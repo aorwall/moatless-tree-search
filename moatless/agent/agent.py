@@ -1,9 +1,11 @@
 import logging
 from typing import List, Type, Tuple
 
+from pydantic import BaseModel, Field, PrivateAttr
+
 from moatless.actions.action import Action
 from moatless.actions.model import ActionArguments
-from moatless.actions.reject import Reject
+from moatless.actions.reject import Reject, RejectArgs
 from moatless.completion.completion import (
     CompletionModel,
 )
@@ -15,21 +17,26 @@ from moatless.workspace import Workspace
 logger = logging.getLogger(__name__)
 
 
-class Agent:
+class Agent(BaseModel):
+
+    actions: List[Action] = Field(default_factory=list)
+    completion: CompletionModel = Field(...)
+
+    _action_map: dict[Type[ActionArguments], Action] = PrivateAttr(default_factory=dict)
+
     def __init__(
         self,
-        actions: List[Action] | None = None,
+        actions: List[Action] = None,
         completion: CompletionModel | None = None,
         model_settings: ModelSettings | None = None,
     ):
-        if completion:
-            self.completion = completion
-        else:
-            model_settings = model_settings or Settings.default_model
-            self.completion = CompletionModel.from_settings(model_settings)
+        if not completion:
+            model_settings = model_settings
+            completion = CompletionModel.from_settings(model_settings)
 
-        self.actions = actions
-        self.action_map = {action.args_schema: action for action in actions} if actions else {}
+        actions_map = {action.args_schema: action for action in actions}
+        super().__init__(actions=actions, completion=completion)
+        self._action_map = actions_map
 
     def run(self, node: Node):
         self._generate_action(node)
@@ -66,10 +73,14 @@ class Agent:
 
         except Exception as e:
             logger.exception(f"Node{node.node_id}: Error generating action.")
-            node.action = Reject(rejection_reason=f"Failed to generate action: {e}")
+            error_message = f"Failed to generate action: {str(e)}"
+            node.action = RejectArgs(
+                rejection_reason=error_message,
+                scratch_pad=f"An error occurred during action generation: {error_message}"
+            )
 
     def _execute_action(self, node: Node) -> Tuple[ActionArguments, Completion]:
-        action = self.action_map.get(type(node.action))
+        action = self._action_map.get(type(node.action))
         if action:
             output = action.execute(node.action, node.file_context)
             node.output = output
@@ -83,7 +94,7 @@ class Agent:
                 f"Output: {node.output.message}"
             )
 
-    def _create_system_prompt(self, possible_actions: List[Type[ActionArguments]]) -> str:
+    def _create_system_prompt(self, possible_actions: List[Action]) -> str:
         return ""
 
     def _create_messages(self, node: Node) -> list[Message]:
@@ -130,11 +141,30 @@ class Agent:
         return messages
 
     def _generate_action_args(
-        self, system_prompt: str, messages: List[Message], actions: List[Type[Action]]
+        self, system_prompt: str, messages: List[Message], actions: List[Action]
     ) -> Tuple[ActionArguments, Completion]:
-        return self.completion.create_completion(
-            messages, system_prompt=system_prompt, actions=actions
-        )
+        try:
+            action_args = []
+            for action in actions:
+                if not isinstance(action, Action):
+                    raise TypeError(f"Invalid action type: {type(action)}. Expected Action subclass.")
+                if not hasattr(action, 'args_schema'):
+                    raise AttributeError(f"Action {action.__class__.__name__} is missing args_schema attribute")
+                action_args.append(action.args_schema)
+            
+            return self.completion.create_completion(
+                messages, system_prompt=system_prompt, actions=action_args
+            )
+        except Exception as e:
+            logger.exception(f"Error in _generate_action_args: {str(e)}")
+            problematic_actions = [f"{action.__class__.__name__} (type: {type(action)})" for action in actions if not isinstance(action, Action) or not hasattr(action, 'args_schema')]
+            if problematic_actions:
+                error_message = f"The following actions are invalid or missing args_schema attribute: {', '.join(problematic_actions)}"
+            else:
+                error_message = "Unknown error occurred while generating action arguments"
+            raise RuntimeError(error_message) from e
 
-    def _determine_possible_actions(self, node: Node) -> List[Type[ActionArguments]]:
-        return [action.args_schema for action in self.actions]
+    def _determine_possible_actions(self, node: Node) -> List[Action]:
+        actions = self.actions
+        logger.debug(f"Possible actions for Node{node.node_id}: {[action.__class__.__name__ for action in actions]}")
+        return actions

@@ -35,6 +35,7 @@ class ActionArguments(OpenAISchema, ABC):
             exclude={"scratch_pad"}
         )
 
+    @property
     def name(self):
         return self.Config.title if hasattr(self.Config, 'title') else self.__class__.__name__
 

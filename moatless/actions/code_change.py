@@ -103,15 +103,18 @@ class RequestCodeChangeArgs(ActionArguments):
 
 
 class RequestCodeChange(Action):
-    name: str = "RequestCodeChange"
-    description: str = "Request for the next code change."
     args_schema: Type[ActionArguments] = RequestCodeChangeArgs
 
-    _repository: Repository = PrivateAttr(None)
-    _completion_model: CompletionModel = PrivateAttr(None)
+    _repository: Repository = PrivateAttr()
+    _completion_model: CompletionModel = PrivateAttr()
 
     _max_tokens_in_edit_prompt: int = 500
     _show_file_context: bool = True
+
+    def __init__(self, repository: Repository, completion_model: CompletionModel, **data):
+        super().__init__(**data)
+        self._repository = repository
+        self._completion_model = completion_model
 
     def execute(self, args: RequestCodeChangeArgs, file_context: FileContext) -> ActionOutput:
         logger.info(
@@ -239,7 +242,7 @@ class RequestCodeChange(Action):
         pseudo_code: str,
     ) -> ActionOutput:
         messages = []
-        search_block = self.create_search_block(context_file, start_line, end_line)
+        search_block = self.create_search_block(context_file, start_line, end_line, change_type)
 
         user_message = self.create_message(
             context_file, search_block, start_line, end_line, instructions, pseudo_code
@@ -316,7 +319,7 @@ class RequestCodeChange(Action):
         #    content = f"<main_objective>\n{self.initial_message}\n</main_objective>\n\n"
 
         if self._show_file_context:
-            file_context = FileContext(repository=self._repository, max_tokens=3000)
+            file_context = FileContext(repo=self._repository, max_tokens=3000)
             file_context.add_line_span_to_context(
                 file.file_path, start_line, end_line
             )
@@ -550,7 +553,7 @@ class RequestCodeChange(Action):
 
             if child_block.type == CodeBlockType.CLASS:
                 existing_hallucinated_spans.update(
-                    self.find_hallucinated_spans(child_block, context_file)
+                    self.find_hallucinated_spans(child_block, context_file, start_line, end_line)
                 )
 
             # Check if the pseudo code identifier is part of any existing span_id

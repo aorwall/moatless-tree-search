@@ -382,7 +382,7 @@ class CompletionModel(BaseModel):
     def _openai_completion(
         self,
         messages: list[dict],
-        actions: List[type[Action]] | None = None,
+        actions: List[type[OpenAISchema]] | None = None,
         response_format: type[OpenAISchema] | None = None,
         is_retry: bool = False,
     ):

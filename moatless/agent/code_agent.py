@@ -29,49 +29,30 @@ class CodingAgent(Agent):
             prompt += "\n\n" + FEW_SHOT_JSON
 
         return prompt
+  
+    def _determine_possible_actions(self, node: Node) -> List[Action]:
+        possible_actions = self.actions.copy()
 
-    def _determine_possible_actions(self, node: Node) -> List[Type[Action]]:
-        possible_actions = [
-            SemanticSearch,
-            FindClass,
-            FindFunction,
-            FindCodeSnippet,
-            RequestMoreContext,
-        ]
+        # Remove RequestCodeChange and RunTests if there's no file context
+        if node.file_context.is_empty():
+            possible_actions = [action for action in possible_actions if action.__class__ not in [RequestCodeChange, RunTests]]
 
-        # Only allow RequestCodeChange and RunTests if there's a file context
-        if not node.file_context.is_empty():
-            possible_actions.extend([RequestCodeChange])
+        # Remove RunTests if it was just executed in the parent node
+        if node.parent and node.parent.action and node.parent.action.__class__ == RunTests:
+            possible_actions = [action for action in possible_actions if action.__class__ != RunTests]
 
-            # Don't rerun tests
-            if not node.parent or not node.parent.action or node.parent.action.__class__ != RunTests:
-                possible_actions.append(RunTests)
-
-
-        # Just finish or reject a node once and if there is a file context and code changes
-        has_finished_child = any(child.action.__class__ == Finish for child in node.children)
-        if not has_finished_child and node.file_context.has_patch():
-            possible_actions.append(Finish)
-            possible_actions.append(Reject)
+        # Remove Finish and Reject if there's no file context or no code changes
+        if not node.file_context.has_patch():
+            possible_actions = [action for action in possible_actions if action.__class__ not in [Finish, Reject]]
 
         # Remove actions that have been marked as duplicates
         if node.parent:
-            siblings = [
-                child for child in node.parent.children if child.node_id != node.node_id
-            ]
-        else:
-            siblings = []
+            siblings = [child for child in node.parent.children if child.node_id != node.node_id]
+            duplicate_actions = set(child.action.__class__ for child in siblings if child.is_duplicate)
+            possible_actions = [action for action in possible_actions if action.__class__ not in duplicate_actions]
 
-        duplicate_actions = set(
-            child.action.__class__ for child in siblings if child.is_duplicate
-        )
-        filtered_actions = [
-            action for action in possible_actions if action not in duplicate_actions
-        ]
-
-        # If there's at least one action left after filtering, use the filtered list
-        # Otherwise, keep the original list of possible actions
-        return filtered_actions if filtered_actions else possible_actions
+        logger.debug(f"Possible actions for Node{node.node_id}: {[action.__class__.__name__ for action in possible_actions]}")
+        return possible_actions
 
 
 SYSTEM_PROMPT = """You are an autonomous AI assistant with superior programming skills. 

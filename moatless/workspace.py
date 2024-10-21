@@ -59,12 +59,7 @@ class Workspace:
         else:
             self.runtime = None
 
-        if file_context:
-            self._file_context = file_context
-        else:
-            self._file_context = self.create_file_context(
-                max_tokens=max_file_context_tokens
-            )
+        self._file_context = None
 
     @classmethod
     def from_dirs(

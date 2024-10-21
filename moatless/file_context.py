@@ -731,6 +731,10 @@ class FileContext(BaseModel):
 
     def __init__(self, repo: Repository, **data):
         super().__init__(**data)
+
+        if not repo:
+            raise ValueError("No repo set")
+
         self._repo = repo
         if "_files" not in self.__dict__:
             self.__dict__["_files"] = {}

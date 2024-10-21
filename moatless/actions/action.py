@@ -1,7 +1,8 @@
 import logging
+from abc import ABC
 from typing import List, Type, Tuple
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from moatless.actions.model import ActionArguments, ActionOutput
 from moatless.file_context import FileContext
@@ -10,7 +11,7 @@ from moatless.schema import RewardScaleEntry
 logger = logging.getLogger(__name__)
 
 
-class Action(BaseModel):
+class Action(BaseModel, ABC):
 
     args_schema: Type[ActionArguments]
 
