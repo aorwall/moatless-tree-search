@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Type
 
 from pydantic import Field
 
@@ -6,29 +6,30 @@ from moatless.actions.search_base import SearchBaseAction, logger
 from moatless.codeblocks import CodeBlockType
 from moatless.index import CodeIndex
 from moatless.index.types import SearchCodeResponse, SearchCodeHit, SpanHit
+from moatless.actions.action import Action, ActionArguments
+from moatless.actions.action import FileContext, ActionOutput
 
 
-class FindFunction(SearchBaseAction):
-    """
-    Find a specific function in the code base.
-    """
-
-    scratch_pad: str = Field(
-        ..., description="Your thoughts on how to define the search."
-    )
-
-    function_name: str = Field(
-        ..., description="Specific function names to include in the search."
-    )
-
+class FindFunctionArgs(ActionArguments):
+    scratch_pad: str = Field(..., description="Your thoughts on the code change.")
+    function_name: str = Field(..., description="Specific function names to include in the search.")
     file_pattern: Optional[str] = Field(
         default=None,
         description="A glob pattern to filter search results to specific file types or directories. ",
     )
-
     class_name: Optional[str] = Field(
         default=None, description="Specific class name to include in the search."
     )
+
+
+class FindFunction(Action):
+    name: str = "FindFunction"
+    description: str = "Search for a specific function or class in the codebase."
+    args_schema: Type[ActionArguments] = FindFunctionArgs
+
+    def execute(self, args: FindFunctionArgs, file_context: FileContext | None = None) -> ActionOutput:
+        # Implementation of the execute method
+        pass
 
     @property
     def log_name(self):

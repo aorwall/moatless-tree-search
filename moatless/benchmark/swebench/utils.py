@@ -3,7 +3,6 @@ import logging
 import os
 from typing import Optional
 
-from datasets import load_dataset
 
 from moatless.benchmark.utils import (
     get_missing_files,
@@ -16,9 +15,7 @@ from moatless.utils.repo import (
     get_repo_dir_name,
     retry_clone,
 )
-from moatless.verify.testbed import TestbedEnvironment
 from moatless.workspace import Workspace
-from testbed.sdk import TestbedSDK
 
 # from moatless.verify.testbed import TestbedVerifier
 # from moatless.verify.verify import Verifier
@@ -30,6 +27,8 @@ logger = logging.getLogger(__name__)
 def load_instances(
     dataset_name: str = "princeton-nlp/SWE-bench_Lite", split: str = "test"
 ):
+    from datasets import load_dataset
+
     data = load_dataset(dataset_name, split=split)
     return {d["instance_id"]: d for d in data}
 
@@ -48,6 +47,7 @@ def sorted_instances(
     split: str = "test",
     sort_by: str = "created_at",
 ):
+    from datasets import load_dataset
     data = load_dataset(dataset_name, split=split)
     instances = list(data)
     instances = sorted(instances, key=lambda x: x[sort_by])
@@ -212,6 +212,8 @@ def create_workspace(
         code_index = None
 
     if use_testbed:
+        from testbed.sdk import TestbedSDK
+        from moatless.verify.testbed import TestbedEnvironment
         runtime = TestbedEnvironment(
             testbed_sdk=TestbedSDK(),
             repository=repo,

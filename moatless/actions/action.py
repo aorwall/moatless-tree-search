@@ -1,7 +1,7 @@
 import importlib
 import logging
 import pkgutil
-from typing import Any, Optional, List, Dict, Type, Tuple
+from typing import Any, Optional, List, Dict, Type, Tuple, ClassVar
 
 from instructor import OpenAISchema
 from instructor.utils import classproperty, extract_json_from_codeblock
@@ -14,6 +14,10 @@ from moatless.schema import RewardScaleEntry
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
+
+class ActionArguments(OpenAISchema):
+    pass
+
 
 
 class ActionOutput(BaseModel):
@@ -42,27 +46,19 @@ class ActionOutput(BaseModel):
         return cls(message=message, terminal=terminal)
 
 
-class Action(OpenAISchema):
-    _workspace: Workspace = PrivateAttr(None)
-    _file_context: FileContext | None = PrivateAttr(None)
+class Action(BaseModel):
+
+    name: str
+    description: str
+    args_schema: Type[ActionArguments]
 
     def __init__(self, **data):
         super().__init__(**data)
 
-    def set_workspace(self, workspace: Workspace):
-        self._workspace = workspace
-
-    def set_file_context(self, file_context: FileContext):
-        self._file_context = file_context
-
-    def execute(self, file_context: FileContext | None = None) -> ActionOutput:
+    def execute(self, args: ActionArguments, file_context: FileContext | None = None) -> ActionOutput:
         """
         Execute the action.
         """
-        if self._workspace is None:
-            raise ValueError(
-                "Workspace not set. Call set_workspace() before executing the action."
-            )
 
         message = self._execute(file_context=file_context)
         return ActionOutput.create(message)
@@ -79,14 +75,6 @@ class Action(OpenAISchema):
 
     def to_tool_call(self) -> ToolCall:
         return ToolCall(name=self.name, input=self.model_dump())
-
-    @property
-    def action_name(self):
-        return self.__class__.__name__
-
-    @classproperty
-    def openai_tool_schema(cls):
-        return {"type": "function", "function": cls.openai_schema}
 
     @property
     def log_name(self):
@@ -106,7 +94,7 @@ class Action(OpenAISchema):
         prompt += "\n".join(
             [
                 f"  {k}: {v}"
-                for k, v in self.model_dump(exclude={"thoughts", "scratch_pad"}).items()
+                for k, v in self.model_dump(exclude={"scratch_pad"}).items()
             ]
         )
         return prompt

@@ -227,7 +227,7 @@ class SearchTree:
         node.output = output
         node.message = output.message
         logger.info(
-            f"Node{node.node_id}: Executed action: {node.action.action_name}. "
+            f"Node{node.node_id}: Executed action: {node.action.name}. "
             f"Terminal: {node.output.terminal}. "
             f"Output: {node.output.message}"
         )

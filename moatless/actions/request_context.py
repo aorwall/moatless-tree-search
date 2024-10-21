@@ -1,11 +1,12 @@
 import logging
 from typing import List, Optional
 
-from pydantic import Field, BaseModel
+from pydantic import Field, BaseModel, PrivateAttr
 
-from moatless.actions.action import Action, ActionOutput
+from moatless.actions.action import Action, ActionOutput, ActionArguments
 from moatless.codeblocks import CodeBlockType
 from moatless.file_context import FileContext, ContextFile
+from moatless.repository.repository import Repository
 from moatless.schema import RewardScaleEntry
 
 logger = logging.getLogger(__name__)
@@ -39,13 +40,26 @@ class CodeSpan(BaseModel):
         return log
 
 
-class RequestMoreContext(Action):
-    """Request additional code spans to be added to your current context."""
-
+class RequestMoreContextArgs(ActionArguments):
     scratch_pad: str = Field(..., description="Your thoughts on the code change.")
     files: List[CodeSpan] = Field(
         ..., description="The code that should be provided in the file context."
     )
+
+
+class RequestMoreContext(Action):
+    """Request additional code spans to be added to your current context."""
+
+    name: str = "RequestMoreContext"
+    description: str = "Request additional code spans to be added to your current context."
+    args_schema = RequestMoreContextArgs
+
+    _repository: Repository = PrivateAttr()
+
+    def __init__(self, repository: Repository, **data):
+        super().__init__(**data)
+        self._repository = repository
+    
 
     @property
     def log_name(self):
@@ -70,7 +84,7 @@ class RequestMoreContext(Action):
     # TODO?
     _max_tokens_in_edit_prompt = 750
 
-    def execute(self, file_context: FileContext | None = None) -> ActionOutput:
+    def execute(self, args: RequestMoreContextArgs, file_context: FileContext | None = None) -> ActionOutput:
         if file_context is None:
             raise ValueError(
                 "File context must be provided to execute the search action."
@@ -79,7 +93,7 @@ class RequestMoreContext(Action):
         properties = {"files": {}}
         message = ""
 
-        for file_with_spans in self.files:
+        for file_with_spans in args.files:
             file = file_context.get_file(file_with_spans.file_path)
 
             if not file:
@@ -89,7 +103,7 @@ class RequestMoreContext(Action):
                 message += f"The requested file {file_with_spans.file_path} is not found in the file repository. Use the search functions to search for the code if you are unsure of the file path."
                 continue
 
-            if self._workspace.file_repo.is_directory(file.file_path):
+            if self._repository.is_directory(file.file_path):
                 logger.info(
                     f"{file_with_spans.file_path} is a directory and not a file."
                 )

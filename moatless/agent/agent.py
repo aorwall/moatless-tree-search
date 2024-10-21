@@ -45,7 +45,7 @@ class Agent:
         try:
             node.possible_actions = self._determine_possible_actions(node)
             action, completion_response = self._generate(node)
-            logger.info(f"Node{node.node_id}: Generated action: {action.action_name}")
+            logger.info(f"Node{node.node_id}: Generated action: {action.name}")
 
             # TODO: Configure this for each type of action
             if hasattr(action, "_completion_model"):
