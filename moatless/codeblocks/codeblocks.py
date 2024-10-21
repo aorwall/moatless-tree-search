@@ -831,7 +831,7 @@ class CodeBlock:
         return None
 
     def find_spans_by_line_numbers(
-        self, start_line: int, end_line: int = None
+        self, start_line: int, end_line: int | None = None
     ) -> list[BlockSpan]:
         spans = []
         for child in self.children:

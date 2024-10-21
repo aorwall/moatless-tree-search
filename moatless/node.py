@@ -3,10 +3,11 @@ import logging
 from typing import Optional, List, Dict, Any, Type
 
 from instructor import OpenAISchema
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field
 
-from moatless.actions.action import Action, ActionExecution, ActionOutput
-from moatless.completion import Usage, Completion
+from moatless.actions.action import Action
+from moatless.actions.model import ActionArguments, ActionOutput
+from moatless.completion.model import Usage, Completion
 from moatless.file_context import FileContext
 from moatless.repository.repository import Repository
 
@@ -33,7 +34,7 @@ class Node(BaseModel):
     is_duplicate: bool = Field(
         False, description="Flag to indicate if the node is a duplicate"
     )
-    action: Optional[Action] = Field(
+    action: Optional[ActionArguments] = Field(
         None, description="The action associated with the node"
     )
     output: Optional[ActionOutput] = Field(None, description="The output of the action")
@@ -51,7 +52,7 @@ class Node(BaseModel):
     completions: Dict[str, Completion] = Field(
         default_factory=dict, description="The completions used in this node"
     )
-    possible_actions: List[Type[Action]] = Field(
+    possible_actions: List[Type[ActionArguments]] = Field(
         default_factory=list,
         description="List of possible action types for this node"
     )
@@ -269,13 +270,6 @@ class Node(BaseModel):
 
         if node_data.get("possible_actions"):
             node.possible_actions = [Action.get_action_class(action_name) for action_name in node_data.get("possible_actions")]
-
-        if node_data.get("execution"):
-            # TODO: To keep backward compatiblity
-            execution = ActionExecution.model_validate(node_data["execution"])
-            node.action = execution.action
-            node.completions["build"] = execution.build_completion
-            node.output = execution.output
 
         if node_data.get("action"):
             node.action = Action.model_validate(node_data["action"])

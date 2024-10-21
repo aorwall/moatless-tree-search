@@ -2,7 +2,8 @@ import logging
 from typing import List, Optional, Tuple
 
 
-from moatless.completion import CompletionModel, UserMessage, Message, Completion
+from moatless.completion.completion import CompletionModel
+from moatless.completion.model import Message, UserMessage, Completion
 from moatless.node import Node, Reward
 from moatless.schema import RewardScaleEntry
 from moatless.settings import ModelSettings, Settings

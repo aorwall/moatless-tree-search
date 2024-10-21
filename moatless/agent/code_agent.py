@@ -1,5 +1,5 @@
 import logging
-from typing import List, Type, Tuple
+from typing import List, Type
 
 from moatless.actions.action import Action
 from moatless.actions.code_change import RequestCodeChange
@@ -12,17 +12,10 @@ from moatless.actions.request_context import RequestMoreContext
 from moatless.actions.run_tests import RunTests
 from moatless.actions.semantic_search import SemanticSearch
 from moatless.agent.agent import Agent
-from moatless.completion import (
+from moatless.completion.completion import (
     LLMResponseFormat,
-    Message,
-    UserMessage,
-    AssistantMessage,
-    Completion,
-    ToolCall,
 )
 from moatless.node import Node
-from moatless.settings import ModelSettings, Settings
-from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 

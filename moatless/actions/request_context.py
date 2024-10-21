@@ -3,7 +3,8 @@ from typing import List, Optional
 
 from pydantic import Field, BaseModel, PrivateAttr
 
-from moatless.actions.action import Action, ActionOutput, ActionArguments
+from moatless.actions.action import Action
+from moatless.actions.model import ActionArguments, ActionOutput
 from moatless.codeblocks import CodeBlockType
 from moatless.file_context import FileContext, ContextFile
 from moatless.repository.repository import Repository
@@ -46,21 +47,9 @@ class RequestMoreContextArgs(ActionArguments):
         ..., description="The code that should be provided in the file context."
     )
 
-
-class RequestMoreContext(Action):
-    """Request additional code spans to be added to your current context."""
-
-    name: str = "RequestMoreContext"
-    description: str = "Request additional code spans to be added to your current context."
-    args_schema = RequestMoreContextArgs
-
-    _repository: Repository = PrivateAttr()
-
-    def __init__(self, repository: Repository, **data):
-        super().__init__(**data)
-        self._repository = repository
+    class Config:
+        title = 'RequestMoreContext'
     
-
     @property
     def log_name(self):
         if len(self.files) == 1:
@@ -80,6 +69,22 @@ class RequestMoreContext(Action):
             if file.span_ids:
                 prompt += f"  Spans: {', '.join(file.span_ids)}\n"
         return prompt
+
+
+
+class RequestMoreContext(Action):
+    """Request additional code spans to be added to your current context."""
+
+    name: str = "RequestMoreContext"
+    description: str = "Request additional code spans to be added to your current context."
+    args_schema = RequestMoreContextArgs
+
+    _repository: Repository = PrivateAttr()
+
+    def __init__(self, repository: Repository, **data):
+        super().__init__(**data)
+        self._repository = repository
+    
 
     # TODO?
     _max_tokens_in_edit_prompt = 750

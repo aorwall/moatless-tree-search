@@ -3,7 +3,8 @@ from typing import List, Any
 
 from pydantic import Field, model_validator
 
-from moatless.actions.action import Action, ActionOutput
+from moatless.actions.action import Action
+from moatless.actions.model import ActionOutput
 from moatless.file_context import FileContext
 from moatless.index.code_index import is_test
 from moatless.schema import RewardScaleEntry, TestStatus, TestResult

@@ -1,12 +1,13 @@
 from typing import List
 
+from litellm import Type
 from pydantic import model_validator, Field
-from moatless.actions.action import Action, ActionOutput
+from moatless.actions.action import Action
+from moatless.actions.model import ActionArguments, ActionOutput
 from moatless.file_context import FileContext
 from moatless.schema import RewardScaleEntry
 
-
-class Finish(Action):
+class FinishArgs(ActionArguments):
     """Indicate that the task is fully completed."""
 
     scratch_pad: str = Field(
@@ -14,25 +15,17 @@ class Finish(Action):
     )
     finish_reason: str = Field(..., description="Explanation of completion.")
 
-    @model_validator(mode="before")
-    def convert_reason(cls, values):
-        if isinstance(values, dict):
-            if values.get("reason"):
-                values["finish_reason"] = values["reason"]
-
-            if "finish_reason" not in values:
-                values["finish_reason"] = "No reason given."
-
-            if "scratch_pad" not in values:
-                values["scratch_pad"] = ""
-
-        return values
+    class Config:
+        title = 'Finish'
 
     def to_prompt(self):
         return f"Finish with reason: {self.finish_reason}"
 
-    def execute(self, file_context: FileContext | None = None):
-        return ActionOutput(message=self.finish_reason, terminal=True)
+class Finish(Action):
+    args_schema: Type[ActionArguments] = FinishArgs
+    
+    def execute(self, args: FinishArgs, file_context: FileContext | None = None):
+        return ActionOutput(message=args.finish_reason, terminal=True)
     
     def get_evaluation_criteria(self) -> List[str]:
         return [

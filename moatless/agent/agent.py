@@ -2,17 +2,12 @@ import logging
 from typing import List, Type, Tuple
 
 from moatless.actions.action import Action
+from moatless.actions.model import ActionArguments
 from moatless.actions.reject import Reject
-from moatless.actions.run_tests import RunTests
-from moatless.completion import (
+from moatless.completion.completion import (
     CompletionModel,
-    LLMResponseFormat,
-    Message,
-    UserMessage,
-    AssistantMessage,
-    Completion,
-    ToolCall,
 )
+from moatless.completion.model import Message, AssistantMessage, UserMessage, Completion
 from moatless.node import Node
 from moatless.settings import ModelSettings, Settings
 from moatless.workspace import Workspace
@@ -23,8 +18,7 @@ logger = logging.getLogger(__name__)
 class Agent:
     def __init__(
         self,
-        workspace: Workspace,
-        actions: List[Type[Action]] | None = None,
+        actions: List[Action] | None = None,
         completion: CompletionModel | None = None,
         model_settings: ModelSettings | None = None,
     ):
@@ -34,37 +28,62 @@ class Agent:
             model_settings = model_settings or Settings.default_model
             self.completion = CompletionModel.from_settings(model_settings)
 
-        self.workspace = workspace
         self.actions = actions
+        self.action_map = {action.args_schema: action for action in actions} if actions else {}
 
-    def generate_action(self, node: Node) -> Tuple[Action, Completion | None]:
+    def run(self, node: Node):
+        self._generate_action(node)
+        self._execute_action(node)
+            
+        logger.info(
+            f"Node{node.node_id}: Executed action: {node.action.name}. "
+            f"Terminal: {node.output.terminal}. "
+            f"Output: {node.output.message}"
+        )
+
+    def _generate_action(self, node: Node):
         """
-        Build and execute the action for the given node and apply the results to the node.
+        Generate an action
         """
         completion_response = None
-        try:
+        try:            
             node.possible_actions = self._determine_possible_actions(node)
-            action, completion_response = self._generate(node)
-            logger.info(f"Node{node.node_id}: Generated action: {action.name}")
+            system_prompt = self._create_system_prompt(node.possible_actions)
+            messages = self._create_messages(node)
 
-            # TODO: Configure this for each type of action
-            if hasattr(action, "_completion_model"):
-                action._completion_model = CompletionModel.from_settings(
-                    Settings.default_model
+            action_args, completion_response = self._generate_action_args(system_prompt, messages, node.possible_actions)
+
+            node.action = action_args
+            node.completions["build_action"] = completion_response
+
+            duplicate_node = node.find_duplicate()
+            if duplicate_node:
+                logger.info(
+                    f"Node{node.node_id} is a duplicate to Node{duplicate_node.node_id}. Skipping execution."
                 )
+                node.is_duplicate = True
+                return
 
         except Exception as e:
             logger.exception(f"Node{node.node_id}: Error generating action.")
-            action = Reject(rejection_reason=f"Failed to generate action: {e}")
+            node.action = Reject(rejection_reason=f"Failed to generate action: {e}")
 
-        return action, completion_response
+    def _execute_action(self, node: Node) -> Tuple[ActionArguments, Completion]:
+        action = self.action_map.get(type(node.action))
+        if action:
+            output = action.execute(node.action, node.file_context)
+            node.output = output
 
-    def _generate(self, node: Node) -> Tuple[Action, Completion]:
-        system_prompt = self._create_system_prompt(node.possible_actions)
-        messages = self._create_messages(node)
-        return self._generate_action(system_prompt, messages, node.possible_actions)
+            if output.execution_completion:
+                node.completions["execute_action"] = output.execution_completion
 
-    def _create_system_prompt(self, possible_actions: List[Type[Action]]) -> str:
+            logger.info(
+                f"Node{node.node_id}: Executed action: {action.name}. "
+                f"Terminal: {node.output.terminal}. "
+                f"Output: {node.output.message}"
+            )
+
+    def _create_system_prompt(self, possible_actions: List[Type[ActionArguments]]) -> str:
         return ""
 
     def _create_messages(self, node: Node) -> list[Message]:
@@ -110,14 +129,12 @@ class Agent:
 
         return messages
 
-    def _generate_action(
+    def _generate_action_args(
         self, system_prompt: str, messages: List[Message], actions: List[Type[Action]]
-    ) -> Tuple[Action, Completion]:
-        action, completion = self.completion.create_completion(
+    ) -> Tuple[ActionArguments, Completion]:
+        return self.completion.create_completion(
             messages, system_prompt=system_prompt, actions=actions
         )
-        action.set_workspace(self.workspace)
-        return action, completion
 
-    def _determine_possible_actions(self, node: Node) -> List[Type[Action]]:
-        return self.actions
+    def _determine_possible_actions(self, node: Node) -> List[Type[ActionArguments]]:
+        return [action.args_schema for action in self.actions]

@@ -2,41 +2,25 @@ from typing import Optional, List, Type
 
 from pydantic import Field
 
-from moatless.actions.search_base import SearchBaseAction, logger
+from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs, logger
 from moatless.codeblocks import CodeBlockType
 from moatless.index import CodeIndex
 from moatless.index.types import SearchCodeResponse, SearchCodeHit, SpanHit
-from moatless.actions.action import Action, ActionArguments
-from moatless.actions.action import FileContext, ActionOutput
+from moatless.actions.action import Action
+from moatless.actions.model import ActionArguments, ActionOutput
+from moatless.actions.action import FileContext
 
 
-class FindFunctionArgs(ActionArguments):
-    scratch_pad: str = Field(..., description="Your thoughts on the code change.")
+class FindFunctionArgs(SearchBaseArgs):
+    """Search for a specific function or class in the codebase."""
+
     function_name: str = Field(..., description="Specific function names to include in the search.")
-    file_pattern: Optional[str] = Field(
-        default=None,
-        description="A glob pattern to filter search results to specific file types or directories. ",
-    )
     class_name: Optional[str] = Field(
         default=None, description="Specific class name to include in the search."
     )
 
-
-class FindFunction(Action):
-    name: str = "FindFunction"
-    description: str = "Search for a specific function or class in the codebase."
-    args_schema: Type[ActionArguments] = FindFunctionArgs
-
-    def execute(self, args: FindFunctionArgs, file_context: FileContext | None = None) -> ActionOutput:
-        # Implementation of the execute method
-        pass
-
-    @property
-    def log_name(self):
-        if self.class_name:
-            return f"FindFunction({self.class_name}.{self.function_name})"
-
-        return f"FindFunction({self.function_name})"
+    class Config:
+        title = 'FindFunction'
 
     def to_prompt(self):
         prompt = f"Searching for function: {self.function_name}"
@@ -46,27 +30,32 @@ class FindFunction(Action):
             prompt += f" in files matching the pattern: {self.file_pattern}"
         return prompt
 
-    def _search(self, code_index: CodeIndex) -> SearchCodeResponse:
+
+class FindFunction(SearchBaseAction):
+    args_schema: Type[ActionArguments] = FindFunctionArgs
+
+    
+    def _search(self, args: FindFunctionArgs) -> SearchCodeResponse:
         logger.info(
-            f"{self.name}: {self.function_name} (class_name: {self.class_name}, file_pattern: {self.file_pattern})"
+            f"{self.name}: {args.function_name} (class_name: {args.class_name}, file_pattern: {args.file_pattern})"
         )
-        return code_index.find_function(
-            self.function_name,
-            class_name=self.class_name,
-            file_pattern=self.file_pattern,
+        return self._code_index.find_function(
+            args.function_name,
+            class_name=args.class_name,
+            file_pattern=args.file_pattern,
         )
 
     def _search_for_alternative_suggestion(
-        self, code_index: CodeIndex
+        self, args: FindFunctionArgs
     ) -> SearchCodeResponse:
         """Return methods in the same class or other methods in same file with the method name the method in class is not found."""
 
-        if self.class_name and self.file_pattern:
-            file = self._workspace.file_repo.get_file(self.file_pattern)
+        if args.class_name and args.file_pattern:
+            file = self._repository.get_file(args.file_pattern)
 
             span_ids = []
             if file and file.module:
-                class_block = file.module.find_by_identifier(self.class_name)
+                class_block = file.module.find_by_identifier(args.class_name)
                 if class_block and class_block.type == CodeBlockType.CLASS:
                     function_blocks = class_block.find_blocks_with_type(
                         CodeBlockType.FUNCTION
@@ -75,7 +64,7 @@ class FindFunction(Action):
                         span_ids.append(function_block.belongs_to_span.span_id)
 
                 function_blocks = file.module.find_blocks_with_identifier(
-                    self.function_name
+                    args.function_name
                 )
                 for function_block in function_blocks:
                     span_ids.append(function_block.belongs_to_span.span_id)
@@ -84,14 +73,14 @@ class FindFunction(Action):
                 return SearchCodeResponse(
                     hits=[
                         SearchCodeHit(
-                            file_path=self.file_pattern,
+                            file_path=args.file_pattern,
                             spans=[SpanHit(span_id=span_id) for span_id in span_ids],
                         )
                     ]
                 )
 
-            return code_index.find_class(
-                self.class_name, file_pattern=self.file_pattern
+            return self._code_index.find_class(
+                args.class_name, file_pattern=args.file_pattern
             )
 
         return SearchCodeResponse()

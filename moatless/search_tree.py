@@ -1,107 +1,111 @@
-import json
-import logging
-from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any, List
 
 from moatless.agent.agent import Agent
-
-from moatless.completion import Usage
+from moatless.completion.model import Usage
 from moatless.discriminators import MeanAwardDiscriminator
 from moatless.feedback import FeedbackGenerator
+from moatless.file_context import FileContext
 from moatless.node import Node, generate_ascii_tree
+from moatless.repository.repository import Repository
 from moatless.selector import BestFirstSelector, Selector, SoftmaxSelector
-from moatless.settings import TreeSearchSettings
+from moatless.settings import TreeSearchSettings, ModelSettings
 from moatless.value_function import ValueFunction
 from moatless.workspace import Workspace
 
+import json
+import logging
+
 logger = logging.getLogger(__name__)
 
+class SearchTree(BaseModel):
+    root: Node = Field(..., description="The root node of the search tree.")
+    selector: Selector = Field(..., description="Selector for node selection.")
+    agent: Agent = Field(..., description="Agent for generating actions.")
+    value_function: Optional[ValueFunction] = Field(None, description="Value function for reward calculation.")
+    feedback_generator: Optional[FeedbackGenerator] = Field(None, description="Feedback generator.")
+    discriminator: Optional[MeanAwardDiscriminator] = Field(None, description="Discriminator for selecting the best trajectory.")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata for the search tree.")
+    persist_path: Optional[str] = Field(None, description="Path to persist the search tree.")
+    unique_id: int = Field(default=0, description="Unique ID counter for nodes.")
 
-class SearchTree:
-    def __init__(
-        self,
-        message: str | None = None,
-        root: Node | None = None,
-        workspace: Workspace | None = None,
-        settings: TreeSearchSettings | None = None,
-        selector: Selector | None = None,
-        agent: Agent | None = None,
-        value_function: ValueFunction | None = None,
-        feedback_generator: FeedbackGenerator | None = None,
-        discriminator: MeanAwardDiscriminator | None = None,
-        metadata: Dict[str, Any] | None = None,
-        persist_path: str | None = None,
-    ):
-        """
-        Initialize a SearchTree instance.
+    max_expansions: int = Field(1, description="The maximum number of expansions of one state.")
+    max_iterations: int = Field(10, description="The maximum number of iterations to run the tree search.")
+    max_cost: Optional[float] = Field(None, description="The maximum cost spent on token before finishing.")
+    min_finished_nodes: Optional[int] = Field(None, description="The minimum number of finished nodes to consider before finishing")
+    reward_threshold: Optional[float] = Field(None, description="The min reward threshold to consider before finishing.")
+    max_depth: int = Field(10, description="The maximum depth for one trajectory in simulations.")
 
-        Args:
-            message (str | None): The incoming request message from the user.
-            root (Node | None): The root node of an existing search tree. If not provided, a new root node will be created.
-            workspace (Workspace | None): The workspace for file operations.
-            settings (TreeSearchSettings | None): Settings for the tree search algorithm.
-            selector (Selector | None): Custom selector for node selection.
-            agent (Agent | None): Custom agent for generating actions.
-            value_function (ValueFunction | None): Custom value function for reward calculation.
-            feedback_generator (FeedbackGenerator | None): Custom feedback generator.
-            discriminator (MeanAwardDiscriminator | None): Custom discriminator for selecting the best trajectory.
-            metadata (Dict[str, Any] | None): Additional metadata for the search tree.
-            persist_path (str | None): Path to persist the search tree.
+    class Config:
+        arbitrary_types_allowed = True
 
-        Raises:
-            ValueError: If neither root nor message is provided.
-        """
+    @classmethod
+    def create(
+        cls,
+        message: Optional[str] = None,
+        root: Optional[Node] = None,
+        file_context: Optional[FileContext] = None,
+        selector: Optional[Selector] = None,
+        agent: Optional[Agent] = None,
+        value_function: Optional[ValueFunction] = None,
+        feedback_generator: Optional[FeedbackGenerator] = None,
+        discriminator: Optional[MeanAwardDiscriminator] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        persist_path: Optional[str] = None,
+        max_expansions: int = 1,
+        max_iterations: int = 10,
+        max_cost: Optional[float] = None,
+        min_finished_nodes: Optional[int] = None,
+        reward_threshold: Optional[float] = None,
+        max_depth: int = 10,
+    ) -> "SearchTree":
         if not root and not message:
             raise ValueError("Either a root node or a message must be provided.")
 
-        if root:
-            self.root = root
-        else:
-            self.root = Node(
+        if not root:
+            root = Node(
                 node_id=0,
-                max_expansions=settings.max_expansions,
+                max_expansions=max_expansions,
                 message=message,
-                file_context=workspace.create_file_context() if workspace else None,
+                file_context=file_context,
             )
-        self.unique_id = 0
-        self.settings = settings or TreeSearchSettings()
-        self.workspace = workspace
-        self.metadata = metadata
 
-        if selector:
-            self.selector = selector
-        elif settings.best_first:
-            self.selector = BestFirstSelector()
-        else:
-            self.selector = SoftmaxSelector()
-
-        self.agent = agent or Agent(
-            workspace=self.workspace, model_settings=settings.agent_model
+        selector = selector or BestFirstSelector()
+        
+        return cls(
+            root=root,
+            selector=selector,
+            agent=agent,
+            value_function=value_function,
+            feedback_generator=feedback_generator,
+            discriminator=discriminator or MeanAwardDiscriminator(),
+            metadata=metadata or {},
+            persist_path=persist_path,
+            max_expansions=max_expansions,
+            max_iterations=max_iterations,
+            max_cost=max_cost,
+            min_finished_nodes=min_finished_nodes,
+            reward_threshold=reward_threshold,
+            max_depth=max_depth,
         )
-
-        self.value_function = value_function
-
-        self.feedback_generator = feedback_generator or FeedbackGenerator()
-        self.discriminator = discriminator or MeanAwardDiscriminator()
-
-        self.persist_path = persist_path
 
     @classmethod
     def from_dict(
         cls,
         dict: Dict[str, Any],
-        workspace: Workspace | None = None,
+        repository: Repository,
         persist_path: str | None = None,
     ) -> "SearchTree":
-        settings = TreeSearchSettings(**dict["settings"])
         root = Node.reconstruct(
-            dict["tree"], repo=workspace.file_repo if workspace else None
+            dict["tree"], repo=repository
         )
         tree = cls(
             root=root,
-            workspace=workspace,
-            settings=settings,
+            selector=BestFirstSelector(),  # Default selector
+            agent=None,  # Agent needs to be provided separately
             metadata=dict.get("metadata"),
             persist_path=persist_path,
+            **dict["settings"]
         )
         tree.unique_id = len(tree.root.get_all_nodes())
         return tree
@@ -110,14 +114,13 @@ class SearchTree:
     def from_file(
         cls,
         file_path: str,
-        workspace: Workspace | None = None,
         persist_path: str | None = None,
     ) -> "SearchTree":
         with open(file_path, "r") as f:
             tree_data = json.load(f)
 
         return cls.from_dict(
-            tree_data, workspace=workspace, persist_path=persist_path or file_path
+            tree_data, persist_path=persist_path or file_path
         )
 
     def run_search(self) -> Node | None:
@@ -159,20 +162,13 @@ class SearchTree:
         """Select a node for expansion using the UCT algorithm."""
         expandable_nodes = node.get_expandable_descendants()
 
-        filtered_nodes = []
-        for node in expandable_nodes:
-            if node.get_depth() >= self.settings.max_depth:
-                continue
+        filtered_nodes = [n for n in expandable_nodes if n.get_depth() < self.max_depth]
 
-            filtered_nodes.append(node)
-
-        expandable_nodes = filtered_nodes
-
-        if not expandable_nodes:
+        if not filtered_nodes:
             logger.info("No expandable nodes found.")
             return None
 
-        return self.selector.select(expandable_nodes)
+        return self.selector.select(filtered_nodes)
 
     def _expand(self, node: Node) -> Node:
         """Expand the node by returning an unexecuted child or adding a new child node."""
@@ -184,12 +180,16 @@ class SearchTree:
                 )
                 return child
 
-        feedback = self.feedback_generator.generate_feedback(node)
+        if self.feedback_generator:
+            feedback = self.feedback_generator.generate_feedback(node)
+        else:
+            feedback = None
+
         child_node = Node(
             node_id=self._generate_unique_id(),
             parent=node,
             file_context=node.file_context.clone() if node.file_context else None,
-            max_expansions=self.settings.max_expansions,
+            max_expansions=self.max_expansions,
             feedback=feedback,
         )
         node.add_child(child_node)
@@ -200,37 +200,7 @@ class SearchTree:
         """Simulate a playout by executing the action and evaluating the result."""
 
         if not node.action:
-            action, completion_response = self.agent.generate_action(node)
-            node.action = action
-
-            if completion_response:
-                node.completions["build_action"] = completion_response
-
-            duplicate_node = node.find_duplicate()
-            if duplicate_node:
-                logger.info(
-                    f"Node{node.node_id} is a duplicate to Node{duplicate_node.node_id}. Skipping execution."
-                )
-                node.is_duplicate = True
-                return
-        else:
-            # To set workspace on saved but not executed actions
-            node.action.set_workspace(self.workspace)
-
-        output = node.action.execute(node.file_context)
-
-        # TODO: Return completion_response from execute instead?
-        if output.execution_completion:
-            node.completions["execute_action"] = output.execution_completion
-            output.execution_completion = None
-
-        node.output = output
-        node.message = output.message
-        logger.info(
-            f"Node{node.node_id}: Executed action: {node.action.name}. "
-            f"Terminal: {node.output.terminal}. "
-            f"Output: {node.output.message}"
-        )
+            self.agent.run(node)
 
         if self.value_function:
             node.reward, completion_response = self.value_function.get_reward(node=node)
@@ -270,21 +240,20 @@ class SearchTree:
         return self.discriminator.select(nodes)
 
     def is_finished(self):
-        if len(self.root.get_all_nodes()) >= self.settings.max_iterations:
+        if len(self.root.get_all_nodes()) >= self.max_iterations:
             return True
 
         finished_nodes = self.get_finished_nodes()
 
-        # Expect at least one finished node with reward above threshold
-        if self.settings.reward_threshold and not any(
-            node.reward and node.reward.value >= self.settings.reward_threshold
+        if self.reward_threshold and not any(
+            node.reward and node.reward.value >= self.reward_threshold
             for node in finished_nodes
         ):
             return False
 
         if (
-            self.settings.min_finished_nodes
-            and len(self.get_finished_nodes()) >= self.settings.min_finished_nodes
+            self.min_finished_nodes
+            and len(finished_nodes) >= self.min_finished_nodes
         ):
             return True
 
@@ -349,7 +318,14 @@ class SearchTree:
             Dict[str, Any]: A dictionary representation of the search tree.
         """
         return {
-            "settings": self.settings.model_dump(**kwargs),
+            "settings": {
+                "max_expansions": self.max_expansions,
+                "max_iterations": self.max_iterations,
+                "max_cost": self.max_cost,
+                "min_finished_nodes": self.min_finished_nodes,
+                "reward_threshold": self.reward_threshold,
+                "max_depth": self.max_depth,
+            },
             "tree": self.root.model_dump(**kwargs),
             "metadata": self.metadata,
         }

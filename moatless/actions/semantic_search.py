@@ -1,36 +1,25 @@
-from typing import Optional, List
+from typing import Optional, List, Type
+
 from pydantic import Field
 
-from moatless.actions.search_base import SearchBaseAction, logger
+from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
+from moatless.actions.action import Action
+from moatless.actions.model import ActionArguments
 from moatless.index import CodeIndex
 from moatless.index.types import SearchCodeResponse
 
 
-class SemanticSearch(SearchBaseAction):
+class SemanticSearchArgs(SearchBaseArgs):
     """Search for code snippets based on semantic similarity."""
 
-    scratch_pad: str = Field(
-        ..., description="Your thoughts on how to define the search."
-    )
-
-    file_pattern: Optional[str] = Field(
-        default=None,
-        description="A glob pattern to filter search results to specific file types or directories. ",
-    )
-
-    query: str = Field(
-        ...,
-        description="Natural language description of what you're looking for.",
-    )
-
+    query: str = Field(..., description="Natural language description of what you're looking for.")
     category: Optional[str] = Field(
         None,
         description="The category of files to search for. This can be 'implementation' for core implementation files or 'test' for test files.",
     )
 
-    @property
-    def log_name(self):
-        return f"SemanticSearch({self.query[:20]}...)"
+    class Config:
+        title = 'SemanticSearch'
 
     def to_prompt(self):
         prompt = f"Searching for code using the query: {self.query}"
@@ -38,19 +27,20 @@ class SemanticSearch(SearchBaseAction):
             prompt += f" in files matching the pattern: {self.file_pattern}"
         return prompt
 
-    def _search(self, code_index: CodeIndex) -> SearchCodeResponse:
-        logger.info(f"{self.name}: {self.query} (file_pattern: {self.file_pattern})")
 
-        return code_index.semantic_search(
-            self.query,
-            file_pattern=self.file_pattern,
+class SemanticSearch(SearchBaseAction):
+    args_schema: Type[ActionArguments] = SemanticSearchArgs
+
+
+    def _search(self, args: SemanticSearchArgs) -> SearchCodeResponse:
+        return self._code_index.semantic_search(
+            args.query,
+            file_pattern=args.file_pattern,
             max_results=25,
-            category=self.category,
+            category=args.category,
         )
 
-    def _search_for_alternative_suggestion(
-        self, code_index: CodeIndex
-    ) -> SearchCodeResponse:
+    def _search_for_alternative_suggestion(self, args: SemanticSearchArgs) -> SearchCodeResponse:
         return SearchCodeResponse()
 
     def get_evaluation_criteria(self, trajectory_length) -> List[str]:

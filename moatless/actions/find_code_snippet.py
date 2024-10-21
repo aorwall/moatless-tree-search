@@ -1,34 +1,28 @@
-from typing import Optional
+import logging
+from typing import Optional, Type
 
 from pydantic import Field
 
-from moatless.actions.search_base import SearchBaseAction, logger
+from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
+from moatless.actions.action import Action
+from moatless.actions.model import ActionArguments
 from moatless.index import CodeIndex
 from moatless.index.types import SearchCodeResponse
 
 
-class FindCodeSnippet(SearchBaseAction):
-    """
-    Request to search for an exact code snippet.
-    """
+logger = logging.getLogger(__name__)
 
-    scratch_pad: str = Field(
-        ..., description="Your thoughts on how to define the search."
-    )
+class FindCodeSnippetArgs(SearchBaseArgs):
+    """Request to search for an exact code snippet."""
 
+    code_snippet: str = Field(..., description="The exact code snippet to find.")
     file_pattern: Optional[str] = Field(
         default=None,
         description="A glob pattern to filter search results to specific file types or directories. ",
     )
 
-    code_snippet: str = Field(
-        ...,
-        description="The exact code snippet to find.",
-    )
-
-    @property
-    def log_name(self):
-        return f"FindCodeSnippet({self.code_snippet[:20]}...)"
+    class Config:
+        title = 'FindCodeSnippet'
 
     def to_prompt(self):
         prompt = f"Searching for code snippet: {self.code_snippet}"
@@ -36,13 +30,18 @@ class FindCodeSnippet(SearchBaseAction):
             prompt += f" in files matching the pattern: {self.file_pattern}"
         return prompt
 
-    def _search(self, code_index: CodeIndex) -> SearchCodeResponse:
+
+
+class FindCodeSnippet(SearchBaseAction):
+    args_schema: Type[ActionArguments] = FindCodeSnippetArgs
+
+    def _search(self, args: FindCodeSnippetArgs) -> SearchCodeResponse:
         logger.info(
-            f"{self.name}: {self.code_snippet} (file_pattern: {self.file_pattern})"
+            f"{self.name}: {args.code_snippet} (file_pattern: {args.file_pattern})"
         )
 
-        return code_index.semantic_search(
-            code_snippet=self.code_snippet,
-            file_pattern=self.file_pattern,
+        return self._code_index.semantic_search(
+            code_snippet=args.code_snippet,
+            file_pattern=args.file_pattern,
             max_results=5,
         )

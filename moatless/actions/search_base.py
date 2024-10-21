@@ -1,20 +1,41 @@
+from abc import ABC
 import logging
-from typing import List
+from typing import List, Optional, Type
 
-from moatless.actions.action import Action, ActionOutput
+from pydantic import Field, PrivateAttr
+
+from moatless.actions.action import Action
+from moatless.actions.model import ActionArguments, ActionOutput
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.index.types import SearchCodeResponse
+from moatless.repository.repository import Repository
 from moatless.schema import RewardScaleEntry
 
 logger = logging.getLogger(__name__)
 
+class SearchBaseArgs(ActionArguments, ABC):
+
+    file_pattern: Optional[str] = Field(
+        default=None,
+        description="A glob pattern to filter search results to specific files or directories.",
+    )
 
 class SearchBaseAction(Action):
+    args_schema: Type[ActionArguments] = SearchBaseArgs
+
     _max_search_tokens: int = 1000
     _max_hits: int = 5
 
-    def execute(self, file_context: FileContext | None = None) -> ActionOutput:
+    _repository: Repository = PrivateAttr()
+    _code_index: CodeIndex = PrivateAttr()
+
+    def __init__(self, repository: Repository, code_index: CodeIndex, **data):
+        super().__init__(**data)
+        self._repository = repository
+        self._code_index = code_index
+
+    def execute(self, args: SearchBaseArgs, file_context: FileContext | None = None) -> ActionOutput:
         if file_context is None:
             raise ValueError(
                 "File context must be provided to execute the search action."
@@ -22,11 +43,9 @@ class SearchBaseAction(Action):
 
         properties = {"search_hits": [], "search_tokens": 0}
 
-        search_result = self._search(self._workspace.code_index)
+        search_result = self._search(args)
         if not search_result.hits:
-            alternative_suggestion = self._search_for_alternative_suggestion(
-                self._workspace.code_index
-            )
+            alternative_suggestion = self._search_for_alternative_suggestion(args)
             if alternative_suggestion.hits:
                 search_result.message += f" But found {len(alternative_suggestion.hits)} alternative suggestions."
                 extra = self._select_span_response_prompt(alternative_suggestion)
@@ -82,7 +101,7 @@ class SearchBaseAction(Action):
         return ActionOutput(message=message, properties=properties)
 
     def _select_span_response_prompt(self, search_result: SearchCodeResponse) -> str:
-        search_result_context = self._workspace.create_file_context()
+        search_result_context = FileContext(repository=self._repository)
         for hit in search_result.hits:
             for span in hit.spans:
                 search_result_context.add_span_to_context(
@@ -100,11 +119,11 @@ class SearchBaseAction(Action):
         prompt = f"\n<search_results>\n{search_result_str}\n</search_result>\n"
         return prompt
 
-    def _search(self, code_index: CodeIndex) -> SearchCodeResponse:
+    def _search(self, args: SearchBaseArgs) -> SearchCodeResponse:
         raise NotImplementedError("Subclasses must implement this method.")
 
     def _search_for_alternative_suggestion(
-        self, code_index: CodeIndex
+        self, args: SearchBaseArgs
     ) -> SearchCodeResponse:
         return SearchCodeResponse()
 
