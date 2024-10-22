@@ -3,14 +3,12 @@ from typing import Optional, Type
 
 from pydantic import Field
 
-from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
-from moatless.actions.action import Action
 from moatless.actions.model import ActionArguments
-from moatless.index import CodeIndex
+from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
 from moatless.index.types import SearchCodeResponse
 
-
 logger = logging.getLogger(__name__)
+
 
 class FindCodeSnippetArgs(SearchBaseArgs):
     """Request to search for an exact code snippet."""
@@ -22,14 +20,13 @@ class FindCodeSnippetArgs(SearchBaseArgs):
     )
 
     class Config:
-        title = 'FindCodeSnippet'
+        title = "FindCodeSnippet"
 
     def to_prompt(self):
         prompt = f"Searching for code snippet: {self.code_snippet}"
         if self.file_pattern:
             prompt += f" in files matching the pattern: {self.file_pattern}"
         return prompt
-
 
 
 class FindCodeSnippet(SearchBaseAction):

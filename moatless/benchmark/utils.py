@@ -3,7 +3,6 @@ import logging
 import os
 import re
 import time
-from typing import Tuple
 
 from moatless.codeblocks.module import Module
 from moatless.repository import FileRepository

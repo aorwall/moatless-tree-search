@@ -21,7 +21,15 @@ class ActionArguments(OpenAISchema, ABC):
     scratch_pad: str = Field(..., description="Your reasoning for the action.")
 
     class Config:
-        title = 'Action'
+        title = "Action"
+
+    @property
+    def name(self):
+        return (
+            self.Config.title
+            if hasattr(self.Config, "title")
+            else self.__class__.__name__
+        )
 
     def to_tool_call(self) -> ToolCall:
         return ToolCall(name=self.name, input=self.model_dump())
@@ -35,17 +43,10 @@ class ActionArguments(OpenAISchema, ABC):
             exclude={"scratch_pad"}
         )
 
-    @property
-    def name(self):
-        return self.Config.title if hasattr(self.Config, 'title') else self.__class__.__name__
-
     def to_prompt(self):
-        prompt = f"Action: {self.name()}\n"
+        prompt = f"Action: {self.name}\n"
         prompt += "\n".join(
-            [
-                f"  {k}: {v}"
-                for k, v in self.model_dump(exclude={"scratch_pad"}).items()
-            ]
+            [f"  {k}: {v}" for k, v in self.model_dump(exclude={"scratch_pad"}).items()]
         )
         return prompt
 
@@ -71,21 +72,33 @@ class ActionArguments(OpenAISchema, ABC):
             full_module_name = f"moatless.actions.{module_name}"
             module = importlib.import_module(full_module_name)
             for name, obj in module.__dict__.items():
-                if isinstance(obj, type) and issubclass(obj, ActionArguments) and obj != ActionArguments:
+                if (
+                    isinstance(obj, type)
+                    and issubclass(obj, ActionArguments)
+                    and obj != ActionArguments
+                ):
                     _action_args[name] = obj
-
-    @classmethod
-    def model_validate(cls: Type["Action"], obj: Any) -> "Action":
-        if isinstance(obj, dict) and "action_name" in obj:
-            action_name = obj.pop("action_name")
-            return cls.create_action(action_name, **obj)
-        return super().model_validate(obj)
+                    
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:
-        data = super().model_dump(**kwargs)
-        data["action_name"] = self.__class__.__name__
-        return data
+        dump = {
+            "action_args_class": f"{self.__class__.__module__}.{self.__class__.__name__}"
+        }
+        dump.update(super().model_dump(**kwargs))
+        return dump
 
+    @classmethod
+    def model_validate(cls, obj: Any) -> "ActionArguments":
+        if isinstance(obj, dict):
+            obj = obj.copy()
+            action_args_class_path = obj.pop("action_args_class", None)
+            if action_args_class_path:
+                module_name, class_name = action_args_class_path.rsplit(".", 1)
+                module = importlib.import_module(module_name)
+                action_args_class = getattr(module, class_name)
+                return action_args_class.model_validate(obj)
+        return super().model_validate(obj)
+    
     @classmethod
     def parse_json(
         cls: type[BaseModel],
@@ -108,7 +121,7 @@ class ActionArguments(OpenAISchema, ABC):
         )
 
 
-class ActionOutput(BaseModel):
+class Observation(BaseModel):
     message: str = Field(
         description="The message returned to the agent, will be displayed in chat histoy."
     )

@@ -2963,6 +2963,16 @@ files = [
 windows-terminal = ["colorama (>=0.4.6)"]
 
 [[package]]
+name = "pygraphviz"
+version = "1.14"
+description = "Python interface to Graphviz"
+optional = false
+python-versions = ">=3.10"
+files = [
+    {file = "pygraphviz-1.14.tar.gz", hash = "sha256:c10df02377f4e39b00ae17c862f4ee7e5767317f1c6b2dfd04cea6acc7fc2bea"},
+]
+
+[[package]]
 name = "pylint"
 version = "3.3.1"
 description = "python code static checker"
@@ -4485,4 +4495,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<=3.13"
-content-hash = "9158502313fdafae69682dc070debe4348d5f192f369ad965e9a05a8f3f034fb"
+content-hash = "1010c9cde1c4146bcac879dd6dfbd0362acd51951d867ee18e7b07b5f1601f02"

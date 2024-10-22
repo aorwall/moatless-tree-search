@@ -1,10 +1,5 @@
-import json
 import logging
-from enum import Enum
-from typing import Any, Optional, Union, List
 
-import litellm
-from litellm import cost_per_token, NotFoundError
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -36,28 +31,3 @@ class RankedFileSpan(BaseModel):
     span_id: str
     rank: int = 0
     tokens: int = 0
-
-
-class TestStatus(str, Enum):
-    FAILED = "FAILED"
-    PASSED = "PASSED"
-    SKIPPED = "SKIPPED"
-    ERROR = "ERROR"
-
-
-class TestResult(BaseModel):
-    status: TestStatus
-    message: Optional[str] = None
-    file_path: Optional[str] = None
-    span_id: Optional[str] = None
-    line: Optional[int] = None
-    relevant_files: List[RankedFileSpan] = Field(
-        default_factory=list,
-        description="List of spans that are relevant to the issue",
-    )
-
-
-class RewardScaleEntry(BaseModel):
-    min_value: int
-    max_value: int
-    description: str

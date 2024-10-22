@@ -9,9 +9,9 @@ import networkx as nx
 import plotly.graph_objs as go
 import streamlit as st
 from matplotlib.backends.backend_pdf import PdfPages
-from moatless.benchmark.report import analyse_file_context
 from plotly.subplots import make_subplots
 
+from moatless.benchmark.report import analyse_file_context
 from moatless.benchmark.utils import get_moatless_instance
 from moatless.node import Node
 from moatless.search_tree import SearchTree
@@ -71,12 +71,15 @@ def build_graph(
         else:
             action_name = ""
 
-        context_stats = analyse_file_context(instance, node.file_context)
+        if instance:
+            context_stats = analyse_file_context(instance, node.file_context)
+        else:
+            context_stats = None
 
         warning = ""
-        if node.output and node.output.properties:
-            if "test_results" in node.output.properties:
-                test_results = node.output.properties["test_results"]
+        if node.observation and node.observation.properties:
+            if "test_results" in node.observation.properties:
+                test_results = node.observation.properties["test_results"]
                 failed_test_count = sum(
                     1 for test in test_results if test["status"] in ["FAILED", "ERROR"]
                 )
@@ -84,8 +87,8 @@ def build_graph(
                 if failed_test_count > 0:
                     warning = f"{failed_test_count} failed tests"
 
-            elif "fail_reason" in node.output.properties:
-                warning = f"Fail: {node.output.properties['fail_reason']}"
+            elif "fail_reason" in node.observation.properties:
+                warning = f"Fail: {node.observation.properties['fail_reason']}"
 
         if node.action and node.action.name == "Finish":
             resolved = is_resolved(node.node_id)
@@ -487,11 +490,11 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                             st.subheader(selected_node.action.name)
                             st.json(selected_node.action.model_dump())
 
-                            if selected_node.output:
+                            if selected_node.observation:
                                 st.subheader("Output")
-                                st.code(selected_node.output.message)
-                                if selected_node.output.extra:
-                                    st.code(selected_node.output.extra)
+                                st.code(selected_node.observation.message)
+                                if selected_node.observation.extra:
+                                    st.code(selected_node.observation.extra)
 
                     if "FileContext" in tabs:
                         with tab_contents[tabs.index("FileContext")]:

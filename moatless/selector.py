@@ -2,11 +2,11 @@ import logging
 import math
 import random
 from dataclasses import dataclass
-from typing import List
+from typing import List, Type, Literal, Dict, Any
 
 import numpy as np
+from pydantic import BaseModel, Field
 
-from moatless.actions.code_change import RequestCodeChange
 from moatless.node import Node
 
 logger = logging.getLogger(__name__)
@@ -43,38 +43,61 @@ class UCTScore:
         return ", ".join(components)
 
 
-class Selector:
-    def __init__(
-        self,
-        exploration_weight: float = 1.0,
-        depth_weight: float = 0.8,
-        depth_bonus_factor: float = 200.0,
-        high_value_threshold: float = 55.0,
-        low_value_threshold: float = 50.0,
-        very_high_value_threshold: float = 75.0,
-        high_value_leaf_bonus_constant: float = 20.0,
-        high_value_bad_children_bonus_constant: float = 20.0,
-        high_value_child_penalty_constant: float = 5.0,
-        finished_trajectory_penalty: float = 50.0,
-        expect_correction_bonus: float = 100.0,
-    ):
-        self.exploration_weight = exploration_weight
-        self.depth_weight = depth_weight
-        self.depth_bonus_factor = depth_bonus_factor
-        self.high_value_threshold = high_value_threshold
-        self.low_value_threshold = low_value_threshold
-        self.very_high_value_threshold = very_high_value_threshold
-        self.high_value_leaf_bonus_constant = high_value_leaf_bonus_constant
-        self.high_value_bad_children_bonus_constant = (
-            high_value_bad_children_bonus_constant
-        )
-        self.high_value_child_penalty_constant = high_value_child_penalty_constant
-        self.finished_trajectory_penalty = finished_trajectory_penalty
-        self.expect_correction_bonus = expect_correction_bonus
-        self.check_for_bad_child_actions = [RequestCodeChange]
+class Selector(BaseModel):
+    type: Literal["BestFirstSelector", "SoftmaxSelector"] = Field(
+        ..., description="The type of selector"
+    )
+    exploration_weight: float = Field(
+        default=1.0,
+        description="Weight factor for the exploration term in the UCT score calculation. Higher values encourage more exploration of less-visited nodes.",
+    )
+    depth_weight: float = Field(
+        default=0.8,
+        description="Weight factor for the depth-based components in the UCT score. Affects both the depth bonus and penalty calculations.",
+    )
+    depth_bonus_factor: float = Field(
+        default=200.0,
+        description="Factor used in calculating the depth bonus. Higher values increase the bonus for exploring deeper nodes, especially near the root.",
+    )
+    high_value_threshold: float = Field(
+        default=55.0,
+        description="Threshold for considering a node's reward as 'high value'. Used in various bonus calculations.",
+    )
+    low_value_threshold: float = Field(
+        default=50.0,
+        description="Threshold for considering a node's reward as 'low value'. Used in various penalty calculations.",
+    )
+    very_high_value_threshold: float = Field(
+        default=75.0,
+        description="Threshold for considering a node's reward as 'very high value'. Used in the high value child penalty calculation.",
+    )
+    high_value_leaf_bonus_constant: float = Field(
+        default=20.0,
+        description="Constant bonus applied to high-value leaf nodes to encourage their exploration.",
+    )
+    high_value_bad_children_bonus_constant: float = Field(
+        default=20.0,
+        description="Constant used in calculating the bonus for high-value nodes with low-value children, encouraging 'auto-correction'.",
+    )
+    high_value_child_penalty_constant: float = Field(
+        default=5.0,
+        description="Constant used in penalizing nodes with very high-value children to prevent over-exploitation of a single path.",
+    )
+    finished_trajectory_penalty: float = Field(
+        default=50.0,
+        description="Penalty applied to nodes on a trajectory that has already finished with a high reward, discouraging revisiting completed paths.",
+    )
+    expect_correction_bonus: float = Field(
+        default=100.0,
+        description="Bonus applied to nodes expecting correction, prioritizing exploration of potential fix paths.",
+    )
+    check_for_bad_child_actions: List[str] = Field(
+        default_factory=lambda: ["RequestCodeChange"],
+        description="List of action types to check for when calculating the high value bad children bonus.",
+    )
 
     def select(self, expandable_nodes: List[Node]) -> Node:
-        raise NotImplementedError
+        raise NotImplementedError("Subclasses must implement the select method.")
 
     def uct_score(self, node: Node) -> UCTScore:
         """
@@ -204,7 +227,7 @@ class Selector:
             ]
             if len(child_values) == 1 and any(
                 [
-                    child.action.__class__ in self.check_for_bad_child_actions
+                    child.action.__class__.__name__ in self.check_for_bad_child_actions
                     for child in node.children
                 ]
             ):
@@ -293,15 +316,34 @@ class Selector:
         as the parent node accumulates more children, encouraging exploration of less-visited
         correction paths.
         """
-        if node.output and node.output.expect_correction:
+        if node.observation and node.observation.expect_correction:
             # Use a more aggressive decay factor
             decay_factor = 1 / (1 + len(node.children) ** 2)
             return self.expect_correction_bonus * decay_factor
 
         return 0
 
+    @classmethod
+    def model_validate(cls: Type["Selector"], obj: Any) -> "Selector":
+        if isinstance(obj, dict):
+            selector_type = obj.get("type")
+            if selector_type == "BestFirstSelector":
+                return BestFirstSelector(**obj)
+            elif selector_type == "SoftmaxSelector":
+                return SoftmaxSelector(**obj)
+            else:
+                raise ValueError(f"Unknown selector type: {selector_type}")
+        return super().model_validate(obj)
+
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        dump = super().model_dump(**kwargs)
+        dump["type"] = self.__class__.__name__
+        return dump
+
 
 class BestFirstSelector(Selector):
+    type: Literal["BestFirstSelector"] = "BestFirstSelector"
+
     def select(self, expandable_nodes: List[Node]) -> Node:
         if len(expandable_nodes) == 1:
             return expandable_nodes[0]
@@ -333,6 +375,8 @@ class BestFirstSelector(Selector):
 
 
 class SoftmaxSelector(Selector):
+    type: Literal["SoftmaxSelector"] = "SoftmaxSelector"
+
     def select(self, expandable_nodes: List[Node]) -> Node:
         if len(expandable_nodes) == 1:
             return expandable_nodes[0]

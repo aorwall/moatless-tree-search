@@ -2,17 +2,14 @@ import argparse
 import logging
 import os
 from datetime import datetime
-from functools import partial
 from typing import Optional
 
 from dotenv import load_dotenv
 
-from moatless.benchmark.evaluation import Evaluation
-from moatless.benchmark.evaluation import create_evaluation_name
-from moatless.settings import TreeSearchSettings, Settings, ModelSettings
-
+from moatless.benchmark.evaluation import create_evaluation_name, Evaluation, TreeSearchSettings, ModelSettings
 
 logger = logging.getLogger(__name__)
+
 
 def evaluate_search_and_code(
     model: str,
@@ -51,37 +48,34 @@ def evaluate_search_and_code(
         evaluations_dir = os.getenv("MOATLESS_DIR")
         evaluation_name = os.path.join(name, evaluation_name)
 
-    Settings.default_model = ModelSettings(
-        model=model,
-        temperature=temperature
-    )
+    tree_search_settings.model = ModelSettings(model=model, temperature=temperature)
     # Expect models with prefix openai/ to be custom
     if model.startswith("openai/"):
-        Settings.default_model.base_url = os.getenv("CUSTOM_LLM_API_BASE")
-        Settings.default_model.api_key = os.getenv("CUSTOM_LLM_API_KEY")
+        tree_search_settings.model.base_url = os.getenv("CUSTOM_LLM_API_BASE")
+        tree_search_settings.model.api_key = os.getenv("CUSTOM_LLM_API_KEY")
 
     logger.info("Evaluation Parameters:")
     logger.info(f"Evalation dir: {evaluations_dir}")
     logger.info(f"Evaluation Name: {evaluation_name}")
     logger.info(f"Model: {model}")
-    logger.info(f"Model Base URL: {Settings.default_model.base_url}")
+    logger.info(f"Model Base URL: {tree_search_settings.model.base_url}")
     logger.info(f"Temperature: {temperature}")
     logger.info(f"Identify Model: {identify_model or model}")
     logger.info(f"Tree Search Settings:")
     logger.info(f"  Max Expansions: {tree_search_settings.max_expansions}")
     logger.info(f"  Max Iterations: {tree_search_settings.max_iterations}")
-    logger.info(
-        f"  Min Finished Nodes: {tree_search_settings.min_finished_nodes}"
-    )
+    logger.info(f"  Min Finished Nodes: {tree_search_settings.min_finished_nodes}")
     logger.info(f"  States to Explore: {tree_search_settings.states_to_explore}")
     logger.info(f"  Provide Feedback: {tree_search_settings.provide_feedback}")
     logger.info(f"  Debate: {tree_search_settings.debate}")
     if tree_search_settings.value_function_model:
-        logger.info(f"  Value Function Model: {tree_search_settings.value_function_model.model}")
+        logger.info(
+            f"  Value Function Model: {tree_search_settings.value_function_model.model}"
+        )
         logger.info(
             f"  Value Function Model Temperature: {tree_search_settings.value_function_model.temperature}"
         )
-    logger.info(f"Max Cost: {max_cost}") # TODO: Not used ATM
+    logger.info(f"Max Cost: {max_cost}")  # TODO: Not used ATM
     logger.info(f"Max iterations: {tree_search_settings.max_iterations}")
     logger.info(f"Number of Workers: {num_workers}")
     logger.info(f"Use Testbed: {use_testbed}")

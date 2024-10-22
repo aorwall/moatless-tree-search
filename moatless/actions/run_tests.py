@@ -1,48 +1,78 @@
 import logging
-from typing import List, Any
+from typing import List, Any, Dict
 
-from pydantic import Field, model_validator
+from pydantic import Field, PrivateAttr
 
 from moatless.actions.action import Action
-from moatless.actions.model import ActionOutput
+from moatless.actions.model import ActionArguments, Observation
 from moatless.file_context import FileContext
-from moatless.index.code_index import is_test
-from moatless.schema import RewardScaleEntry, TestStatus, TestResult
+from moatless.index.code_index import CodeIndex, is_test
+from moatless.repository.repository import Repository
+from moatless.value_function.model import RewardScaleEntry
+from moatless.runtime.runtime import RuntimeEnvironment, TestResult, TestStatus
 
 logger = logging.getLogger(__name__)
 
 
-class RunTests(Action):
+class RunTestsArgs(ActionArguments):
     """
     Run the specified unit tests on the codebase.
     """
 
     scratch_pad: str = Field(..., description="Your reasoning on what tests to run.")
-
     test_files: List[str] = Field(..., description="The list of test files to run")
 
-    @model_validator(mode="before")
-    @classmethod
-    def fix_scratch_pad(cls, data: Any) -> Any:
-        """TODO: Just to be able to read old search trees without scratch_pad set. Should be removed."""
-        if isinstance(data, dict):
-            if "scratch_pad" not in data:
-                data["scratch_pad"] = ""
-        return data
+    class Config:
+        title = "RunTests"
 
-    def execute(self, file_context: FileContext | None = None) -> ActionOutput:
+    @property
+    def log_name(self):
+        return f"RunTests({', '.join(self.test_files)})"
+
+    def to_prompt(self):
+        return f"Running tests for the following files:\n" + "\n".join(
+            f"* {file}" for file in self.test_files
+        )
+
+
+class RunTests(Action):
+    args_schema = RunTestsArgs
+
+    _code_index: CodeIndex = PrivateAttr()
+    _repository: Repository = PrivateAttr()
+    _runtime: RuntimeEnvironment = PrivateAttr()
+
+    def __init__(
+        self,
+        code_index: CodeIndex,
+        repository: Repository,
+        runtime: RuntimeEnvironment,
+        **data,
+    ):
+        super().__init__(**data)
+        self._code_index = code_index
+        self._repository = repository
+        self._runtime = runtime
+
+    def execute(
+        self, args: RunTestsArgs, file_context: FileContext | None = None
+    ) -> Observation:
         """
         Run tests on the codebase.
         """
+        if file_context is None:
+            raise ValueError(
+                "File context must be provided to execute the run tests action."
+            )
 
-        if self.test_files:
+        if args.test_files:
             existing_test_files = [
                 test_file
-                for test_file in self.test_files
-                if self._workspace.file_repo.file_exists(test_file)
+                for test_file in args.test_files
+                if self._repository.file_exists(test_file)
             ]
 
-            missing_test_files = set(self.test_files).difference(
+            missing_test_files = set(args.test_files).difference(
                 set(existing_test_files)
             )
             if missing_test_files:
@@ -55,7 +85,7 @@ class RunTests(Action):
                 if is_test(file.file_path)
             ]
             not_existing_test_files = set(existing_test_files).difference(
-                set([file for file in actual_test_files])
+                set(actual_test_files)
             )
             if not_existing_test_files:
                 logger.info(f"Not actual test files: {not_existing_test_files}")
@@ -73,16 +103,16 @@ class RunTests(Action):
 
         if not test_files:
             logger.info(
-                "The agent didn't select any tests. Will search and select test files based on files ."
+                "The agent didn't select any tests. Will search and select test files based on files."
             )
 
-            if self.test_files:
-                file_paths = self.test_files
+            if args.test_files:
+                file_paths = args.test_files
                 if not file_paths:
                     file_paths = [file.file_path for file in file_context.files]
 
                 for file_path in file_paths:
-                    search_results = self._workspace.code_index.find_test_files(
+                    search_results = self._code_index.find_test_files(
                         file_path, query=file_path, max_results=2, max_spans=2
                     )
 
@@ -90,7 +120,7 @@ class RunTests(Action):
                         test_files.append(search_result.file_path)
 
         logger.info(f"Running tests: {test_files}")
-        test_results = self._workspace.run_tests(file_context, test_files)
+        test_results = self._runtime.run_tests(test_files)
         failing_tests = [
             issue
             for issue in test_results
@@ -123,9 +153,9 @@ class RunTests(Action):
 
         return self.create_output(test_results)
 
-    def create_output(self, test_results: List[TestResult]) -> ActionOutput:
+    def create_output(self, test_results: List[TestResult]) -> Observation:
         if not test_results:
-            return ActionOutput(
+            return Observation(
                 message="No tests were run",
                 properties={"test_results": []},
             )
@@ -170,7 +200,7 @@ class RunTests(Action):
             extra += "\n".join(test_result_strings)
 
         result_dicts = [result.model_dump() for result in test_results]
-        return ActionOutput(
+        return Observation(
             message=response_msg,
             extra=extra,
             expect_correction=failure_count > 0 or error_count > 0,
@@ -228,3 +258,22 @@ class RunTests(Action):
                 description="The action is counterproductive, demonstrating misunderstanding or causing setbacks, test failures are severe and could have been anticipated.",
             ),
         ]
+
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        dump = super().model_dump(**kwargs)
+        dump["code_index"] = self._code_index.dict()
+        dump["repository"] = self._repository.model_dump()
+        dump["runtime"] = self._runtime.model_dump()
+        return dump
+
+    @classmethod
+    def model_validate(cls, obj: Any) -> "RunTests":
+        if isinstance(obj, dict):
+            obj = obj.copy()
+            repository = Repository.model_validate(obj.pop("repository", {}))
+            code_index = CodeIndex(file_repo=repository, **obj.pop("code_index", {}))
+            runtime = RuntimeEnvironment.model_validate(obj.pop("runtime", {}))
+            return cls(
+                code_index=code_index, repository=repository, runtime=runtime, **obj
+            )
+        return super().model_validate(obj)

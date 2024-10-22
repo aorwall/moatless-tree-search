@@ -4,11 +4,11 @@ from typing import List, Optional
 from pydantic import Field, BaseModel, PrivateAttr
 
 from moatless.actions.action import Action
-from moatless.actions.model import ActionArguments, ActionOutput
+from moatless.actions.model import ActionArguments, Observation
 from moatless.codeblocks import CodeBlockType
 from moatless.file_context import FileContext, ContextFile
 from moatless.repository.repository import Repository
-from moatless.schema import RewardScaleEntry
+from moatless.value_function.model import RewardScaleEntry
 
 logger = logging.getLogger(__name__)
 
@@ -42,14 +42,16 @@ class CodeSpan(BaseModel):
 
 
 class RequestMoreContextArgs(ActionArguments):
+    """Request additional code spans to be added to your current context."""
+
     scratch_pad: str = Field(..., description="Your thoughts on the code change.")
     files: List[CodeSpan] = Field(
         ..., description="The code that should be provided in the file context."
     )
 
     class Config:
-        title = 'RequestMoreContext'
-    
+        title = "RequestMoreContext"
+
     @property
     def log_name(self):
         if len(self.files) == 1:
@@ -71,12 +73,7 @@ class RequestMoreContextArgs(ActionArguments):
         return prompt
 
 
-
 class RequestMoreContext(Action):
-    """Request additional code spans to be added to your current context."""
-
-    name: str = "RequestMoreContext"
-    description: str = "Request additional code spans to be added to your current context."
     args_schema = RequestMoreContextArgs
 
     _repository: Repository = PrivateAttr()
@@ -84,12 +81,13 @@ class RequestMoreContext(Action):
     def __init__(self, repository: Repository, **data):
         super().__init__(**data)
         self._repository = repository
-    
 
     # TODO?
     _max_tokens_in_edit_prompt = 750
 
-    def execute(self, args: RequestMoreContextArgs, file_context: FileContext | None = None) -> ActionOutput:
+    def execute(
+        self, args: RequestMoreContextArgs, file_context: FileContext
+    ) -> Observation:
         if file_context is None:
             raise ValueError(
                 "File context must be provided to execute the search action."
@@ -138,7 +136,7 @@ class RequestMoreContext(Action):
                 message += self.create_retry_message(
                     file, f"No span ids found. Is it empty?"
                 )
-                return ActionOutput(
+                return Observation(
                     message=message, properties=properties, expect_correction=False
                 )
 
@@ -203,7 +201,7 @@ class RequestMoreContext(Action):
             }
 
         # TODO: Determine which scenarios where we should expect a correction
-        return ActionOutput(
+        return Observation(
             message=message, properties=properties, expect_correction=False
         )
 

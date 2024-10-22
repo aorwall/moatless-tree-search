@@ -1,41 +1,46 @@
+import importlib
 import logging
 from abc import ABC
-from typing import List, Type, Tuple
+from typing import List, Type, Tuple, Any, Dict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict
 
-from moatless.actions.model import ActionArguments, ActionOutput
+from moatless.actions.model import ActionArguments, Observation
 from moatless.file_context import FileContext
-from moatless.schema import RewardScaleEntry
+from moatless.index import CodeIndex
+from moatless.repository.repository import Repository
+from moatless.value_function.model import RewardScaleEntry
 
 logger = logging.getLogger(__name__)
 
 
 class Action(BaseModel, ABC):
-
     args_schema: Type[ActionArguments]
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def __init__(self, **data):
         super().__init__(**data)
 
-    def execute(self, args: ActionArguments, file_context: FileContext | None = None) -> ActionOutput:
+    def execute(
+        self, args: ActionArguments, file_context: FileContext
+    ) -> Observation:
         """
         Execute the action.
         """
 
         message = self._execute(file_context=file_context)
-        return ActionOutput.create(message)
+        return Observation.create(message)
 
-    def _execute(self, file_context: FileContext | None = None) -> str | None:
+    def _execute(self, file_context: FileContext) -> str | None:
         """
         Execute the action and return the updated FileContext.
         """
         raise NotImplementedError("Subclasses must implement this method.")
 
     @property
-    def name(self):
-        return self.args_schema.name
-
+    def name(self) -> str:
+        return self.__class__.__name__
 
     def get_evaluation_criteria(self, trajectory_length) -> List[str]:
         if trajectory_length < 3:
@@ -86,7 +91,7 @@ class Action(BaseModel, ABC):
 
     @staticmethod
     def generate_reward_scale_entries(
-        descriptions: List[Tuple[int, int, str]]
+        descriptions: List[Tuple[int, int, str]],
     ) -> List[RewardScaleEntry]:
         """
         Generate a list of RewardScaleEntry objects based on the provided descriptions.
@@ -128,3 +133,41 @@ At this stage, the agent is still working on the solution. Your task is twofold:
 1. **Evaluation**: Assess whether the change done by the **last executed action** is appropriate for addressing the problem and whether the agent is on the right path to resolving the issue.
 2. **Alternative Feedback**: Independently of your evaluation, provide guidance for an alternative problem-solving branch. This ensures parallel exploration of different solution paths.
 """
+
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        dump = {
+            "action_class": f"{self.__class__.__module__}.{self.__class__.__name__}"
+        }
+        dump.update(super().model_dump(**kwargs))
+        dump.pop("args_schema", None)
+        return dump
+
+    @classmethod
+    def model_validate(cls, obj: Any, repository: Repository = None, runtime: Any = None, code_index: CodeIndex = None) -> "Action":
+        if isinstance(obj, dict):
+            obj = obj.copy()
+            obj.pop("args_schema", None)
+            action_class_path = obj.pop("action_class", None)
+            if action_class_path:
+                module_name, class_name = action_class_path.rsplit(".", 1)
+                module = importlib.import_module(module_name)
+                action_class = getattr(module, class_name)
+
+                if hasattr(action_class, "_repository") and hasattr(action_class, "_code_index") and hasattr(action_class, "_runtime"):
+                    if repository is not None:
+                        obj.pop("repository", None)
+                    if code_index is not None:
+                        obj.pop("code_index", None)
+                    if runtime is not None:
+                        obj.pop("runtime", None)
+                    
+                    # Use provided values, falling back to serialized values if not provided
+                    return action_class(
+                        repository=repository or obj.get("repository"),
+                        code_index=code_index or obj.get("code_index"),
+                        runtime=runtime or obj.get("runtime"),
+                        **obj
+                    )
+                
+                return action_class(**obj)
+        return super().model_validate(obj)

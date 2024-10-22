@@ -1,12 +1,14 @@
 import logging
 from typing import List
 
+from pydantic import BaseModel
+
 from moatless.node import Node
 
 logger = logging.getLogger(__name__)
 
 
-class Discriminator:
+class Discriminator(BaseModel):
     def select(self, nodes: List[Node]) -> Node | None:
         raise NotImplementedError
 

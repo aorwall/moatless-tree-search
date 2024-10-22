@@ -1,24 +1,25 @@
 import hashlib
-import os
-from collections import defaultdict
 import json
 import logging
+import os
 from typing import Dict, List, Optional
 
 import pandas as pd
+from pydantic import BaseModel, Field
 
-from moatless.index.code_index import is_test
 from moatless.benchmark.utils import (
     has_identified_spans,
     has_identified_files,
     count_identified_files,
     count_identified_spans,
     get_missing_files,
-    get_moatless_instance, read_search_trees, get_moatless_instances,
+    get_moatless_instance,
+    read_search_trees,
+    get_moatless_instances,
 )
-from moatless.file_context import FileContext, ContextFile
+from moatless.file_context import FileContext
+from moatless.index.code_index import is_test
 from moatless.node import Node
-from pydantic import BaseModel, Field
 from moatless.search_tree import SearchTree
 
 logger = logging.getLogger(__name__)
@@ -189,7 +190,11 @@ def filter_test_code_from_diff(diff: str) -> str:
 def create_trajectory_stats(
     trajectory_state: Node, instance: dict, evaluation_result: dict | None = None
 ) -> TrajectoryStats:
-    context_stats = analyse_file_context(instance, trajectory_state.file_context)
+    if instance:
+        context_stats = analyse_file_context(instance, trajectory_state.file_context)
+    else:
+        context_stats = None
+
     result = TrajectoryStats(
         state_id=trajectory_state.node_id, context_stats=context_stats
     )
@@ -204,11 +209,11 @@ def create_trajectory_stats(
             result.actions[node.action.name] += 1
 
             if (
-                node.output
-                and node.output.properties
-                and "test_results" in node.output.properties
+                node.observation
+                and node.observation.properties
+                and "test_results" in node.observation.properties
             ):
-                test_results = node.output.properties["test_results"]
+                test_results = node.observation.properties["test_results"]
                 failed_test_count = sum(
                     1 for test in test_results if test["status"] in ["FAILED", "ERROR"]
                 )
@@ -229,10 +234,10 @@ def create_trajectory_stats(
                         test_files.append(test_result["file_path"])
 
             if node.action.name == "RequestCodeChange":
-                if node.output:
+                if node.observation:
                     if (
-                        node.output.properties
-                        and "fail_reason" in node.output.properties
+                        node.observation.properties
+                        and "fail_reason" in node.observation.properties
                     ):
                         result.failed_edits += 1
                     elif is_test(node.action.file_path):
@@ -285,7 +290,7 @@ def create_trajectory_stats(
             result.status = "finished"
         elif trajectory_state.action and trajectory_state.action.name == "Reject":
             result.status = "rejected"
-            result.message = trajectory_state.output.message
+            result.message = trajectory_state.observation.message
         else:
             result.status = "terminal"
     else:

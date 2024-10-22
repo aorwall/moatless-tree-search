@@ -4,16 +4,18 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 from pydantic import BaseModel, Field, PrivateAttr
 
 from moatless.codeblocks import get_parser_by_path
 from moatless.codeblocks.module import Module
+from moatless.repository.repository import Repository
 
 logger = logging.getLogger(__name__)
 
 
+# TODO: Remove this
 class CodeFile(BaseModel):
     file_path: str = Field(..., description="The path to the file")
 
@@ -26,20 +28,20 @@ class CodeFile(BaseModel):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._content = kwargs.get("_content", "")
-        self._repo_path = kwargs.get("_repo_path", None)
+        self._repo_path = kwargs.get("repo_path", None)
         self._module = kwargs.get("_module", None)
         self._last_modified = kwargs.get("_last_modified", None)
 
     @classmethod
     def from_file(cls, repo_path: str, file_path: str):
-        return cls(file_path=file_path, _repo_path=repo_path)
+        return cls(file_path=file_path, repo_path=repo_path)
 
     @classmethod
     def from_content(cls, file_path: str, content: str):
         return cls(file_path=file_path, _content=content)
 
     def get_file_content(self, file_path: str) -> Optional[str]:
-        return self.files.get(file_path)
+        return
 
     def has_been_modified(self) -> bool:
         if not self._repo_path:
@@ -95,25 +97,19 @@ class CodeFile(BaseModel):
         return self._module
 
 
-class FileRepository:
-    def __init__(self, repo_path: str):
-        self._repo_path = repo_path
-        self._files = {}
+class FileRepository(Repository):
+    repo_path: str = Field(..., description="The path to the repository")
 
     @property
     def repo_dir(self):
-        return self._repo_path
+        return self.repo_path
 
-    @property
-    def file_paths(self):
-        return [file_path for file_path in self._files.keys()]
-
-    def dict(self):
-        return {"type": "file", "path": self._repo_path}
+    def model_dump(self) -> Dict:
+        return {"type": "file", "repo_path": self.repo_path}
 
     def get_file_content(self, file_path: str) -> str | None:
-        if os.path.exists(os.path.join(self._repo_path, file_path)):
-            with open(os.path.join(self._repo_path, file_path)) as f:
+        if os.path.exists(os.path.join(self.repo_path, file_path)):
+            with open(os.path.join(self.repo_path, file_path)) as f:
                 return f.read()
 
         return None
@@ -126,22 +122,19 @@ class FileRepository:
 
     @property
     def path(self):
-        return self._repo_path
+        return self.repo_path
 
     def is_directory(self, path: str):
-        full_path = os.path.join(self._repo_path, path)
+        full_path = os.path.join(self.repo_path, path)
         return os.path.isdir(full_path)
 
     def get_file(self, file_path: str):
-        if file_path in self._files:
-            return self._files[file_path]
-
         if file_path.startswith(self.repo_dir):
             file_path = file_path.replace(self.repo_dir, "")
             if file_path.startswith("/"):
                 file_path = file_path[1:]
 
-        full_file_path = os.path.join(self._repo_path, file_path)
+        full_file_path = os.path.join(self.repo_path, file_path)
         if not os.path.exists(full_file_path):
             logger.debug(f"File not found: {full_file_path}")
             return None
@@ -150,16 +143,15 @@ class FileRepository:
             logger.warning(f"{full_file_path} is not a file")
             return None
 
-        file = CodeFile.from_file(file_path=file_path, repo_path=self._repo_path)
-        self._files[file_path] = file
+        file = CodeFile.from_file(file_path=file_path, repo_path=self.repo_path)
 
         return file
 
     def file_exists(self, file_path: str):
-        return os.path.exists(os.path.join(self._repo_path, file_path))
+        return os.path.exists(os.path.join(self.repo_path, file_path))
 
     def create_empty_file(self, file_path: str):
-        full_file_path = os.path.join(self._repo_path, file_path)
+        full_file_path = os.path.join(self.repo_path, file_path)
         if not os.path.exists(os.path.dirname(full_file_path)):
             logger.info(f"Creating directory for {full_file_path}")
             os.makedirs(os.path.dirname(full_file_path))
@@ -173,7 +165,7 @@ class FileRepository:
         if not self.file_exists(file_path):
             file = self.create_empty_file(file_path)
 
-        with open(os.path.join(self._repo_path, file_path), "w") as f:
+        with open(os.path.join(self.repo_path, file_path), "w") as f:
             f.write(updated_content)
 
     def matching_files(self, file_pattern: str):
@@ -194,12 +186,12 @@ class FileRepository:
         ):
             file_pattern = f"**/{file_pattern}"
 
-        repo_path = Path(self._repo_path)
+        repo_path = Path(self.repo_path)
         matched_files = []
-        repo_path = Path(self._repo_path)
+        repo_path = Path(self.repo_path)
         for path in repo_path.glob(file_pattern):
             if path.is_file():
-                relative_path = str(path.relative_to(self._repo_path)).replace(
+                relative_path = str(path.relative_to(self.repo_path)).replace(
                     os.sep, "/"
                 )
                 matched_files.append(relative_path)
@@ -216,7 +208,7 @@ class FileRepository:
 
     def has_matching_files(self, file_pattern: str):
         for _matched_file in glob.iglob(
-            file_pattern, root_dir=self._repo_path, recursive=True
+            file_pattern, root_dir=self.repo_path, recursive=True
         ):
             return True
         return False
@@ -224,7 +216,7 @@ class FileRepository:
     def file_match(self, file_pattern: str, file_path: str):
         match = False
         for matched_file in glob.iglob(
-            file_pattern, root_dir=self._repo_path, recursive=True
+            file_pattern, root_dir=self.repo_path, recursive=True
         ):
             if matched_file == file_path:
                 match = True
@@ -235,9 +227,20 @@ class FileRepository:
         matched_files = []
         for pattern in patterns:
             matched_files.extend(
-                glob.iglob(f"**/{pattern}", root_dir=self._repo_path, recursive=True)
+                glob.iglob(f"**/{pattern}", root_dir=self.repo_path, recursive=True)
             )
         return matched_files
+
+    def model_dump(self) -> Dict:
+        return {
+            "type": "file",
+            "path": self.repo_path,
+        }
+
+    @classmethod
+    def model_validate(cls, obj: Dict):
+        repo = cls(repo_path=obj["path"])
+        return repo
 
 
 def remove_duplicate_lines(replacement_lines, original_lines):

@@ -4,9 +4,7 @@ from typing import Optional, Any, Union
 
 import litellm
 from litellm import cost_per_token, NotFoundError
-
 from pydantic import BaseModel
-
 
 logger = logging.getLogger(__name__)
 

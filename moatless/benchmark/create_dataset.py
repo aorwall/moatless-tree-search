@@ -18,7 +18,9 @@ def read_predictions(pred_path: str):
     return predictions
 
 
-def generate_report(dataset_path=str, dataset_name: str = "princeton-nlp/SWE-bench_Lite"):
+def generate_report(
+    dataset_path=str, dataset_name: str = "princeton-nlp/SWE-bench_Lite"
+):
     results = {}
 
     experiments_dir = "/home/albert/repos/stuffs/experiments/evaluation/lite"

@@ -4,6 +4,7 @@ import os
 import altair as alt
 import pandas as pd
 import streamlit as st
+
 from moatless.benchmark.report import read_reports, to_dataframe
 
 logger = logging.getLogger(__name__)
@@ -89,10 +90,10 @@ def generate_summary(df: pd.DataFrame):
         st.altair_chart(final_chart, use_container_width=True)
 
 
-def trajectory_table(moatless_dir: str):
+def trajectory_table(directory_path: str):
     st.header("Trajectory List")
 
-    report_path = os.path.join(moatless_dir, "report.json")
+    report_path = os.path.join(directory_path, "report.json")
     if not os.path.exists(report_path):
         logger.error(f"Report file not found at {report_path}")
         return
@@ -129,11 +130,11 @@ def trajectory_table(moatless_dir: str):
     col4, col5 = st.columns(2)
 
     with col1:
-        status_filter = st.multiselect("Status", df["status"].unique())
+        status_filter = st.multiselect("Status", df["status"].unique(), key="status_filter")
     with col2:
         has_resolved_solutions = st.multiselect("Has Resolved Solutions", ["Yes", "No"])
     with col3:
-        instance_filter = st.text_input("Instance ID (contains)")
+        instance_filter = st.multiselect("Instance", df["instance"].unique(), key="instance_filter")
     with col4:
         llmonkeys_rate_range = st.slider("LLMonkeys Rate (%)", 0, 100, (0, 100), 1)
 
@@ -142,7 +143,7 @@ def trajectory_table(moatless_dir: str):
     if status_filter:
         mask &= df["status"].isin(status_filter)
     if instance_filter:
-        mask &= df["instance_id"].apply(lambda x: instance_filter.lower() in x.lower())
+        mask &= df["instance"].isin(instance_filter)
     if has_resolved_solutions:
         if "Yes" in has_resolved_solutions:
             mask &= df["resolved_solutions"] > 0
@@ -169,7 +170,7 @@ def trajectory_table(moatless_dir: str):
 
     # Create a column with clickable links using trajectory_path
     filtered_df["Select"] = filtered_df.apply(
-        lambda row: f'<a href="?trajectory_path={moatless_dir}/{row["instance_id"]}/trajectory.json">View</a>',
+        lambda row: f'<a href="?trajectory_path={directory_path}/{row["instance_id"]}/trajectory.json">View</a>',
         axis=1,
     )
 

@@ -1,40 +1,64 @@
-from pydantic import BaseModel, Field
+import json
+import logging
 from typing import Optional, Dict, Any, List
+
+from pydantic import BaseModel, Field
 
 from moatless.agent.agent import Agent
 from moatless.completion.model import Usage
 from moatless.discriminators import MeanAwardDiscriminator
 from moatless.feedback import FeedbackGenerator
 from moatless.file_context import FileContext
+from moatless.index.code_index import CodeIndex
 from moatless.node import Node, generate_ascii_tree
 from moatless.repository.repository import Repository
 from moatless.selector import BestFirstSelector, Selector, SoftmaxSelector
-from moatless.settings import TreeSearchSettings, ModelSettings
 from moatless.value_function import ValueFunction
-from moatless.workspace import Workspace
-
-import json
-import logging
+from moatless.runtime.runtime import RuntimeEnvironment
 
 logger = logging.getLogger(__name__)
+
 
 class SearchTree(BaseModel):
     root: Node = Field(..., description="The root node of the search tree.")
     selector: Selector = Field(..., description="Selector for node selection.")
     agent: Agent = Field(..., description="Agent for generating actions.")
-    value_function: Optional[ValueFunction] = Field(None, description="Value function for reward calculation.")
-    feedback_generator: Optional[FeedbackGenerator] = Field(None, description="Feedback generator.")
-    discriminator: Optional[MeanAwardDiscriminator] = Field(None, description="Discriminator for selecting the best trajectory.")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata for the search tree.")
-    persist_path: Optional[str] = Field(None, description="Path to persist the search tree.")
+    value_function: Optional[ValueFunction] = Field(
+        None, description="Value function for reward calculation."
+    )
+    feedback_generator: Optional[FeedbackGenerator] = Field(
+        None, description="Feedback generator."
+    )
+    discriminator: Optional[MeanAwardDiscriminator] = Field(
+        None, description="Discriminator for selecting the best trajectory."
+    )
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict, description="Additional metadata for the search tree."
+    )
+    persist_path: Optional[str] = Field(
+        None, description="Path to persist the search tree."
+    )
     unique_id: int = Field(default=0, description="Unique ID counter for nodes.")
 
-    max_expansions: int = Field(1, description="The maximum number of expansions of one state.")
-    max_iterations: int = Field(10, description="The maximum number of iterations to run the tree search.")
-    max_cost: Optional[float] = Field(None, description="The maximum cost spent on token before finishing.")
-    min_finished_nodes: Optional[int] = Field(None, description="The minimum number of finished nodes to consider before finishing")
-    reward_threshold: Optional[float] = Field(None, description="The min reward threshold to consider before finishing.")
-    max_depth: int = Field(10, description="The maximum depth for one trajectory in simulations.")
+    max_expansions: int = Field(
+        1, description="The maximum number of expansions of one state."
+    )
+    max_iterations: int = Field(
+        10, description="The maximum number of iterations to run the tree search."
+    )
+    max_cost: Optional[float] = Field(
+        None, description="The maximum cost spent on token before finishing."
+    )
+    min_finished_nodes: Optional[int] = Field(
+        None,
+        description="The minimum number of finished nodes to consider before finishing",
+    )
+    reward_threshold: Optional[float] = Field(
+        None, description="The min reward threshold to consider before finishing."
+    )
+    max_depth: int = Field(
+        10, description="The maximum depth for one trajectory in simulations."
+    )
 
     class Config:
         arbitrary_types_allowed = True
@@ -71,7 +95,7 @@ class SearchTree(BaseModel):
             )
 
         selector = selector or BestFirstSelector()
-        
+
         return cls(
             root=root,
             selector=selector,
@@ -90,38 +114,73 @@ class SearchTree(BaseModel):
         )
 
     @classmethod
+    def model_validate(cls, obj: Any, repository: Repository | None = None):
+        if isinstance(obj, dict):
+            obj = obj.copy()
+
+            if "selector" in obj and isinstance(obj["selector"], dict):
+                selector_type = obj["selector"].get("type")
+                if selector_type == "BestFirstSelector":
+                    obj["selector"] = BestFirstSelector.model_validate(obj["selector"])
+                elif selector_type == "SoftmaxSelector":
+                    obj["selector"] = SoftmaxSelector.model_validate(obj["selector"])
+                else:
+                    raise ValueError(f"Unknown selector type: {selector_type}")
+
+            if "agent" in obj and isinstance(obj["agent"], dict):
+                obj["agent"] = Agent.model_validate(obj["agent"])
+
+            if "value_function" in obj and isinstance(obj["value_function"], dict):
+                obj["value_function"] = ValueFunction.model_validate(
+                    obj["value_function"]
+                )
+
+            if "feedback_generator" in obj and isinstance(
+                obj["feedback_generator"], dict
+            ):
+                obj["feedback_generator"] = FeedbackGenerator.model_validate(
+                    obj["feedback_generator"]
+                )
+
+            if "discriminator" in obj and isinstance(obj["discriminator"], dict):
+                obj["discriminator"] = MeanAwardDiscriminator.model_validate(
+                    obj["discriminator"]
+                )
+
+            if "root" in obj and isinstance(obj["root"], dict):
+                obj["root"] = Node.reconstruct(obj["root"], repo=repository)
+
+        return super().model_validate(obj)
+
+    @classmethod
     def from_dict(
         cls,
-        dict: Dict[str, Any],
-        repository: Repository,
+        data: Dict[str, Any],
         persist_path: str | None = None,
+        repository: Repository | None = None,
+        code_index: CodeIndex | None = None,
+        runtime: RuntimeEnvironment | None = None,
     ) -> "SearchTree":
-        root = Node.reconstruct(
-            dict["tree"], repo=repository
-        )
-        tree = cls(
-            root=root,
-            selector=BestFirstSelector(),  # Default selector
-            agent=None,  # Agent needs to be provided separately
-            metadata=dict.get("metadata"),
-            persist_path=persist_path,
-            **dict["settings"]
-        )
-        tree.unique_id = len(tree.root.get_all_nodes())
-        return tree
+        data = data.copy()
+        if persist_path:
+            data["persist_path"] = persist_path
+
+        if "agent" in data and isinstance(data["agent"], dict):
+            agent_data = data["agent"]
+            data["agent"] = Agent.model_validate(agent_data, repository=repository, code_index=code_index, runtime=runtime)
+        return cls.model_validate(data, repository)
 
     @classmethod
     def from_file(
         cls,
         file_path: str,
         persist_path: str | None = None,
+        **kwargs
     ) -> "SearchTree":
         with open(file_path, "r") as f:
             tree_data = json.load(f)
 
-        return cls.from_dict(
-            tree_data, persist_path=persist_path or file_path
-        )
+        return cls.from_dict(tree_data, persist_path=persist_path or file_path, **kwargs)
 
     def run_search(self) -> Node | None:
         """Run the MCTS algorithm for a specified number of iterations."""
@@ -174,7 +233,7 @@ class SearchTree(BaseModel):
         """Expand the node by returning an unexecuted child or adding a new child node."""
         # Check for unexecuted children
         for child in node.children:
-            if not child.is_duplicate and child.output is None:
+            if not child.is_duplicate and child.observation is None:
                 logger.info(
                     f"Returning unexecuted child Node{child.node_id} of Node{node.node_id}"
                 )
@@ -251,10 +310,7 @@ class SearchTree(BaseModel):
         ):
             return False
 
-        if (
-            self.min_finished_nodes
-            and len(finished_nodes) >= self.min_finished_nodes
-        ):
+        if self.min_finished_nodes and len(finished_nodes) >= self.min_finished_nodes:
             return True
 
         if not self.root.get_expandable_descendants():
@@ -317,18 +373,40 @@ class SearchTree(BaseModel):
         Returns:
             Dict[str, Any]: A dictionary representation of the search tree.
         """
-        return {
-            "settings": {
-                "max_expansions": self.max_expansions,
-                "max_iterations": self.max_iterations,
-                "max_cost": self.max_cost,
-                "min_finished_nodes": self.min_finished_nodes,
-                "reward_threshold": self.reward_threshold,
-                "max_depth": self.max_depth,
-            },
-            "tree": self.root.model_dump(**kwargs),
-            "metadata": self.metadata,
+        # Get all fields except the ones we'll handle separately
+        data = {
+            field: getattr(self, field)
+            for field in self.model_fields
+            if field
+            not in [
+                "root",
+                "selector",
+                "agent",
+                "value_function",
+                "feedback_generator",
+                "discriminator",
+                "persist_path",
+            ]
         }
+
+        # Remove persist_path if it exists
+        data.pop("persist_path", None)
+
+        # Add selector, agent, value_function, feedback_generator, and discriminator
+        data["selector"] = self.selector.model_dump(**kwargs)
+        data["agent"] = self.agent.model_dump(**kwargs)
+
+        if self.value_function:
+            data["value_function"] = self.value_function.model_dump(**kwargs)
+        if self.feedback_generator:
+            data["feedback_generator"] = self.feedback_generator.model_dump(**kwargs)
+        if self.discriminator:
+            data["discriminator"] = self.discriminator.model_dump(**kwargs)
+
+        # Add root last
+        data["root"] = self.root.model_dump(**kwargs)
+
+        return data
 
 
 def find_best_by_mean_award(finished_nodes: List[Node]) -> Node | None:

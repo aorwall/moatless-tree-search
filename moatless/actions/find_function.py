@@ -2,25 +2,24 @@ from typing import Optional, List, Type
 
 from pydantic import Field
 
+from moatless.actions.model import ActionArguments
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs, logger
 from moatless.codeblocks import CodeBlockType
-from moatless.index import CodeIndex
 from moatless.index.types import SearchCodeResponse, SearchCodeHit, SpanHit
-from moatless.actions.action import Action
-from moatless.actions.model import ActionArguments, ActionOutput
-from moatless.actions.action import FileContext
 
 
 class FindFunctionArgs(SearchBaseArgs):
     """Search for a specific function or class in the codebase."""
 
-    function_name: str = Field(..., description="Specific function names to include in the search.")
+    function_name: str = Field(
+        ..., description="Specific function names to include in the search."
+    )
     class_name: Optional[str] = Field(
         default=None, description="Specific class name to include in the search."
     )
 
     class Config:
-        title = 'FindFunction'
+        title = "FindFunction"
 
     def to_prompt(self):
         prompt = f"Searching for function: {self.function_name}"
@@ -34,7 +33,6 @@ class FindFunctionArgs(SearchBaseArgs):
 class FindFunction(SearchBaseAction):
     args_schema: Type[ActionArguments] = FindFunctionArgs
 
-    
     def _search(self, args: FindFunctionArgs) -> SearchCodeResponse:
         logger.info(
             f"{self.name}: {args.function_name} (class_name: {args.class_name}, file_pattern: {args.file_pattern})"

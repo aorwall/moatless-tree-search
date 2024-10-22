@@ -1,8 +1,10 @@
 from abc import ABC, abstractmethod
 from typing import Optional, Dict
 
+from pydantic import BaseModel, Field
 
-class Repository(ABC):
+
+class Repository(BaseModel, ABC):
     @abstractmethod
     def get_file_content(self, file_path: str) -> Optional[str]:
         pass
@@ -18,8 +20,7 @@ class Repository(ABC):
 
 
 class InMemRepository(Repository):
-    def __init__(self, files: Dict[str, str] | None = None):
-        self.files = files or {}
+    files: Dict[str, str] = Field(default_factory=dict)
 
     def get_file_content(self, file_path: str) -> Optional[str]:
         return self.files.get(file_path)
@@ -29,3 +30,10 @@ class InMemRepository(Repository):
 
     def save_file(self, file_path: str, updated_content: str):
         self.files[file_path] = updated_content
+
+    def model_dump(self) -> Dict:
+        return {"files": self.files}
+
+    @classmethod
+    def model_validate(cls, obj: Dict):
+        return cls(files=obj.get("files", {}))

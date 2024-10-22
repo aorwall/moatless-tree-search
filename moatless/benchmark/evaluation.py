@@ -9,9 +9,10 @@ import time
 import traceback
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Optional, Any
+from typing import Optional, Any, List
 
 import litellm
+from pydantic import BaseModel, Field
 from tqdm.auto import tqdm
 
 from moatless.agent.code_agent import CodingAgent
@@ -21,14 +22,110 @@ from moatless.benchmark.report import (
     create_sha256_hash,
 )
 from moatless.benchmark.swebench import (
-    load_instance,
-    create_workspace,
+    create_repository,
+    create_index,
 )
-from moatless.settings import TreeSearchSettings, Settings, ModelSettings
+from moatless.benchmark.utils import get_moatless_instance
+from moatless.completion.completion import CompletionModel, LLMResponseFormat
+from moatless.discriminators import MeanAwardDiscriminator
+from moatless.feedback import FeedbackGenerator
 from moatless.search_tree import SearchTree
+from moatless.selector import BestFirstSelector, SoftmaxSelector
+from moatless.templates import create_coding_actions
 from moatless.value_function import ValueFunction
 
 logger = logging.getLogger(__name__)
+
+
+class ModelSettings(BaseModel):
+    model: str = Field(
+        ...,
+        description="The model to use for completions.",
+    )
+    temperature: float = Field(
+        0.0,
+        description="The temperature to use for completions.",
+    )
+    base_url: Optional[str] = Field(
+        None,
+        description="The base URL for the model API.",
+    )
+    api_key: Optional[str] = Field(
+        None,
+        description="The API key for the model API.",
+    )
+    response_format: Optional[LLMResponseFormat] = Field(
+        None,
+        description="The response format for the model API.",
+    )
+
+
+class TreeSearchSettings(BaseModel):
+    max_expansions: int = Field(
+        1,
+        description="The maximum number of expansions of one state.",
+    )
+
+    max_iterations: int = Field(
+        25,
+        description="The maximum number of iterations to run the tree search.",
+    )
+
+    max_cost: float = Field(
+        0.5,
+        description="The maximum cost spent on token before finishing.",
+    )
+
+    model: Optional[ModelSettings] = Field(
+        default=None,
+        description="The default model.",
+    )
+
+    agent_model: Optional[ModelSettings] = Field(
+        default=None,
+        description="The model the agent will use.",
+    )
+
+    value_function_model: Optional[ModelSettings] = Field(
+        None,
+        description="The model to use for building actions.",
+    )
+
+    min_finished_nodes: Optional[int] = Field(
+        None,
+        description="The minimum number of finished nodes to consider before finishing",
+    )
+
+    reward_threshold: Optional[int] = Field(
+        100,
+        description="The min reward threshold to consider before finishing.",
+    )
+
+    provide_feedback: bool = Field(
+        False,
+        description="Whether to provide feedback from previosly evaluated transitions.",
+    )
+
+    debate: bool = Field(
+        False,
+        description="Whether to debate the rewards to transitions.",
+    )
+
+    best_first: bool = Field(
+        True,
+        description="Whether to use best first search.",
+    )
+
+    exploration_constant: float = Field(
+        1.41,
+        description="The exploration constant for UCT.",
+    )
+
+    max_depth: int = Field(
+        20,
+        description="The maximum depth for one trajectory in simulations.",
+    )
+
 
 
 class Evaluation:
@@ -169,7 +266,7 @@ class Evaluation:
         dataset: str = "princeton-nlp/SWE-bench_Lite",
         split="test",
     ) -> BenchmarkResult:
-        instance = load_instance(instance_id, dataset, split)
+        instance = get_moatless_instance(instance_id, split)
         return self.evaluate_instance(instance)
 
     def evaluate_instance(self, instance: dict):
@@ -205,14 +302,6 @@ class Evaluation:
         try:
             search_tree = None
 
-            workspace = create_workspace(
-                instance,
-                repo_base_dir=self.repo_base_dir,
-                use_perfect_file_context=self.use_perfect_file_context,
-                max_file_context_tokens=self.max_file_context_tokens,
-                use_testbed=self.use_testbed,
-                log_dir=log_dir,
-            )
             if os.path.exists(trajectory_path):
                 persisted_tree = SearchTree.from_file(trajectory_path)
                 if persisted_tree.is_finished():
@@ -229,22 +318,56 @@ class Evaluation:
                     "instance_id": instance["instance_id"],
                 }
 
-                if os.path.exists(trajectory_path):
-                    search_tree = SearchTree.from_file(trajectory_path, workspace)
+                repository = create_repository(instance, repo_base_dir=self.repo_base_dir)
+                code_index = create_index(instance, repository=repository)
+
+                if self.use_testbed:
+                    from testbed.sdk import TestbedSDK
+                    from moatless.runtime.testbed import TestbedEnvironment
+                    runtime = TestbedEnvironment(
+                        testbed_sdk=TestbedSDK(),
+                        repository=repository,
+                        instance=instance,
+                        log_dir=log_dir,
+                    )
                 else:
+                    runtime = None
 
-                    instance = load_instance("django__django-16379")
-                    workspace = create_workspace(instance)
+                if os.path.exists(trajectory_path):
+                    search_tree = SearchTree.from_file(trajectory_path, repository=repository, runtime=runtime, code_index=code_index)
+                else:
+                    instance = get_moatless_instance("django__django-16379")
 
-                    agent = CodingAgent(workspace=workspace, model_settings=self.settings.agent_model)
-                    value_function = ValueFunction(model_settings=self.settings.value_function_model)
+                    actions = create_coding_actions(repository=repository, code_index=code_index, runtime=runtime, edit_completion_model=self._create_completion_model())
+                    agent = CodingAgent(
+                        completion=self._create_completion_model(self.settings.agent_model), actions=actions
+                    )
+
+                    if self.settings.best_first:
+                        selector = BestFirstSelector()
+                    else:
+                        selector = SoftmaxSelector()
+
+                    value_function = ValueFunction(
+                        completion=self._create_completion_model(self.settings.value_function_model)
+                    )
+                    feedback = FeedbackGenerator()
+                    discriminator = MeanAwardDiscriminator()
 
                     search_tree = SearchTree(
                         message=problem_statement,
                         workspace=workspace,
                         agent=agent,
+                        selector=selector,
                         value_function=value_function,
-                        settings=self.settings,
+                        feedback=feedback,
+                        discriminator=discriminator,
+                        max_expansions=self.settings.max_expansions,
+                        max_iterations=self.settings.max_iterations,
+                        max_cost=self.settings.max_cost,
+                        min_finished_nodes=self.settings.min_finished_nodes,
+                        rewards_threshold=self.settings.reward_threshold,
+                        max_depth=self.settings.max_depth,
                         metadata=metadata,
                         persist_path=trajectory_path,
                     )
@@ -368,6 +491,16 @@ class Evaluation:
             with open(self.predictions_path, "a") as file:
                 json_string = json.dumps(prediction)
                 file.write(json_string + "\n")
+
+    def _create_completion_model(self, model_settings: ModelSettings | None = None) -> CompletionModel:
+        model_settings = model_settings or self.settings.model
+        return CompletionModel(
+            model_settings=model_settings.model,
+            temperature=model_settings.temperature,
+            model_base_url=model_settings.base_url,
+            model_api_key=model_settings.api_key,
+            response_format=model_settings.response_format
+        )
 
     def _to_csv_report(self, results: list[BenchmarkResult]):
         df = to_dataframe(results, self.report_mode)

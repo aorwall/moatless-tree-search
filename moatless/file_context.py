@@ -723,17 +723,14 @@ class ContextFile(BaseModel):
 
 
 class FileContext(BaseModel):
-    _repo: Repository = PrivateAttr()
+    _repo: Repository | None = PrivateAttr(None)
     _files: Dict[str, ContextFile] = PrivateAttr(default_factory=dict)
     _max_tokens: int = PrivateAttr(default=8000)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def __init__(self, repo: Repository, **data):
+    def __init__(self, repo: Repository | None, **data):
         super().__init__(**data)
-
-        if not repo:
-            raise ValueError("No repo set")
 
         self._repo = repo
         if "_files" not in self.__dict__:
@@ -745,7 +742,7 @@ class FileContext(BaseModel):
     def from_dir(cls, repo_dir: str, max_tokens: int = 8000):
         from moatless.repository.file import FileRepository
 
-        repo = FileRepository(repo_dir)
+        repo = FileRepository(repo_path=repo_dir)
         instance = cls(max_tokens=max_tokens, repo=repo)
         return instance
 
@@ -762,9 +759,11 @@ class FileContext(BaseModel):
         return cls.from_dict(data, repo_dir=repo_dir)
 
     @classmethod
-    def from_dict(cls, data: Dict, repo_dir: str | None = None, repo: Repository | None = None):
-        if not repo:
-            repo = FileRepository(repo_dir)
+    def from_dict(
+        cls, data: Dict, repo_dir: str | None = None, repo: Repository | None = None
+    ):
+        if not repo and repo_dir:
+            repo = FileRepository(repo_path=repo_dir)
         instance = cls(max_tokens=data.get("max_tokens", 8000), repo=repo)
         instance.load_files_from_dict(data.get("files", []))
         return instance

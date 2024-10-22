@@ -4,46 +4,37 @@ from typing import Optional, List
 
 import litellm
 
+from moatless.completion.completion import CompletionModel
+from moatless.completion.model import UserMessage
 from moatless.repository.file import FileRepository
-from moatless.settings import Settings
 from moatless.utils.repo import maybe_clone, checkout_commit, clone_and_checkout
+from pydantic import Field
 
 logger = logging.getLogger(__name__)
 
 
 class GitRepository(FileRepository):
-    def __init__(
-        self,
-        repo_path: str,
-        git_repo_url: Optional[str] = None,
-        commit: Optional[str] = None,
-        generate_commit_message: bool = False,
-    ):
-        super().__init__(repo_path)
-        self._repo_path = repo_path
-        self._repo_url = git_repo_url
+    repo_url: Optional[str] = Field(default=None, alias="git_repo_url")
+    generate_commit_message: bool = Field(default=False)
+    completion: Optional[CompletionModel] = None
+    current_commit: str = Field(default="")
+    current_diff: Optional[str] = None
+    initial_commit: str = Field(default="")
+
+    def __init__(self, **data):
+        super().__init__(**data)
         from git import Repo
 
-        self._repo = Repo(path=repo_path)
-        self._generate_commit_message = generate_commit_message
+        self._repo = Repo(path=self.repo_path)
 
         if not self._repo.heads:
-            logger.error(f"Repo at {repo_path} has no branches")
-            # TODO: Fail?
+            logger.error(f"Repo at {self.repo_path} has no branches")
 
-        # TODO: Add support for branches
-        # self._current_branch = self._repo.active_branch.name
+        if data.get("commit"):
+            checkout_commit(self.repo_path, data["commit"])
 
-        # TODO: Check if current branch is mainline
-
-        # TODO: Check if repo is dirty
-
-        if commit:
-            checkout_commit(repo_path, commit)
-
-        self._current_commit = self._repo.head.commit.hexsha
-        self._current_diff = None
-        self._initial_commit = self._current_commit
+        self.current_commit = self._repo.head.commit.hexsha
+        self.initial_commit = self.current_commit
 
     @classmethod
     def from_repo(cls, git_repo_url: str, repo_path: str, commit: Optional[str] = None):
@@ -67,17 +58,17 @@ class GitRepository(FileRepository):
         )
 
     def restore_from_snapshot(self, snapshot: dict):
-        self._current_commit = snapshot["commit"]
+        self.current_commit = snapshot["commit"]
 
         if snapshot.get("patch"):
-            self._current_diff = snapshot["patch"]
+            self.current_diff = snapshot["patch"]
 
         try:
             self.clean_untracked_files()
             self._repo.git.reset("--hard", "HEAD")  # Discard all local changes
-            self._repo.git.checkout("-f", self._current_commit)  # Force checkout
+            self._repo.git.checkout("-f", self.current_commit)  # Force checkout
         except Exception as e:
-            logger.error(f"Error checking out commit {self._current_commit}: {e}")
+            logger.error(f"Error checking out commit {self.current_commit}: {e}")
 
         # TODO: Check diff and only reset changed files
 
@@ -91,14 +82,14 @@ class GitRepository(FileRepository):
     def dict(self):
         return {
             "type": "git",
-            "repo_path": self._repo_path,
-            "git_repo_url": self._repo_url,
-            "commit": self._initial_commit,
+            "repo_path": self.repo_path,
+            "git_repo_url": self.repo_url,
+            "commit": self.initial_commit,
         }
 
     def snapshot(self) -> dict:
         return {
-            "commit": self._current_commit,
+            "commit": self.current_commit,
             "patch": self.diff(),
         }
 
@@ -120,10 +111,10 @@ class GitRepository(FileRepository):
             else:
                 self._repo.index.add("*")
             self._repo.index.commit(commit_message)
-            self._current_commit = self._repo.head.commit.hexsha
+            self.current_commit = self._repo.head.commit.hexsha
 
             logger.info(
-                f"Committed changes to git with message '{commit_message}' and commit hash '{self._current_commit}'"
+                f"Committed changes to git with message '{commit_message}' and commit hash '{self.current_commit}'"
             )
             self.clean_untracked_files()  # Clean untracked files after commit
         except FileNotFoundError as e:
@@ -132,17 +123,17 @@ class GitRepository(FileRepository):
             )
             # Attempt to change to the repository directory
             try:
-                os.chdir(self._repo_path)
-                logger.info(f"Changed working directory to {self._repo_path}")
+                os.chdir(self.repo_path)
+                logger.info(f"Changed working directory to {self.repo_path}")
                 # Retry the commit operation
                 if file_path:
                     self._repo.index.add([file_path])
                 else:
                     self._repo.index.add("*")
                 self._repo.index.commit(commit_message)
-                self._current_commit = self._repo.head.commit.hexsha
+                self.current_commit = self._repo.head.commit.hexsha
                 logger.info(
-                    f"Successfully committed changes after changing directory. Commit hash: '{self._current_commit}'"
+                    f"Successfully committed changes after changing directory. Commit hash: '{self.current_commit}'"
                 )
             except Exception as retry_error:
                 logger.error(
@@ -160,17 +151,15 @@ class GitRepository(FileRepository):
         if not diff:
             return "No changes."
 
-        if Settings.cheap_model and self._generate_commit_message:
+        if self.completion and self.generate_commit_message:
             prompt = f"Generate a concise commit message for the following git diff"
             if file_path:
                 prompt += f" of file {file_path}"
             prompt += f":\n\n{diff}\n\nCommit message:"
 
             try:
-                response = litellm.completion(
-                    model=Settings.cheap_model,
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=50,
+                response = self.completion.create_text_completion(
+                    messages=[UserMessage(content=prompt)],
                 )
                 return response.choices[0].message.content.strip()
             except Exception as e:
@@ -180,25 +169,25 @@ class GitRepository(FileRepository):
 
     def diff(self, ignore_paths: Optional[List[str]] = None):
         logger.info(
-            f"Get diff between {self._initial_commit} and {self._current_commit}"
+            f"Get diff between {self.initial_commit} and {self.current_commit}"
         )
 
         if ignore_paths:
             exclude_patterns = [f":(exclude){path}" for path in ignore_paths]
             diff_command = [
-                self._initial_commit,
-                self._current_commit,
+                self.initial_commit,
+                self.current_commit,
                 "--",
             ] + exclude_patterns
             return self._repo.git.diff(*diff_command)
         else:
             try:
-                return self._repo.git.diff(self._initial_commit, self._current_commit)
+                return self._repo.git.diff(self.initial_commit, self.current_commit)
             except Exception as e:
                 logger.error(f"Error getting diff: {e}")
 
-            if self._current_diff:
+            if self.current_diff:
                 logger.info(f"Returning cached diff")
-                return self._current_diff
+                return self.current_diff
             else:
                 return None

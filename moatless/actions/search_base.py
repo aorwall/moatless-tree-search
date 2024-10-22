@@ -1,29 +1,31 @@
-from abc import ABC
 import logging
-from typing import List, Optional, Type
+from abc import ABC
+from typing import List, Optional, Type, Any, Dict
 
 from pydantic import Field, PrivateAttr
 
 from moatless.actions.action import Action
-from moatless.actions.model import ActionArguments, ActionOutput
+from moatless.actions.model import ActionArguments, Observation
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.index.types import SearchCodeResponse
 from moatless.repository.repository import Repository
-from moatless.schema import RewardScaleEntry
+from moatless.value_function.model import RewardScaleEntry
 
 logger = logging.getLogger(__name__)
 
-class SearchBaseArgs(ActionArguments, ABC):
 
+class SearchBaseArgs(ActionArguments, ABC):
     file_pattern: Optional[str] = Field(
         default=None,
         description="A glob pattern to filter search results to specific files or directories.",
     )
 
+
 class SearchBaseAction(Action):
     args_schema: Type[ActionArguments] = SearchBaseArgs
 
+    # TODO: Should be fields
     _max_search_tokens: int = 1000
     _max_hits: int = 5
 
@@ -35,7 +37,9 @@ class SearchBaseAction(Action):
         self._repository = repository
         self._code_index = code_index
 
-    def execute(self, args: SearchBaseArgs, file_context: FileContext | None = None) -> ActionOutput:
+    def execute(
+        self, args: SearchBaseArgs, file_context: FileContext | None = None
+    ) -> Observation:
         if file_context is None:
             raise ValueError(
                 "File context must be provided to execute the search action."
@@ -49,14 +53,14 @@ class SearchBaseAction(Action):
             if alternative_suggestion.hits:
                 search_result.message += f" But found {len(alternative_suggestion.hits)} alternative suggestions."
                 extra = self._select_span_response_prompt(alternative_suggestion)
-                return ActionOutput(
+                return Observation(
                     message=search_result.message,
                     extra=extra,
                     properties=properties,
                     expect_correction=True,
                 )
             else:
-                return ActionOutput(
+                return Observation(
                     message=search_result.message, properties=properties
                 )
 
@@ -83,7 +87,7 @@ class SearchBaseAction(Action):
             )
 
             extra = self._select_span_response_prompt(search_result)
-            return ActionOutput(
+            return Observation(
                 message=message,
                 extra=extra,
                 properties=properties,
@@ -98,10 +102,10 @@ class SearchBaseAction(Action):
                 search_hit_str += f"\n  - {span.span_id}"
 
         message += f"\n{search_hit_str}"
-        return ActionOutput(message=message, properties=properties)
+        return Observation(message=message, properties=properties)
 
     def _select_span_response_prompt(self, search_result: SearchCodeResponse) -> str:
-        search_result_context = FileContext(repository=self._repository)
+        search_result_context = FileContext(repo=self._repository)
         for hit in search_result.hits:
             for span in hit.spans:
                 search_result_context.add_span_to_context(
@@ -142,18 +146,77 @@ class SearchBaseAction(Action):
 
     def get_reward_scale(self, trajectory_length) -> List[RewardScaleEntry]:
         if trajectory_length <= 3:
-            return self.generate_reward_scale_entries([
-                (90, 100, "The search action is excellent, with well-defined parameters yielding only highly relevant results."),
-                (75, 89, "The search action is good, with reasonable parameters yielding relevant results."),
-                (25, 74, "The search action have issues with parameters or yields few or no relevant results."),
-                (0, 24, "The action is counterproductive, with search results that are entirely irrelevant or excessively large, causing setbacks."),
-            ])
+            return self.generate_reward_scale_entries(
+                [
+                    (
+                        90,
+                        100,
+                        "The search action is excellent, with well-defined parameters yielding only highly relevant results.",
+                    ),
+                    (
+                        75,
+                        89,
+                        "The search action is good, with reasonable parameters yielding relevant results.",
+                    ),
+                    (
+                        25,
+                        74,
+                        "The search action have issues with parameters or yields few or no relevant results.",
+                    ),
+                    (
+                        0,
+                        24,
+                        "The action is counterproductive, with search results that are entirely irrelevant or excessively large, causing setbacks.",
+                    ),
+                ]
+            )
         else:
-            return self.generate_reward_scale_entries([
-                (90, 100, "The search action significantly advances the solution, providing highly relevant and appropriately sized search results."),
-                (75, 89, "The search action contributes positively towards solving the problem, with relevant results and minor issues."),
-                (50, 74, "The search action is acceptable but may have issues with relevance or provides search results that are too large or too small."),
-                (25, 49, "The search action provides results that are not helpful due to relevance or size issues."),
-                (0, 24, "The search action has minimal impact, providing few relevant results."),
-                (-50, -1, "The action is counterproductive, with search results that are entirely irrelevant or excessively large, causing setbacks."),
-            ])
+            return self.generate_reward_scale_entries(
+                [
+                    (
+                        90,
+                        100,
+                        "The search action significantly advances the solution, providing highly relevant and appropriately sized search results.",
+                    ),
+                    (
+                        75,
+                        89,
+                        "The search action contributes positively towards solving the problem, with relevant results and minor issues.",
+                    ),
+                    (
+                        50,
+                        74,
+                        "The search action is acceptable but may have issues with relevance or provides search results that are too large or too small.",
+                    ),
+                    (
+                        25,
+                        49,
+                        "The search action provides results that are not helpful due to relevance or size issues.",
+                    ),
+                    (
+                        0,
+                        24,
+                        "The search action has minimal impact, providing few relevant results.",
+                    ),
+                    (
+                        -50,
+                        -1,
+                        "The action is counterproductive, with search results that are entirely irrelevant or excessively large, causing setbacks.",
+                    ),
+                ]
+            )
+
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        dump = super().model_dump(**kwargs)
+        dump["code_index"] = self._code_index.dict()
+        dump["repository"] = self._repository.model_dump()
+        return dump
+
+    @classmethod
+    def model_validate(cls, obj: Any) -> "SearchBaseAction":
+        if isinstance(obj, dict):
+            obj = obj.copy()
+            code_index = CodeIndex(**obj.pop("code_index", {}))
+            repository = Repository.model_validate(obj.pop("repository", {}))
+            return cls(code_index=code_index, repository=repository, **obj)
+        return super().model_validate(obj)

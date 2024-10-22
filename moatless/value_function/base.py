@@ -1,27 +1,28 @@
 import logging
 from typing import List, Optional, Tuple
 
+from pydantic import BaseModel, PrivateAttr
 
 from moatless.completion.completion import CompletionModel
 from moatless.completion.model import Message, UserMessage, Completion
 from moatless.node import Node, Reward
-from moatless.schema import RewardScaleEntry
-from moatless.settings import ModelSettings, Settings
+from moatless.value_function.model import RewardScaleEntry
 
 logger = logging.getLogger(__name__)
 
-class ValueFunction:
-    def __init__(
-        self, model_settings: ModelSettings | None = None
-    ):
-        model_settings = model_settings or Settings.default_model
-        self.completion = CompletionModel.from_settings(model_settings)
+
+class ValueFunction(BaseModel):
+    _completion: CompletionModel = PrivateAttr()
+
+    def __init__(self, completion: CompletionModel):
+        super().__init__()
+        self._completion = completion
 
     def get_reward(self, node: Node) -> Tuple[Reward, Optional[Completion]]:
         message = self._create_message(node)
         system_prompt = self._create_system_prompt(node)
 
-        return self.completion.create_completion([message], system_prompt, [Reward])
+        return self._completion.create_completion([message], system_prompt, [Reward])
 
     def _create_system_prompt(self, node: Node) -> str:
         return self._build_system_prompt(node)
@@ -43,8 +44,8 @@ class ValueFunction:
                 )
                 formatted_state += previous_node.action.to_prompt()
 
-                if previous_node.output:
-                    formatted_state += f"\n\nOutput: {previous_node.output.message}"
+                if previous_node.observation:
+                    formatted_state += f"\n\nOutput: {previous_node.observation.message}"
                     formatted_history.append(formatted_state)
                 else:
                     logger.warning(f"No output found for Node{previous_node.node_id}")
@@ -62,9 +63,9 @@ class ValueFunction:
             message += "## Last Executed Action:\n"
             message += "\n\n<executed_action>\n"
             message += node.action.to_prompt()
-            message += f"\n\n**Output:**\n{node.output.message}"
-            if node.output.extra:
-                message += f"\n{node.output.extra}"
+            message += f"\n\n**Output:**\n{node.observation.message}"
+            if node.observation.extra:
+                message += f"\n{node.observation.extra}"
             message += "\n</executed_action>\n\n"
 
         message += "\n<file_context>\n"
@@ -156,3 +157,15 @@ class ValueFunction:
                 formatted_scale += f"* **{entry.min_value} to {entry.max_value}**: {entry.description}\n"
 
         return formatted_scale
+
+    def model_dump(self, **kwargs):
+        dump = super().model_dump(**kwargs)
+        dump["completion"] = self._completion.model_dump() if self._completion else None
+        return dump
+
+    @classmethod
+    def model_validate(cls, obj):
+        completion = None
+        if "completion" in obj and obj["completion"]:
+            completion = CompletionModel.model_validate(obj["completion"])
+        return cls(completion=completion)

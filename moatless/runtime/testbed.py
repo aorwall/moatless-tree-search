@@ -5,10 +5,12 @@ import re
 from datetime import datetime
 from typing import List
 
+from moatless.runtime.runtime import RuntimeEnvironment
+
 from moatless.file_context import RankedFileSpan, FileContext
 from moatless.repository import GitRepository
-from moatless.schema import TestResult, TestStatus
-from moatless.verify.verify import RuntimeEnvironment
+from moatless.repository.repository import Repository
+from moatless.runtime.runtime import TestResult, TestStatus
 from testbed.schema import EvaluationResult, TraceItem
 from testbed.sdk import TestbedSDK
 
@@ -19,10 +21,13 @@ class TestbedEnvironment(RuntimeEnvironment):
     def __init__(
         self,
         testbed_sdk: TestbedSDK,
-        repository: GitRepository,
+        repository: Repository,
         instance: dict = None,
         log_dir: str | None = None,
+        **kwargs
     ):
+        super().__init__(**kwargs)
+
         self.testbed_sdk = testbed_sdk
         self.repository = repository
         self.instance = instance
@@ -262,7 +267,7 @@ class TestbedEnvironment(RuntimeEnvironment):
                 if len(failure_sections) > 1:
                     # skip tests with the same root cause
                     hashed_section = self._hash_output(failure_sections[-1])
-                elif trace_items and trace_items[0].output:
+                elif trace_items and trace_items[0].observation:
                     hashed_section = hashlib.sha256(
                         (str(trace_items[0])).encode()
                     ).hexdigest()

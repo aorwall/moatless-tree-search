@@ -6,7 +6,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional
 
 import requests
 from llama_index.core import SimpleDirectoryReader
@@ -18,6 +18,7 @@ from llama_index.core.vector_stores.types import (
     BasePydanticVectorStore,
     VectorStoreQuery,
 )
+from pydantic import BaseModel
 from rapidfuzz import fuzz
 
 from moatless.codeblocks import CodeBlock, CodeBlockType
@@ -31,6 +32,7 @@ from moatless.index.types import (
     SearchCodeResponse,
 )
 from moatless.repository import FileRepository
+from moatless.repository.repository import Repository
 from moatless.schema import FileWithSpans
 from moatless.utils.tokenizer import count_tokens
 
@@ -52,7 +54,7 @@ def default_vector_store(settings: IndexSettings):
 class CodeIndex:
     def __init__(
         self,
-        file_repo: FileRepository,
+        file_repo: Repository,
         index_name: Optional[str] = None,
         vector_store: BasePydanticVectorStore | None = None,
         docstore: DocumentStore | None = None,
@@ -89,7 +91,7 @@ class CodeIndex:
         )
 
     @classmethod
-    def from_persist_dir(cls, persist_dir: str, file_repo: FileRepository, **kwargs):
+    def from_persist_dir(cls, persist_dir: str, file_repo: Repository, **kwargs):
         vector_store = SimpleFaissVectorStore.from_persist_dir(persist_dir)
         docstore = SimpleDocumentStore.from_persist_dir(persist_dir)
 
@@ -146,7 +148,7 @@ class CodeIndex:
     def from_index_name(
         cls,
         index_name: str,
-        file_repo: FileRepository,
+        file_repo: Repository,
         index_store_dir: Optional[str] = None,
     ):
         if not index_store_dir:
@@ -639,7 +641,6 @@ class CodeIndex:
                 best_match_score = score
 
         return best_match
-
 
     def _create_search_hit(self, file: FileWithSpans, rank: int = 0):
         file_hit = SearchCodeHit(file_path=file.file_path)

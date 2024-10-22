@@ -3,6 +3,7 @@ import logging
 import os
 import random
 import string
+from enum import Enum
 from typing import Optional, Union, List, Tuple
 
 import instructor
@@ -10,19 +11,22 @@ import litellm
 import openai
 from anthropic import Anthropic, AnthropicBedrock, NOT_GIVEN
 from anthropic.types import ToolUseBlock
-from anthropic.types.tool_result_block_param import Content
 from instructor import OpenAISchema
 from instructor.exceptions import InstructorRetryException
 from litellm.types.utils import ModelResponse
 from openai import AzureOpenAI, OpenAI, LengthFinishReasonError
 from pydantic import BaseModel, Field, model_validator
 
-from moatless.actions.action import Action
-from moatless.actions.model import ActionArguments
 from moatless.completion.model import Message, Completion
-from moatless.settings import ModelSettings, LLMResponseFormat
 
 logger = logging.getLogger(__name__)
+
+
+class LLMResponseFormat(str, Enum):
+    TOOLS = "tool_call"
+    JSON = "json"
+    ANTHROPIC_TOOLS = "anthropic_tools"
+    STRUCTURED_OUTPUT = "structured_output"
 
 
 class CompletionModel(BaseModel):
@@ -43,20 +47,6 @@ class CompletionModel(BaseModel):
     stop_words: Optional[list[str]] = Field(
         default=None, description="The stop words to use for completion"
     )
-
-    @classmethod
-    def from_settings(cls, settings: ModelSettings):
-        if not settings:
-            raise ValueError(
-                "Model settings must be provided or set in the default settings."
-            )
-        return cls(
-            model=settings.model,
-            temperature=settings.temperature,
-            model_base_url=settings.base_url,
-            model_api_key=settings.api_key,
-            # response_format=settings.response_format
-        )
 
     @model_validator(mode="after")
     def validate_response_format(self):
@@ -398,7 +388,8 @@ class CompletionModel(BaseModel):
         tools = []
         if actions:
             for action in actions:
-                tools.append(openai.pydantic_function_tool(action))
+                schema = action.openai_schema
+                tools.append(openai.pydantic_function_tool(action, name=schema["name"], description=schema["description"]))
 
         try:
             if actions:
@@ -462,7 +453,10 @@ class CompletionModel(BaseModel):
             return action_request, completion_response
 
     def _anthropic_completion(
-        self, messages: list[dict], system_prompt: str | None = None, actions: List[type[OpenAISchema]] | None = None
+        self,
+        messages: list[dict],
+        system_prompt: str | None = None,
+        actions: List[type[OpenAISchema]] | None = None,
     ) -> Tuple[OpenAISchema, Message]:
         if self.model.startswith("anthropic"):
             anthropic_client = AnthropicBedrock()
@@ -474,7 +468,7 @@ class CompletionModel(BaseModel):
             tool_choice = {"type": "any"}
             for action in actions:
                 tools.append(action.anthropic_schema)
-        else:   
+        else:
             tools = NOT_GIVEN
             tool_choice = NOT_GIVEN
 
@@ -522,7 +516,6 @@ class CompletionModel(BaseModel):
                 f"Failed to parse action request from completion response. Completion: {completion_response}"
             )
             raise e
-
 
     def _map_completion_messages(self, messages: list[Message]) -> list[dict]:
         tool_call_id = None
@@ -643,6 +636,20 @@ class CompletionModel(BaseModel):
             return tool_call.function.name, tool_dict
 
         return None
+
+    def model_dump(self, **kwargs):
+        dump = super().model_dump(**kwargs)
+        if "model_api_key" in dump:
+            dump["model_api_key"] = None
+        if "response_format" in dump:
+            dump["response_format"] = dump["response_format"].value
+        return dump
+
+    @classmethod
+    def model_validate(cls, obj):
+        if isinstance(obj, dict) and "response_format" in obj:
+            obj["response_format"] = LLMResponseFormat(obj["response_format"])
+        return super().model_validate(obj)
 
 
 def generate_call_id():
