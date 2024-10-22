@@ -4,7 +4,7 @@ import os
 import random
 import string
 from enum import Enum
-from typing import Optional, Union, List, Tuple
+from typing import Optional, Union, List, Tuple, Any
 
 import instructor
 import litellm
@@ -111,7 +111,8 @@ class CompletionModel(BaseModel):
             raise e
         except Exception as e:
             logger.warning(
-                f"Failed to get completion response from LLM. {e}. Input messages:\n {json.dumps(completion_messages, indent=2)}"
+                f"Failed to get completion response from LLM. {e}."
+                f"Input messages:\n {json.dumps(completion_messages, indent=2)}"
             )
             raise e
 
@@ -221,12 +222,15 @@ class CompletionModel(BaseModel):
     def create_text_completion(self, messages: List[Message], system_prompt: str):
         completion_messages = self._map_completion_messages(messages)
 
-        if self.response_format != LLMResponseFormat.ANTHROPIC_TOOLS:
+        if self.response_format == LLMResponseFormat.ANTHROPIC_TOOLS:
+            response, completion_response = self._anthropic_completion(
+                completion_messages, system_prompt
+            )
+        else:
             completion_messages.insert(0, {"role": "system", "content": system_prompt})
-
-        response, completion_response = self._litellm_text_completion(
-            completion_messages
-        )
+            response, completion_response = self._litellm_text_completion(
+                completion_messages
+            )
 
         completion = Completion.from_llm_completion(
             input_messages=completion_messages,
@@ -457,7 +461,7 @@ class CompletionModel(BaseModel):
         messages: list[dict],
         system_prompt: str | None = None,
         actions: List[type[OpenAISchema]] | None = None,
-    ) -> Tuple[OpenAISchema, Message]:
+    ) -> Tuple[OpenAISchema | str, Any]:
         if self.model.startswith("anthropic"):
             anthropic_client = AnthropicBedrock()
         else:
@@ -491,25 +495,25 @@ class CompletionModel(BaseModel):
         try:
             if not actions:
                 return completion_response.content[0].text, completion_response
-            else:
-                for block in completion_response.content:
-                    if isinstance(block, ToolUseBlock):
-                        action = None
-                        for action in actions:
-                            if action.name == block.name:
-                                action = action
-                                break
+            for block in completion_response.content:
+                if isinstance(block, ToolUseBlock):
+                    action = None
+                    for check_action in actions:
+                        logger.info(f"Checking action {check_action.name} == {block.name}")
+                        if check_action.name == block.name:
+                            action = check_action
+                            break
 
-                        if not action:
-                            raise ValueError(f"Unknown action {block.name}")
+                    if not action:
+                        raise ValueError(f"Unknown action {block.name}")
 
-                        action_args = action.model_validate(block.input)
+                    action_args = action.model_validate(block.input)
 
-                        # TODO: We only support one action at the moment
-                        return action_args, completion_response
+                    # TODO: We only support one action at the moment
+                    return action_args, completion_response
 
-                    else:
-                        logger.warning(f"Unexpected block {block}]")
+                else:
+                    logger.warning(f"Unexpected block {block}]")
 
         except Exception as e:
             logger.exception(
@@ -545,6 +549,22 @@ class CompletionModel(BaseModel):
                                     "tool_use_id": tool_call_id,
                                     "content": message.content,
                                     "type": "tool_result",
+                                }
+                            ],
+                        }
+                    )
+                elif tool_call_id and self.response_format in [
+                    LLMResponseFormat.ANTHROPIC_TOOLS,
+                ]:
+                    completion_messages.append(
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "tool_use_id": tool_call_id,
+                                    "content": message.content,
+                                    "type": "tool_result",
+                                    # FIME "cache_control": {"type": "ephemeral"}
                                 }
                             ],
                         }

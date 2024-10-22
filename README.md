@@ -1,18 +1,21 @@
 ## Description of the Flow
 The search algorithm operates in a loop, following these main steps to explore and evaluate possible actions:
 
- * **Selection:** Choose the next `Node` to expand using a `Selector` strategy. The selector evaluates the available nodes (usually expandable descendants) and selects the most promising one based on predefined criteria like visit count, value estimates, or heuristics.
- * **Action Generation:**
-   * **Feedback Generation:** Before generating an action for the selected `Node`, use a `FeedbackGenerator` to provide insights or guidance based on the current node's state.
-   * **Action Generation**: Use an `Agent` to generate a new action for the `Node`, utilizing the generated feedback and other contextual information. This action represents a possible step or decision in solving the problem.
- * **Simulation**:
-   * **Action Execution:** Execute the `Action` within the given context (e.g., workspace or file context). This simulates the outcome of taking that action in the environment.
-   * **Reward Evaluation:** Use a `ValueFunction` to evaluate the outcome of the action execution, assigning a reward to the `Node`. The reward reflects how favorable or successful the action's outcome is towards achieving the goal.
- * **Backpropagation:** Propagate the obtained reward back up the tree, updating the value estimates and visit counts of ancestor nodes. This process helps inform future selections by reinforcing paths that lead to better outcomes.
+1. **Selection:** Choose the next `Node` to expand using a `Selector` strategy. The selector evaluates the available nodes (expandable descendants) and selects the most promising one based on predefined criteria.
 
-When the search process finishes (based on predefined stopping criteria), the algorithm needs to determine the best solution found. This involves selecting the most promising `Node` (or trajectory) using a `Discriminator`, which assesses the nodes based on their rewards and possibly other factors.
+2. **Expansion:** Create a new child `Node` or select an existing unexecuted child.
 
-## Key Components
+3. **Simulation:**
+   * **Action Generation and Execution:** Use the `Agent` to generate and execute an action for the `Node`:
+     - Generate possible actions for the node
+     - Create a system prompt and messages based on the node's history
+     - Use a `CompletionModel` to generate action arguments
+     - Execute the chosen action, updating the node's `FileContext` and creating an `Observation`
+   * **Reward Evaluation:** If a `ValueFunction` is defined, evaluate the outcome of the action execution, assigning a reward to the `Node`.
+
+4. **Backpropagation:** Propagate the obtained reward back up the tree, updating the value estimates and visit counts of ancestor nodes.
+
+When the search process finishes (based on predefined stopping criteria), the algorithm determines the best solution found using a `Discriminator`, which assesses the nodes based on their rewards and other factors.
 
 ### Node
    
@@ -22,8 +25,8 @@ class Node(BaseModel):
     parent: Optional['Node'] = Field(None, description="The parent node")
     children: List['Node'] = Field(default_factory=list, description="The child nodes")
     is_duplicate: bool = Field(False, description="Flag to indicate if the node is a duplicate")
-    action: Optional[Action] = Field(None, description="The action associated with the node")
-    output: Optional[ActionOutput] = Field(None, description="The output of the executed action")
+    action: Optional[ActionArguments] = Field(None, description="The action associated with the node")
+    observation: Optional[Observation] = Field(None, description="The observation from the executed action")
     reward: Optional[Reward] = Field(None, description="The reward of the node")
     visits: int = Field(0, description="The number of times the node has been visited")
     value: float = Field(0.0, description="The total value (reward) of the node")
@@ -52,36 +55,46 @@ class Selector(ABC):
 ```
 
 ### Agent
+Responsible for generating and executing actions:
 
 ```python
-class Agent:
-   
-    def generate_action(self, node: Node) -> Action:
-        """
-        Generates an action for the given node, potentially using feedback.
-
-        Args:
-            node (Node): The node for which to generate an action.
-
-        Returns:
-            Action: The generated action.
-        """
-        pass
-``` 
+class Agent(BaseModel):
+    def run(self, node: Node):
+        self._generate_action(node)
+        self._execute_action(node)
+```
 
 ### Action
+Defines the structure and execution logic for different types of actions:
 
 ```python
-class Action:
-   
-   file_context: FileContext | None = None
-   workspace: Workspace | None = None
+class Action(BaseModel, ABC):
+    args_schema: Type[ActionArguments]
 
-    def execute(self) -> ActionOutput:
-        """
-        Execute the action.
-        """
-        pass
+    def execute(self, args: ActionArguments, file_context: FileContext) -> Observation:
+        message = self._execute(file_context=file_context)
+        return Observation.create(message)
+```
+
+### ActionArguments
+Defines the arguments required for each action type:
+
+```python
+class ActionArguments(OpenAISchema, ABC):
+    scratch_pad: str = Field(..., description="Your reasoning for the action.")
+```
+
+### Observation
+Represents the result of an action execution:
+
+```python
+class Observation(BaseModel):
+    message: str
+    extra: Optional[str] = None
+    terminal: bool = False
+    expect_correction: bool = False
+    properties: Optional[Dict[str, Any]] = None
+    execution_completion: Optional[Completion] = None
 ```
 
 ### ValueFunction

@@ -5,7 +5,7 @@ from abc import ABC
 from typing import Dict, Type, Any, Optional
 
 from instructor import OpenAISchema
-from instructor.utils import extract_json_from_codeblock
+from instructor.utils import extract_json_from_codeblock, classproperty
 from openai.types.chat import ChatCompletion
 from pydantic import Field, BaseModel
 
@@ -23,12 +23,12 @@ class ActionArguments(OpenAISchema, ABC):
     class Config:
         title = "Action"
 
-    @property
-    def name(self):
+    @classproperty
+    def name(cls):
         return (
-            self.Config.title
-            if hasattr(self.Config, "title")
-            else self.__class__.__name__
+            cls.Config.title
+            if hasattr(cls.Config, "title")
+            else cls.__name__
         )
 
     def to_tool_call(self) -> ToolCall:

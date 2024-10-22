@@ -26,6 +26,11 @@ def test_action_name():
     action = TestAction()
     assert action.name == "TestAction"
 
+def test_action_args_name():
+    print(FinishArgs.name)
+
+    assert FinishArgs.name == "Finish"
+
 
 def test_take_action():
     actions = [SemanticSearchArgs, RequestCodeChangeArgs, FinishArgs]
