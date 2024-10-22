@@ -2,7 +2,8 @@ import logging
 
 import pytest
 
-from moatless.actions.action import ActionOutput, Action
+from moatless.actions.action import Action
+from moatless.actions.model import Observation, ActionArguments
 from moatless.selector import Selector, BestFirstSelector, SoftmaxSelector
 from moatless.node import Node, Reward
 
@@ -22,12 +23,12 @@ def softmax_selector():
     return SoftmaxSelector()
 
 
-def test_uct_score(selector):
+def test_uct_score(best_first_selector):
     node = Node(node_id=1)
     node.visits = 10
     node.reward = Reward(value=75, explanation="Test explanation")
 
-    score = selector.uct_score(node)
+    score = best_first_selector.uct_score(node)
 
     assert isinstance(score.final_score, float)
     assert score.exploitation == 75
@@ -66,7 +67,7 @@ def test_softmax_selector(softmax_selector):
 def create_node(node_id, action_name, reward_value, expansions, visits):
     return Node(
         node_id=node_id,
-        action=Action(name=action_name),
+        action=ActionArguments(name=action_name),
         reward=Reward(value=reward_value),
         expansions=expansions,
         visits=visits,
@@ -81,7 +82,7 @@ def test_expect_correction_bonus3():
         node_id=43,
         visits=5,
         reward=Reward(value=75),
-        output=ActionOutput(expect_correction=True, message=""),
+        output=Observation(expect_correction=True, message=""),
         children=[],
     )
 

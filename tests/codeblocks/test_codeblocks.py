@@ -1,4 +1,4 @@
-from moatless.benchmark.swebench import setup_swebench_repo, create_workspace
+from moatless.benchmark.swebench import create_repository
 from moatless.benchmark.utils import get_moatless_instance
 from moatless.codeblocks.codeblocks import CodeBlockTypeGroup
 from moatless.codeblocks.parser.python import PythonParser
@@ -6,9 +6,9 @@ from moatless.codeblocks.parser.python import PythonParser
 
 def test_find_by_line_numbers():
     instance = get_moatless_instance("scikit-learn__scikit-learn-25570", split="lite")
-    workspace = create_workspace(instance)
+    repository = create_repository(instance)
 
-    file = workspace.file_repo.get_file(
+    file = repository.get_file(
         "sklearn/compose/tests/test_column_transformer.py"
     )
 

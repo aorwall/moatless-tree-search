@@ -7,6 +7,7 @@ import pandas as pd
 
 import streamlit as st
 from dotenv import load_dotenv
+from streamlit.runtime.uploaded_file_manager import UploadedFile
 
 from moatless.benchmark.report import generate_report
 from moatless.streamlit.shared import trajectory_table
@@ -74,7 +75,7 @@ def tree_table(directory_path: str):
     df = pd.DataFrame(data)
     st.dataframe(df)
 
-    selected_indices = st.multiselect("Select trees to visualize:", df.index)
+    selected_indices = st.multiselect("Select trees to visualize:", df.index, key="tree_select")
     if selected_indices:
         selected_tree_path = df.loc[selected_indices[0], "Path"]
         st.session_state.search_tree = get_search_tree(selected_tree_path).root
@@ -82,35 +83,48 @@ def tree_table(directory_path: str):
 
 if __name__ == "__main__":
     args = parse_args()
-    moatless_dir = args.moatless_dir
+    
+    # Check if path is in query params
+    if "path" in st.query_params:
+        file_path = st.query_params["path"]
+    else:
+        file_path = None
 
-    st.sidebar.text(f"Using Moatless directory: {moatless_dir}")
+    if not file_path:
+        st.sidebar.text("Please provide a file path.")
+        file_path = st.text_input("Enter the full path to your JSON file:")
+        load_button = st.button("Load File")
 
-    directories = [d for d in os.listdir(moatless_dir) if os.path.isdir(os.path.join(moatless_dir, d))]
-    directories.sort()
-
-    selected_directory = st.selectbox("Select a directory", directories)
-
-    if selected_directory:
-        selected_directory_path = os.path.join(moatless_dir, selected_directory)
-        if st.button("Regenerate Report"):
-            with st.spinner("Generating report..."):
-                generate_report(selected_directory_path)
-            st.success("Report generated successfully!")
+        if load_button and file_path:
+            # Set the path as a query parameter and rerun
+            st.query_params["path"] = file_path
             st.rerun()
+    else:
+        st.sidebar.text(f"Loading file: {file_path}")
 
-        # Check for tree_path in query params
-        if "trajectory_path" in st.query_params:
-            selected_tree_path = st.query_params["trajectory_path"]
-            if "search_tree" not in st.session_state: # TODO or st.session_state.root_node._persist_path != selected_tree_path:
-                with st.spinner(f"Loading search tree: {selected_tree_path}"):
-                    st.session_state.search_tree = get_search_tree(selected_tree_path)
-                    st.session_state.selected_tree_path = selected_tree_path
-
-        if "search_tree" in st.session_state:
-            update_visualization(container, st.session_state.search_tree, selected_tree_path)
+    if file_path:
+        if os.path.exists(file_path):
+            file_name = os.path.basename(file_path).lower()
+            
+            if file_name == "report.json":
+                # Handle as a table
+                with st.spinner("Loading report..."):
+                    df = pd.read_json(file_path)
+                    trajectory_table(df)
+            else:
+                # Handle as trajectory_path
+                with st.spinner("Loading search tree from trajectory file"):
+                    st.session_state.search_tree = SearchTree.from_file(file_path)
+                    st.session_state.selected_tree_path = file_name
+                    update_visualization(container, st.session_state.search_tree, st.session_state.selected_tree_path)
         else:
-            trajectory_table(selected_directory_path)
+            st.error("The specified file does not exist. Please check the path and try again.")
+
+    if not file_path:
+        st.info("Please provide a valid file path and click 'Load File' to begin.")
 
     if st.button("Reset Cache"):
         reset_cache()
+        # Clear the path from query params
+        st.experimental_set_query_params()
+        st.rerun()

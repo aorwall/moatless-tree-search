@@ -1,5 +1,8 @@
+import json
 import anthropic.types
-from moatless.completion import Completion, Usage
+from moatless.completion.model import Usage, Completion
+import pytest
+from moatless.completion.completion import CompletionModel, LLMResponseFormat
 
 
 class TestCompletion:
@@ -95,3 +98,23 @@ class TestCompletion:
         assert isinstance(completion.usage, Usage)
         assert completion.usage.prompt_tokens == 20
         assert completion.usage.completion_tokens == 10
+
+
+def test_serialization_deserialization():
+    model = CompletionModel(
+        model="gpt-3.5-turbo",
+        temperature=0.7,
+        max_tokens=1000,
+        response_format=LLMResponseFormat.TOOLS,
+    )
+
+    serialized = model.model_dump()
+    assert serialized["response_format"] == "tool_call"
+
+    deserialized = CompletionModel.model_validate(serialized)
+    assert deserialized.response_format == LLMResponseFormat.TOOLS
+
+    # Check if it's JSON serializable
+    json_string = json.dumps(serialized, indent=2)
+    print(json_string)
+    assert json_string  # This will raise an error if not serializable

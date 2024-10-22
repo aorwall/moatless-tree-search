@@ -22,7 +22,7 @@ def temp_git_repo(tmp_path):
 
 @pytest.fixture
 def git_repository(temp_git_repo):
-    return GitRepository(str(temp_git_repo), None)
+    return GitRepository(repo_path=str(temp_git_repo))
 
 
 def test_diff_with_ignore_paths(temp_git_repo, git_repository):

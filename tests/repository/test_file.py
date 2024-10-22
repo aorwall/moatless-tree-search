@@ -28,7 +28,7 @@ def temp_repo(tmp_path):
     (repo_dir / "docs" / "README.md").touch()
     (repo_dir / ".gitignore").touch()
 
-    return FileRepository(str(repo_dir))
+    return FileRepository(repo_path=str(repo_dir))
 
 
 def test_matching_files_basic(temp_repo):

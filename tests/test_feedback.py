@@ -1,8 +1,8 @@
 import pytest
 from moatless.feedback import FeedbackGenerator
 from moatless.node import Node, Reward
-from moatless.actions.run_tests import RunTests
-from moatless.actions.code_change import RequestCodeChange
+from moatless.actions.run_tests import RunTests, RunTestsArgs
+from moatless.actions.code_change import RequestCodeChange, RequestCodeChangeArgs
 
 
 @pytest.fixture
@@ -19,7 +19,7 @@ def test_generate_feedback_no_children(feedback_generator):
 def test_generate_feedback_run_tests(feedback_generator):
     parent_node = Node(node_id=1)
     child_node = Node(node_id=2, parent=parent_node)
-    child_node.action = RunTests(test_files=["test_file.py"])
+    child_node.action = RunTestsArgs(test_files=["test_file.py"])
     child_node.reward = Reward(value=75, explanation="Test explanation")
 
     parent_node.children.append(child_node)
@@ -31,7 +31,7 @@ def test_generate_feedback_run_tests(feedback_generator):
 
 def test_generate_feedback_code_change(feedback_generator):
     parent_node = Node(node_id=1)
-    request_code_change = RequestCodeChange(
+    request_code_change = RequestCodeChangeArgs(
         scratch_pad="Change the instantiation of CommandParser to use self.prog_name for the prog argument.",
         file_path="django/core/management/__init__.py",
         instructions="Change the instantiation of CommandParser to use self.prog_name for the prog argument.",
