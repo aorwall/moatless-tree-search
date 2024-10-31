@@ -1,22 +1,24 @@
 # Moatless Tree Search 
 
-### Code for paper [SWE-Search: Enhancing Software Agents with Monte Carlo Tree Search and Iterative Refinement](https://arxiv.org/html/2410.20285v1)
+### Code for paper [SWE-Search: Enhancing Software Agents with Monte Carlo Tree Search and Iterative Refinement](https://arxiv.org/abs/2410.20285)
 
-Note: The original development code can be found at [https://github.com/a-antoniades/swe-planner](https://github.com/a-antoniades/swe-planner). It is only intended for reproducing the results in the paper. This is a clean refactor with a modular design, which will be maintained and extended.
+Note: The original development code can be found at [github.com/a-antoniades/swe-search](https://github.com/a-antoniades/swe-search). It is only intended for reproducing the results in the paper. This is a clean refactor with a modular design, which will be maintained and extended.
+
+##
 
 <div align="center">
 
-[![License](https://img.shields.io/badge/LICENSE-APACHE_LICENSE_2.0-yellow?style=flat-square&labelColor=lightgrey)](./LICENSE)
-[![arXiv](https://img.shields.io/badge/arXiv-2408.08435-B31B1B?style=flat-square)](https://arxiv.org/html/2410.20285v1)
-[![Streamlit](https://img.shields.io/badge/STREAMLIT-7C4DFF?style=flat-square)](https://streamlit.moatless.ai/)
-[![Twitter](https://img.shields.io/badge/TWITTER-00ACEE?style=flat-square)](https://twitter.com/your-handle)
-[![YouTube](https://img.shields.io/badge/YOUTUBE-FF0000?style=flat-square)](https://www.youtube.com/watch?v=VcEHX_TNDgQ)
+[![License](https://img.shields.io/badge/License-Apache_2.0-4D9885.svg?style=flat&logo=apache)](./LICENSE)
+[![arXiv](https://img.shields.io/badge/arXiv-2408.08435-B31B1B.svg?style=flat&logo=arxiv)](https://arxiv.org/html/2410.20285v1)
+[![Streamlit](https://img.shields.io/badge/Demo-Streamlit-FF4B4B.svg?style=flat&logo=streamlit)](https://streamlit.moatless.ai/)
+[![YouTube](https://img.shields.io/badge/Video-YouTube-FF0000.svg?style=flat&logo=youtube)](https://www.youtube.com/watch?v=VcEHX_TNDgQ)
+[![Twitter](https://img.shields.io/badge/Tweet-X-1DA1F2.svg?style=flat&logo=twitter)](https://twitter.com/your-handle)
 [![Discord](https://img.shields.io/badge/DISCORD-7289DA?style=flat-square)](https://discord.gg/74VX8ppBEg)
 </div>
 
 <div align="center">
   <a href="assets/method.pdf" target="_blank">
-    <img src="./assets/method.png" alt="Method Diagram" width="90%">
+    <img src="./assets/method.png" alt="Method Diagram" width="100%">
   </a>
 
   <p>Overview of SWE-Search showing the tree search process, where states (nodes) and actions (edges) are evaluated using contextual information and value function feedback to guide expansion.</p>
@@ -256,4 +258,17 @@ search_tree = SearchTree.create(
 
 node = search_tree.run_search()
 print(node.observation.message)
+```
+
+### Citation
+```
+@misc{antoniades2024swesearchenhancingsoftwareagents,
+      title={SWE-Search: Enhancing Software Agents with Monte Carlo Tree Search and Iterative Refinement}, 
+      author={Antonis Antoniades and Albert Örwall and Kexun Zhang and Yuxi Xie and Anirudh Goyal and William Wang},
+      year={2024},
+      eprint={2410.20285},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2410.20285}, 
+}
 ```
