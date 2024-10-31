@@ -4,7 +4,7 @@ from typing import List, Type, Tuple, Dict, Any, Optional
 from pydantic import BaseModel, Field, PrivateAttr
 
 from moatless.actions.action import Action
-from moatless.actions.model import ActionArguments
+from moatless.actions.model import ActionArguments, Observation
 from moatless.actions.reject import RejectArgs
 from moatless.completion.completion import (
     CompletionModel,
@@ -30,7 +30,7 @@ class ActionAgent(BaseModel):
         self,
         system_prompt: str | None = None,
         actions: List[Action] | None = None,
-        completion: CompletionModel | None = None
+        completion: CompletionModel | None = None,
     ):
         actions = actions or []
         actions_map = {action.args_schema: action for action in actions}
@@ -81,7 +81,7 @@ class ActionAgent(BaseModel):
                 return
 
         except Exception as e:
-            logger.exception(f"Node{node.node_id}: Error generating action.")
+            logger.exception(f"Node{node.node_id}: Error generating action. Set action to Reject")
             error_message = f"Failed to generate action: {str(e)}"
             node.action = RejectArgs(
                 rejection_reason=error_message,
@@ -98,7 +98,15 @@ class ActionAgent(BaseModel):
             node.observation = action.execute(node.action, node.file_context)
 
             if node.observation.execution_completion:
-                node.completions["execute_action"] = node.observation.execution_completion
+                node.completions["execute_action"] = (
+                    node.observation.execution_completion
+                )
+        else:
+            logger.error(
+                f"Node{node.node_id}: Action {node.action} not found in action map. "
+                f"Available actions: {self._action_map.keys()}"
+            )
+            raise Exception(f"Action {node.action} not found in action map.")
 
     def _create_system_prompt(self, possible_actions: List[Action]) -> str:
         return self.system_prompt or ""
@@ -122,7 +130,9 @@ class ActionAgent(BaseModel):
                 content += previous_node.observation.message
 
             if not content:
-                logger.warning(f"Node{previous_node.node_id}: No content to add to messages")
+                logger.warning(
+                    f"Node{previous_node.node_id}: No content to add to messages"
+                )
 
             messages.append(UserMessage(content=content))
 
@@ -187,7 +197,7 @@ class ActionAgent(BaseModel):
                 error_message = (
                     "Unknown error occurred while generating action arguments"
                 )
-            raise RuntimeError(error_message) from e
+            raise Exception(error_message) from e
 
     def _determine_possible_actions(self, node: Node) -> List[Action]:
         actions = self.actions
@@ -199,11 +209,23 @@ class ActionAgent(BaseModel):
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         dump = super().model_dump(**kwargs)
         dump["completion"] = self._completion.model_dump(**kwargs)
-        dump["actions"] = [action.model_dump(**kwargs) for action in self.actions]
+        dump["actions"] = []
+        for action in self.actions:
+            action_dump = action.model_dump(**kwargs)
+            action_dump["action_class"] = (
+                f"{action.__class__.__module__}.{action.__class__.__name__}"
+            )
+            dump["actions"].append(action_dump)
         return dump
 
     @classmethod
-    def model_validate(cls, obj: Any, repository: Repository = None, runtime: Any = None, code_index: CodeIndex = None) -> "ActionAgent":
+    def model_validate(
+        cls,
+        obj: Any,
+        repository: Repository = None,
+        runtime: Any = None,
+        code_index: CodeIndex = None,
+    ) -> "ActionAgent":
         if isinstance(obj, dict):
             obj = obj.copy()
             completion_data = obj.pop("completion", None)
@@ -215,7 +237,12 @@ class ActionAgent(BaseModel):
 
             if repository:
                 actions = [
-                    Action.from_dict(action_data, repository=repository, runtime=runtime, code_index=code_index)
+                    Action.from_dict(
+                        action_data,
+                        repository=repository,
+                        runtime=runtime,
+                        code_index=code_index,
+                    )
                     for action_data in obj.get("actions", [])
                 ]
             else:

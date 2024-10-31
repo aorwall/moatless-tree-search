@@ -25,11 +25,7 @@ class ActionArguments(OpenAISchema, ABC):
 
     @classproperty
     def name(cls):
-        return (
-            cls.Config.title
-            if hasattr(cls.Config, "title")
-            else cls.__name__
-        )
+        return cls.Config.title if hasattr(cls.Config, "title") else cls.__name__
 
     def to_tool_call(self) -> ToolCall:
         return ToolCall(name=self.name, input=self.model_dump())
@@ -79,13 +75,6 @@ class ActionArguments(OpenAISchema, ABC):
                 ):
                     _action_args[name] = obj
 
-    def model_dump(self, **kwargs) -> Dict[str, Any]:
-        dump = {
-            "action_args_class": f"{self.__class__.__module__}.{self.__class__.__name__}"
-        }
-        dump.update(super().model_dump(**kwargs))
-        return dump
-
     @classmethod
     def model_validate(cls, obj: Any) -> "ActionArguments":
         if isinstance(obj, dict):
@@ -97,7 +86,7 @@ class ActionArguments(OpenAISchema, ABC):
                 action_args_class = getattr(module, class_name)
                 return action_args_class.model_validate(obj)
         return super().model_validate(obj)
-    
+
     @classmethod
     def parse_json(
         cls: type[BaseModel],
@@ -118,6 +107,7 @@ class ActionArguments(OpenAISchema, ABC):
             context=validation_context,
             strict=strict,
         )
+
 
 class RewardScaleEntry(BaseModel):
     min_value: int

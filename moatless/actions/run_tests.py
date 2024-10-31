@@ -37,7 +37,7 @@ class RunTestsArgs(ActionArguments):
 class RunTests(Action):
     args_schema = RunTestsArgs
 
-    _code_index: CodeIndex 
+    _code_index: CodeIndex
     _repository: Repository
     _runtime: RuntimeEnvironment
 
@@ -52,7 +52,6 @@ class RunTests(Action):
         self._repository = repository
         self._code_index = code_index
         self._runtime = runtime
-
 
     def execute(
         self, args: RunTestsArgs, file_context: FileContext | None = None

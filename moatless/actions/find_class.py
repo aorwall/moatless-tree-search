@@ -18,8 +18,8 @@ class FindClassArgs(SearchBaseArgs):
         ..., description="Specific class name to include in the search."
     )
 
-    @model_validator(mode='after')
-    def validate_names(self) -> 'FindClassArgs':
+    @model_validator(mode="after")
+    def validate_names(self) -> "FindClassArgs":
         if not self.class_name.strip():
             raise ValueError("class_name cannot be empty")
         return self
@@ -45,19 +45,11 @@ class FindClass(SearchBaseAction):
             args.class_name, file_pattern=args.file_pattern
         )
 
-    def _select_span_response_prompt(self, search_result: SearchCodeResponse) -> str:
-        prompt = (
+    def _select_span_instructions(self, search_result: SearchCodeResponse) -> str:
+        return (
             f"The class is too large. You must add the relevant functions to context to be able to use them. "
             f"Use the function RequestMoreContext and specify the SpanIDs of the relevant functions to add them to context.\n"
         )
-        prompt += super()._select_span_response_prompt(search_result)
-        return prompt
-
-    def _search_for_alternative_suggestion(
-        self, code_index: CodeIndex
-    ) -> SearchCodeResponse:
-        if self.file_pattern:
-            return code_index.find_class(self.class_name, file_pattern=None)
 
     def _search_for_alternative_suggestion(
         self, args: FindClassArgs

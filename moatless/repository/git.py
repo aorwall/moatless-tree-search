@@ -168,9 +168,7 @@ class GitRepository(FileRepository):
         return "Automated commit by Moatless Tools"
 
     def diff(self, ignore_paths: Optional[List[str]] = None):
-        logger.info(
-            f"Get diff between {self.initial_commit} and {self.current_commit}"
-        )
+        logger.info(f"Get diff between {self.initial_commit} and {self.current_commit}")
 
         if ignore_paths:
             exclude_patterns = [f":(exclude){path}" for path in ignore_paths]

@@ -356,9 +356,9 @@ class BestFirstSelector(Selector):
 
         # Log top nodes with detailed score breakdowns
         top_nodes = sorted_nodes[: min(len(sorted_nodes), 10)]
-        logger.info("Comparing top nodes:")
+        logger.debug("Comparing top nodes:")
         for i, (node, score) in enumerate(top_nodes):
-            logger.info(
+            logger.debug(
                 f"Node {node.node_id} - Visits: {node.visits} - "
                 f"Reward: {node.reward.value if node.reward else '-'} - "
                 f"\nScore components: {score}"

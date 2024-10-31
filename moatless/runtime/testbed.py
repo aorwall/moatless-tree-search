@@ -24,7 +24,7 @@ class TestbedEnvironment(RuntimeEnvironment):
         repository: Repository,
         instance: dict = None,
         log_dir: str | None = None,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(**kwargs)
 
@@ -52,7 +52,9 @@ class TestbedEnvironment(RuntimeEnvironment):
         log_content += f"\n\n# Patch:\n```diff\n{patch}\n```"
 
         try:
-            with self.testbed_sdk.create_client(instance_id=self.instance["instance_id"]) as testbed:
+            with self.testbed_sdk.create_client(
+                instance_id=self.instance["instance_id"]
+            ) as testbed:
                 response = testbed.run_tests(test_files=test_files, patch=patch)
 
                 if response.output:
@@ -120,7 +122,9 @@ class TestbedEnvironment(RuntimeEnvironment):
         log_content += f"Test files: {test_patch_files}"
 
         try:
-            with self.testbed_sdk.create_client(instance_id=self.instance["instance_id"]) as testbed:
+            with self.testbed_sdk.create_client(
+                instance_id=self.instance["instance_id"]
+            ) as testbed:
                 if not patch.endswith("\n"):
                     patch += "\n"
 
@@ -129,7 +133,9 @@ class TestbedEnvironment(RuntimeEnvironment):
                 evaluation_result = testbed.run_evaluation(patch=patch)
 
                 if evaluation_result.output:
-                    log_content += f"\n\n## Log:\n```\n{evaluation_result.output}\n```\n"
+                    log_content += (
+                        f"\n\n## Log:\n```\n{evaluation_result.output}\n```\n"
+                    )
 
                 log_content += f"\n\n## Evaluation result:\n```json\n{evaluation_result.model_dump_json(indent=2)}\n```"
                 return evaluation_result

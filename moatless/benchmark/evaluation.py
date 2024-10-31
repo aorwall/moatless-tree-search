@@ -331,7 +331,6 @@ class Evaluation:
             if os.path.exists(trajectory_path):
                 persisted_tree = SearchTree.from_file(trajectory_path)
                 if persisted_tree.is_finished():
-
                     logger.info(f"Found completed search tree for {instance_id}")
                     search_tree = persisted_tree
 
@@ -345,12 +344,15 @@ class Evaluation:
                     "instance_id": instance["instance_id"],
                 }
 
-                repository = create_repository(instance, repo_base_dir=self.repo_base_dir)
+                repository = create_repository(
+                    instance, repo_base_dir=self.repo_base_dir
+                )
                 code_index = create_index(instance, repository=repository)
 
                 if self.use_testbed:
                     from testbeds.sdk import TestbedSDK
                     from moatless.runtime.testbed import TestbedEnvironment
+
                     runtime = TestbedEnvironment(
                         testbed_sdk=TestbedSDK(),
                         repository=repository,
@@ -363,13 +365,24 @@ class Evaluation:
                     system_prompt = SIMPLE_CODE_PROMPT # Use simple code prompt
 
                 if os.path.exists(trajectory_path):
-                    search_tree = SearchTree.from_file(trajectory_path, repository=repository, runtime=runtime, code_index=code_index)
+                    search_tree = SearchTree.from_file(
+                        trajectory_path,
+                        repository=repository,
+                        runtime=runtime,
+                        code_index=code_index,
+                    )
                 else:
-                    instance = get_moatless_instance("django__django-16379")
-
-                    actions = create_coding_actions(repository=repository, code_index=code_index, runtime=runtime, edit_completion_model=self._create_completion_model())
+                    actions = create_coding_actions(
+                        repository=repository,
+                        code_index=code_index,
+                        runtime=runtime,
+                        edit_completion_model=self._create_completion_model(),
+                    )
                     agent = CodingAgent(
-                        completion=self._create_completion_model(self.settings.agent_model), actions=actions, system_prompt=system_prompt
+                        completion=self._create_completion_model(
+                            self.settings.agent_model
+                        ),
+                        actions=actions,
                     )
 
                     if self.settings.best_first:
@@ -378,24 +391,22 @@ class Evaluation:
                         selector = SoftmaxSelector()
 
                     value_function = ValueFunction(
-                        completion=self._create_completion_model(self.settings.value_function_model)
+                        completion=self._create_completion_model(
+                            self.settings.value_function_model
+                        )
                     )
 
                     # discriminator = MeanAwardDiscriminator()
                     discriminator = AgentDiscriminator(
-                        create_completion=self._create_completion_model(),
-                        debate_settings=DebateSettings(
-                            n_agents=self.settings.debate_n_agents,
-                            n_rounds=self.settings.debate_n_rounds,
-                        )
+                        completion_model=self._create_completion_model(),
+                        n_agents=self.settings.debate_n_agents,
+                        n_rounds=self.settings.debate_n_rounds,
                     )
 
                     if self.settings.provide_feedback:
                         feedback = FeedbackGenerator()
                     else:
                         feedback = None
-
-                    discriminator = MeanAwardDiscriminator()
 
                     file_context = FileContext(repo=repository)
 
@@ -444,14 +455,20 @@ class Evaluation:
                 eval_result["node_results"] = {}
 
             if self.use_testbed:
-                if len(eval_result.get("node_results")) == len(search_tree.get_finished_nodes()):
-                    logger.info(f"Already evaluated results for {len(search_tree.get_finished_nodes())} nodes in {instance_id}")
+                if len(eval_result.get("node_results")) == len(
+                    search_tree.get_finished_nodes()
+                ):
+                    logger.info(
+                        f"Already evaluated results for {len(search_tree.get_finished_nodes())} nodes in {instance_id}"
+                    )
                 else:
-
                     if not runtime:
-                        repository = create_repository(instance, repo_base_dir=self.repo_base_dir)
+                        repository = create_repository(
+                            instance, repo_base_dir=self.repo_base_dir
+                        )
                         from testbeds.sdk import TestbedSDK
                         from moatless.runtime.testbed import TestbedEnvironment
+
                         runtime = TestbedEnvironment(
                             testbed_sdk=TestbedSDK(),
                             repository=repository,
@@ -549,14 +566,16 @@ class Evaluation:
                 json_string = json.dumps(prediction)
                 file.write(json_string + "\n")
 
-    def _create_completion_model(self, model_settings: ModelSettings | None = None) -> CompletionModel:
+    def _create_completion_model(
+        self, model_settings: ModelSettings | None = None
+    ) -> CompletionModel:
         model_settings = model_settings or self.settings.model
         return CompletionModel(
             model=model_settings.model,
             temperature=model_settings.temperature,
             model_base_url=model_settings.base_url,
             model_api_key=model_settings.api_key,
-            response_format=model_settings.response_format
+            response_format=model_settings.response_format,
         )
 
     def _to_csv_report(self, results: list[BenchmarkResult]):

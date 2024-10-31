@@ -129,7 +129,10 @@ class RequestCodeChange(Action):
     _completion_model: CompletionModel = PrivateAttr()
 
     def __init__(
-        self, repository: Repository | None = None, completion_model: CompletionModel | None = None, **data
+        self,
+        repository: Repository | None = None,
+        completion_model: CompletionModel | None = None,
+        **data,
     ):
         super().__init__(**data)
         self._repository = repository
@@ -153,6 +156,13 @@ class RequestCodeChange(Action):
             return Observation(
                 message="Please provide pseudo code for the code change.",
                 properties={"fail_reason": "no_pseudo_code"},
+                expect_correction=True,
+            )
+
+        if not args.file_path.endswith(".py"):
+            return Observation(
+                message="Please provide a Python file path.",
+                properties={"fail_reason": "not_python_file"},
                 expect_correction=True,
             )
 
@@ -872,6 +882,4 @@ class RequestCodeChange(Action):
                 obj["completion_model"]
             )
 
-        return cls(
-            **obj
-        )
+        return cls(**obj)

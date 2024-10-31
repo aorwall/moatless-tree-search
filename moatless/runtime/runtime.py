@@ -29,5 +29,7 @@ class TestResult(BaseModel):
 
 class RuntimeEnvironment(ABC):
     @abstractmethod
-    def run_tests(self, file_context: FileContext, test_files: List[str] | None = None) -> list[TestResult]:
+    def run_tests(
+        self, file_context: FileContext, test_files: List[str] | None = None
+    ) -> list[TestResult]:
         pass

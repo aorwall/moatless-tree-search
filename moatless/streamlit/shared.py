@@ -130,11 +130,15 @@ def trajectory_table(directory_path: str):
     col4, col5 = st.columns(2)
 
     with col1:
-        status_filter = st.multiselect("Status", df["status"].unique(), key="status_filter")
+        status_filter = st.multiselect(
+            "Status", df["status"].unique(), key="status_filter"
+        )
     with col2:
         has_resolved_solutions = st.multiselect("Has Resolved Solutions", ["Yes", "No"])
     with col3:
-        instance_filter = st.multiselect("Instance", df["instance"].unique(), key="instance_filter")
+        instance_filter = st.multiselect(
+            "Instance", df["instance"].unique(), key="instance_filter"
+        )
     with col4:
         llmonkeys_rate_range = st.slider("LLMonkeys Rate (%)", 0, 100, (0, 100), 1)
 

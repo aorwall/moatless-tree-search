@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from moatless.agent.agent import ActionAgent
 from moatless.completion.model import Usage
-from moatless.discriminator import MeanAwardDiscriminator
+from moatless.discriminator import MeanAwardDiscriminator, Discriminator
 from moatless.feedback import FeedbackGenerator
 from moatless.file_context import FileContext
 from moatless.index.code_index import CodeIndex
@@ -29,7 +29,7 @@ class SearchTree(BaseModel):
     feedback_generator: Optional[FeedbackGenerator] = Field(
         None, description="Feedback generator."
     )
-    discriminator: Optional[MeanAwardDiscriminator] = Field(
+    discriminator: Optional[Discriminator] = Field(
         None, description="Discriminator for selecting the best trajectory."
     )
     metadata: Dict[str, Any] = Field(
@@ -77,7 +77,7 @@ class SearchTree(BaseModel):
         agent: Optional[ActionAgent] = None,
         value_function: Optional[ValueFunction] = None,
         feedback_generator: Optional[FeedbackGenerator] = None,
-        discriminator: Optional[MeanAwardDiscriminator] = None,
+        discriminator: Optional[Discriminator] = None,
         metadata: Optional[Dict[str, Any]] = None,
         persist_path: Optional[str] = None,
         max_expansions: int = 1,
@@ -173,23 +173,29 @@ class SearchTree(BaseModel):
 
         if "agent" in data and isinstance(data["agent"], dict):
             agent_data = data["agent"]
-            data["agent"] = ActionAgent.model_validate(agent_data, repository=repository, code_index=code_index, runtime=runtime)
+            data["agent"] = ActionAgent.model_validate(
+                agent_data,
+                repository=repository,
+                code_index=code_index,
+                runtime=runtime,
+            )
         return cls.model_validate(data, repository)
 
     @classmethod
     def from_file(
-        cls,
-        file_path: str,
-        persist_path: str | None = None,
-        **kwargs
+        cls, file_path: str, persist_path: str | None = None, **kwargs
     ) -> "SearchTree":
         with open(file_path, "r") as f:
             tree_data = json.load(f)
 
-        return cls.from_dict(tree_data, persist_path=persist_path or file_path, **kwargs)
+        return cls.from_dict(
+            tree_data, persist_path=persist_path or file_path, **kwargs
+        )
 
     def run_search(self) -> Node | None:
         """Run the MCTS algorithm for a specified number of iterations."""
+
+        self.assert_runnable()
 
         logger.info(generate_ascii_tree(self.root))
 
@@ -199,7 +205,15 @@ class SearchTree(BaseModel):
             )
 
         while not self.is_finished():
-            logger.info(f"Run iteration {len(self.root.get_all_nodes())}")
+            total_cost = self.total_usage().completion_cost
+
+            logger.info(f"Run iteration {len(self.root.get_all_nodes())} (cost: ${total_cost}")
+
+            if self.max_cost and self.total_usage().completion_cost and total_cost >= self.max_cost:
+                logger.warning(
+                    f"Search cost ${total_cost} exceeded max cost of ${self.max_cost}. Finishing search."
+                )
+                break
 
             node = self._select(self.root)
             if node:
@@ -270,7 +284,9 @@ class SearchTree(BaseModel):
         if self.value_function:
             node.reward, completion_response = self.value_function.get_reward(node=node)
             node.completions["value_function"] = completion_response
-            logger.info(f"Node{node.node_id}: The value function returned a reward of {node.reward.value}.")
+            logger.info(
+                f"Node{node.node_id}: The value function returned a reward of {node.reward.value}."
+            )
 
     def _backpropagate(self, node: Node):
         """Backpropagate the reward up the tree."""
@@ -318,7 +334,7 @@ class SearchTree(BaseModel):
 
         if self.min_finished_nodes and len(finished_nodes) >= self.min_finished_nodes:
             return True
-        
+
         if self.max_finished_nodes and len(finished_nodes) >= self.max_finished_nodes:
             return True
 
@@ -374,6 +390,18 @@ class SearchTree(BaseModel):
     def _generate_unique_id(self) -> int:
         self.unique_id += 1
         return self.unique_id
+
+    def assert_runnable(self):
+        if self.root is None:
+            raise ValueError("SearchTree must have a root node.")
+
+        if self.root.file_context is None:
+            raise ValueError("SearchTree root node must have a file context.")
+
+        if self.root.file_context._repo is None:
+            raise ValueError("SearchTree root node file context must have a repository.")
+
+        return True
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         """

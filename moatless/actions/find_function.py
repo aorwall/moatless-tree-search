@@ -18,8 +18,8 @@ class FindFunctionArgs(SearchBaseArgs):
         default=None, description="Specific class name to include in the search."
     )
 
-    @model_validator(mode='after')
-    def validate_names(self) -> 'FindFunctionArgs':
+    @model_validator(mode="after")
+    def validate_names(self) -> "FindFunctionArgs":
         if not self.function_name.strip():
             raise ValueError("function_name cannot be empty")
         if self.class_name is not None and not self.class_name.strip():

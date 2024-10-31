@@ -31,7 +31,12 @@ class SearchBaseAction(Action):
     _repository: Repository = PrivateAttr()
     _code_index: CodeIndex = PrivateAttr()
 
-    def __init__(self, repository: Repository | None = None, code_index: CodeIndex | None = None, **data):
+    def __init__(
+        self,
+        repository: Repository | None = None,
+        code_index: CodeIndex | None = None,
+        **data,
+    ):
         super().__init__(**data)
         self._repository = repository
         self._code_index = code_index
@@ -59,9 +64,7 @@ class SearchBaseAction(Action):
                     expect_correction=True,
                 )
             else:
-                return Observation(
-                    message=search_result.message, properties=properties
-                )
+                return Observation(message=search_result.message, properties=properties)
 
         search_tokens = 0
         span_count = 0
@@ -103,6 +106,12 @@ class SearchBaseAction(Action):
         message += f"\n{search_hit_str}"
         return Observation(message=message, properties=properties)
 
+    def _select_span_instructions(self, search_result: SearchCodeResponse) -> str:
+        return (
+            f"The search result is too large. You must select the relevant code spans in the search results to the file context. "
+            f"Use the function RequestMoreContext and specify the SpanIDs of the relevant code spans to add them to context.\n"
+        )
+
     def _select_span_response_prompt(self, search_result: SearchCodeResponse) -> str:
         search_result_context = FileContext(repo=self._repository)
         for hit in search_result.hits:
@@ -119,7 +128,8 @@ class SearchBaseAction(Action):
             outcomment_code_comment="... rest of the code",
         )
 
-        prompt = f"\n<search_results>\n{search_result_str}\n</search_result>\n"
+        prompt = self._select_span_instructions(search_result)
+        prompt += f"\n<search_results>\n{search_result_str}\n</search_result>\n"
         return prompt
 
     def _search(self, args: SearchBaseArgs) -> SearchCodeResponse:
@@ -213,7 +223,5 @@ class SearchBaseAction(Action):
             obj = obj.copy()
             repository = obj.pop("repository")
             code_index = obj.pop("code_index")
-            return cls(
-                code_index=code_index, repository=repository, **obj
-            )
+            return cls(code_index=code_index, repository=repository, **obj)
         return super().model_validate(obj)

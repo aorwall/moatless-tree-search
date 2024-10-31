@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from io import BytesIO
-from typing import Optional
+from typing import Optional, List, Dict
 import time
 
 import matplotlib.pyplot as plt
@@ -134,12 +134,17 @@ def show_completion(completion):
         st.subheader("Input prompts")
         for input_idx, input_msg in enumerate(completion.input):
             if "content" in input_msg:
-                tokens = count_tokens(input_msg["content"])
+                if isinstance(input_msg["content"], str):
+                    content = input_msg["content"]
+                else:
+                    content = json.dumps(input_msg["content"], indent=2)
+
+                tokens = count_tokens(content)
                 with st.expander(
                     f"Message {input_idx + 1} by {input_msg['role']} ({tokens} tokens)",
                     expanded=(input_idx == len(completion.input) - 1),
                 ):
-                    st.code(input_msg["content"], language="")
+                    st.code(content, language="")
             else:
                 with st.expander(
                     f"Message {input_idx + 1} by {input_msg['role']}",
@@ -167,33 +172,36 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
         instance = None
 
     # Initialize session state for step-by-step visualization
-    if 'total_nodes' not in st.session_state:
+    if "total_nodes" not in st.session_state:
         st.session_state.total_nodes = count_total_nodes(search_tree.root)
-    if 'max_node_id' not in st.session_state:
+    if "max_node_id" not in st.session_state:
         st.session_state.max_node_id = st.session_state.total_nodes - 1
-    if 'selected_node_id' not in st.session_state:
+    if "selected_node_id" not in st.session_state:
         st.session_state.selected_node_id = st.session_state.total_nodes - 1
-    if 'auto_play' not in st.session_state:
+    if "auto_play" not in st.session_state:
         st.session_state.auto_play = False
 
     # Function to get nodes up to the current max_node_id
     def get_nodes_up_to_id(root_node, max_id):
         nodes = []
+
         def dfs(node):
             if node.node_id <= max_id:
                 nodes.append(node)
                 for child in node.children:
                     dfs(child)
+
         dfs(root_node)
         return nodes
-
 
     container.empty()
     with container:
         graph_col, info_col = st.columns([6, 3])
         with graph_col:
             # Get nodes up to the current max_node_id
-            nodes_to_show = get_nodes_up_to_id(search_tree.root, st.session_state.max_node_id)
+            nodes_to_show = get_nodes_up_to_id(
+                search_tree.root, st.session_state.max_node_id
+            )
             G = build_graph(search_tree.root, eval_result, instance)
             G_subset = G.subgraph([f"Node{node.node_id}" for node in nodes_to_show])
             pos = nx.nx_agraph.graphviz_layout(G, prog="dot")
@@ -421,21 +429,63 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
 
             col1, col2, col3, col4, col5, col6 = st.columns(6)
             with col1:
-                st.button("⏪ Reset to 0", 
-                          on_click=lambda: setattr(st.session_state, 'max_node_id', 0) or setattr(st.session_state, 'selected_node_id', 0),
-                          disabled=(st.session_state.max_node_id == 0 or st.session_state.auto_play))
+                st.button(
+                    "⏪ Reset to 0",
+                    on_click=lambda: setattr(st.session_state, "max_node_id", 0)
+                    or setattr(st.session_state, "selected_node_id", 0),
+                    disabled=(
+                        st.session_state.max_node_id == 0 or st.session_state.auto_play
+                    ),
+                )
             with col2:
-                st.button("◀ Step Back", 
-                          on_click=lambda: setattr(st.session_state, 'max_node_id', st.session_state.max_node_id - 1) or setattr(st.session_state, 'selected_node_id', st.session_state.max_node_id),
-                          disabled=(st.session_state.max_node_id <= 0))
+                st.button(
+                    "◀ Step Back",
+                    on_click=lambda: setattr(
+                        st.session_state,
+                        "max_node_id",
+                        st.session_state.max_node_id - 1,
+                    )
+                    or setattr(
+                        st.session_state,
+                        "selected_node_id",
+                        st.session_state.max_node_id,
+                    ),
+                    disabled=(st.session_state.max_node_id <= 0),
+                )
             with col3:
-                st.button("▶ Step Forward", 
-                          on_click=lambda: setattr(st.session_state, 'max_node_id', st.session_state.max_node_id + 1) or setattr(st.session_state, 'selected_node_id', st.session_state.max_node_id),
-                          disabled=(st.session_state.max_node_id >= st.session_state.total_nodes - 1))
+                st.button(
+                    "▶ Step Forward",
+                    on_click=lambda: setattr(
+                        st.session_state,
+                        "max_node_id",
+                        st.session_state.max_node_id + 1,
+                    )
+                    or setattr(
+                        st.session_state,
+                        "selected_node_id",
+                        st.session_state.max_node_id,
+                    ),
+                    disabled=(
+                        st.session_state.max_node_id >= st.session_state.total_nodes - 1
+                    ),
+                )
             with col4:
-                st.button("⏩ Show Full Tree", 
-                          on_click=lambda: setattr(st.session_state, 'max_node_id', st.session_state.total_nodes - 1) or setattr(st.session_state, 'selected_node_id', st.session_state.max_node_id),
-                          disabled=(st.session_state.max_node_id == st.session_state.total_nodes - 1))
+                st.button(
+                    "⏩ Show Full Tree",
+                    on_click=lambda: setattr(
+                        st.session_state,
+                        "max_node_id",
+                        st.session_state.total_nodes - 1,
+                    )
+                    or setattr(
+                        st.session_state,
+                        "selected_node_id",
+                        st.session_state.max_node_id,
+                    ),
+                    disabled=(
+                        st.session_state.max_node_id == st.session_state.total_nodes - 1
+                    ),
+                )
             with col5:
                 if st.session_state.auto_play:
                     if st.button("⏹ Stop Auto-play"):
@@ -447,7 +497,9 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
 
             with col6:
                 st.write(f"Showing nodes up to ID: {st.session_state.max_node_id}")
-                st.write("Auto-play: " + ("On" if st.session_state.auto_play else "Off"))
+                st.write(
+                    "Auto-play: " + ("On" if st.session_state.auto_play else "Off")
+                )
 
             chart_placeholder = st.empty()
             event = chart_placeholder.plotly_chart(
@@ -463,9 +515,12 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                     point_index = selected_points[0]["point_index"]
                     if point_index in point_to_node_id:
                         node_id = point_to_node_id[point_index]
-                        logger.info(f"Selected node: {node_id} by point index: {point_index}: {point_to_node_id}")
-                        st.session_state.selected_node_id = int(node_id.split("Node")[1])
-
+                        logger.info(
+                            f"Selected node: {node_id} by point index: {point_index}: {point_to_node_id}"
+                        )
+                        st.session_state.selected_node_id = int(
+                            node_id.split("Node")[1]
+                        )
 
             # Add a button to toggle PDF settings
             show_pdf_settings = st.button("Toggle PDF Settings")
@@ -475,7 +530,9 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                 st.session_state.pdf_settings_visible = False
 
             if show_pdf_settings:
-                st.session_state.pdf_settings_visible = not st.session_state.pdf_settings_visible
+                st.session_state.pdf_settings_visible = (
+                    not st.session_state.pdf_settings_visible
+                )
 
             # Show PDF settings only if the toggle is on
             if st.session_state.pdf_settings_visible:
@@ -495,9 +552,11 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
 
         with info_col:
             # Update the node selection dropdown
-            max_visible_node = min(int(st.session_state.max_node_id), st.session_state.total_nodes - 1)
+            max_visible_node = min(
+                int(st.session_state.max_node_id), st.session_state.total_nodes - 1
+            )
             node_options = [f"Node{i}" for i in range(max_visible_node + 1)]
-            
+
             selected_node_option = st.selectbox(
                 "Select Node",
                 node_options,
@@ -505,7 +564,9 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                 key="selected_node_option",
             )
             if selected_node_option:
-                st.session_state.selected_node_id = int(selected_node_option.split("Node")[1])
+                st.session_state.selected_node_id = int(
+                    selected_node_option.split("Node")[1]
+                )
 
             # Display selected node information
             if st.session_state.selected_node_id is not None:
@@ -545,7 +606,9 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
 
                     with tab_contents[tabs.index("Summary")]:
                         if selected_node.action:
-                            st.subheader(f"Node{selected_node.node_id}: {selected_node.action.name}")
+                            st.subheader(
+                                f"Node{selected_node.node_id}: {selected_node.action.name}"
+                            )
                             st.json(selected_node.action.model_dump())
 
                             if selected_node.observation:
@@ -598,12 +661,15 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                 )
 
         # Auto-play logic
-        if st.session_state.auto_play and st.session_state.max_node_id < st.session_state.total_nodes - 1:
+        if (
+            st.session_state.auto_play
+            and st.session_state.max_node_id < st.session_state.total_nodes - 1
+        ):
             st.session_state.max_node_id += 1
             st.session_state.selected_node_id = st.session_state.max_node_id
             time.sleep(1)  # Delay between steps
             st.rerun()
-            
+
         # Move PDF generation and download button outside of columns
         if generate_pdf:
             with st.spinner("Generating PDF..."):
@@ -618,6 +684,7 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                 file_name="trajectory_tree.pdf",
                 mime="application/pdf",
             )
+
 
 def find_node_by_id(root_node: Node, node_id: int) -> Optional[Node]:
     if root_node.node_id == node_id:
@@ -761,4 +828,3 @@ def count_total_nodes(root_node):
     for child in root_node.children:
         count += count_total_nodes(child)
     return count
-

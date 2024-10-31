@@ -393,7 +393,11 @@ class CompletionModel(BaseModel):
         if actions:
             for action in actions:
                 schema = action.openai_schema
-                tools.append(openai.pydantic_function_tool(action, name=schema["name"], description=schema["description"]))
+                tools.append(
+                    openai.pydantic_function_tool(
+                        action, name=schema["name"], description=schema["description"]
+                    )
+                )
 
         try:
             if actions:
@@ -499,8 +503,7 @@ class CompletionModel(BaseModel):
                 if isinstance(block, ToolUseBlock):
                     action = None
                     for check_action in actions:
-                        logger.info(f"Checking action {check_action.name} == {block.name}")
-                        if check_action.name == block.name:
+                        if check_action.openai_schema["name"] == block.name:
                             action = check_action
                             break
 

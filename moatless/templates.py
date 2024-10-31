@@ -27,7 +27,7 @@ def create_basic_coding_tree(
     max_iterations: int = 10,
     max_depth: int = 10,
     max_cost: float | None = None,
-    perist_path: str | None = None
+    perist_path: str | None = None,
 ):
     find_class = FindClass(code_index=code_index, repository=repository)
     find_function = FindFunction(code_index=code_index, repository=repository)
@@ -52,7 +52,9 @@ def create_basic_coding_tree(
     ]
 
     file_context = FileContext(repo=repository)
-    agent = CodingAgent(actions=actions, completion=completion_model, system_prompt=SIMPLE_CODE_PROMPT)
+    agent = CodingAgent(
+        actions=actions, completion=completion_model, system_prompt=SIMPLE_CODE_PROMPT
+    )
     return SearchTree.create(
         message=message,
         agent=agent,
@@ -61,16 +63,16 @@ def create_basic_coding_tree(
         max_iterations=max_iterations,
         max_depth=max_depth,
         max_cost=max_cost,
-        persist_path=perist_path
+        persist_path=perist_path,
     )
 
-def create_coding_actions(
-        repository: Repository,
-        code_index: CodeIndex | None = None,
-        runtime: RuntimeEnvironment | None = None,
-        edit_completion_model: CompletionModel | None = None,
-):
 
+def create_coding_actions(
+    repository: Repository,
+    code_index: CodeIndex | None = None,
+    runtime: RuntimeEnvironment | None = None,
+    edit_completion_model: CompletionModel | None = None,
+):
     find_class = FindClass(code_index=code_index, repository=repository)
     find_function = FindFunction(code_index=code_index, repository=repository)
     find_code_snippet = FindCodeSnippet(code_index=code_index, repository=repository)
@@ -90,7 +92,9 @@ def create_coding_actions(
     ]
 
     if runtime:
-        actions.append(RunTests(code_index=code_index, repository=repository, runtime=runtime))
+        actions.append(
+            RunTests(code_index=code_index, repository=repository, runtime=runtime)
+        )
 
     actions.append(Finish())
     actions.append(Reject())

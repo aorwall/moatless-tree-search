@@ -36,7 +36,9 @@ class Node(BaseModel):
     action: Optional[ActionArguments] = Field(
         None, description="The action associated with the node"
     )
-    observation: Optional[Observation] = Field(None, description="The output of the action")
+    observation: Optional[Observation] = Field(
+        None, description="The output of the action"
+    )
     reward: Optional[Reward] = Field(None, description="The reward of the node")
     visits: int = Field(0, description="The number of times the node has been visited")
     value: float = Field(0.0, description="The total value (reward) of the node")
@@ -197,12 +199,13 @@ class Node(BaseModel):
                     exclude_set.update(kwargs["exclude"])
                 elif isinstance(kwargs["exclude"], dict):
                     exclude_set.update(kwargs["exclude"].keys())
-            
+
             new_kwargs = {k: v for k, v in kwargs.items() if k != "exclude"}
             node_dict = super().model_dump(exclude=exclude_set, **new_kwargs)
 
             if node.action and "action" not in exclude_set:
                 node_dict["action"] = node.action.model_dump(**kwargs)
+                node_dict["action"]["action_args_class"] = f"{node.action.__class__.__module__}.{node.action.__class__.__name__}"
 
             if node.completions and "completions" not in exclude_set:
                 node_dict["completions"] = {
@@ -370,4 +373,3 @@ def color_yellow(text: Any) -> str:
 
 def color_white(text: Any) -> str:
     return f"\033[97m{text}\033[0m"
-

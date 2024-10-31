@@ -27,8 +27,8 @@ class SemanticSearchArgs(SearchBaseArgs):
             prompt += f" in files matching the pattern: {self.file_pattern}"
         return prompt
 
-    @model_validator(mode='after')
-    def validate_query(self) -> 'SemanticSearchArgs':
+    @model_validator(mode="after")
+    def validate_query(self) -> "SemanticSearchArgs":
         if not self.query.strip():
             raise ValueError("query cannot be empty")
         return self

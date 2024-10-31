@@ -6,3 +6,4 @@ from moatless.actions.request_context import RequestMoreContext
 from moatless.actions.code_change import RequestCodeChange
 from moatless.actions.finish import Finish
 from moatless.actions.reject import Reject
+from moatless.actions.run_tests import RunTests

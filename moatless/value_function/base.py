@@ -45,7 +45,9 @@ class ValueFunction(BaseModel):
                 formatted_state += previous_node.action.to_prompt()
 
                 if previous_node.observation:
-                    formatted_state += f"\n\nOutput: {previous_node.observation.message}"
+                    formatted_state += (
+                        f"\n\nOutput: {previous_node.observation.message}"
+                    )
                     formatted_history.append(formatted_state)
                 else:
                     logger.warning(f"No output found for Node{previous_node.node_id}")

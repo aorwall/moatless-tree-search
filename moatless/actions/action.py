@@ -13,7 +13,7 @@ from moatless.repository.repository import Repository
 
 logger = logging.getLogger(__name__)
 
-_actions: Dict[str, Type['Action']] = {}
+_actions: Dict[str, Type["Action"]] = {}
 
 
 class Action(BaseModel, ABC):
@@ -24,9 +24,7 @@ class Action(BaseModel, ABC):
     def __init__(self, **data):
         super().__init__(**data)
 
-    def execute(
-        self, args: ActionArguments, file_context: FileContext
-    ) -> Observation:
+    def execute(self, args: ActionArguments, file_context: FileContext) -> Observation:
         """
         Execute the action.
         """
@@ -140,16 +138,14 @@ At this stage, the agent is still working on the solution. Your task is twofold:
 2. **Alternative Feedback**: Independently of your evaluation, provide guidance for an alternative problem-solving branch. This ensures parallel exploration of different solution paths.
 """
 
-    def model_dump(self, **kwargs) -> Dict[str, Any]:
-        dump = {
-            "action_class": f"{self.__class__.__module__}.{self.__class__.__name__}"
-        }
-        dump.update(super().model_dump(**kwargs))
-        dump.pop("args_schema", None)
-        return dump
-
     @classmethod
-    def from_dict(cls, obj: dict, repository: Repository = None, runtime: Any = None, code_index: CodeIndex = None) -> "Action":
+    def from_dict(
+        cls,
+        obj: dict,
+        repository: Repository = None,
+        runtime: Any = None,
+        code_index: CodeIndex = None,
+    ) -> "Action":
         obj = obj.copy()
         obj.pop("args_schema", None)
         action_class_path = obj.pop("action_class", None)
@@ -176,7 +172,9 @@ At this stage, the agent is still working on the solution. Your task is twofold:
         return cls(**obj)
 
     @classmethod
-    def get_action_by_args_class(cls, args_class: Type[ActionArguments]) -> Optional[Type['Action']]:
+    def get_action_by_args_class(
+        cls, args_class: Type[ActionArguments]
+    ) -> Optional[Type["Action"]]:
         """
         Get the Action subclass corresponding to the given ActionArguments subclass.
 
@@ -186,8 +184,12 @@ At this stage, the agent is still working on the solution. Your task is twofold:
         Returns:
             The Action subclass if found, None otherwise.
         """
+
         def search_subclasses(current_class):
-            if hasattr(current_class, 'args_schema') and current_class.args_schema == args_class:
+            if (
+                hasattr(current_class, "args_schema")
+                and current_class.args_schema == args_class
+            ):
                 return current_class
             for subclass in current_class.__subclasses__():
                 result = search_subclasses(subclass)
@@ -198,7 +200,7 @@ At this stage, the agent is still working on the solution. Your task is twofold:
         return search_subclasses(cls)
 
     @classmethod
-    def get_action_by_name(cls, action_name: str) -> Type['Action']:
+    def get_action_by_name(cls, action_name: str) -> Type["Action"]:
         """
         Dynamically import and return the appropriate Action class for the given action name.
         """
@@ -219,9 +221,5 @@ At this stage, the agent is still working on the solution. Your task is twofold:
             full_module_name = f"moatless.actions.{module_name}"
             module = importlib.import_module(full_module_name)
             for name, obj in module.__dict__.items():
-                if (
-                    isinstance(obj, type)
-                    and issubclass(obj, Action)
-                    and obj != Action
-                ):
+                if isinstance(obj, type) and issubclass(obj, Action) and obj != Action:
                     _actions[name] = obj

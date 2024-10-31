@@ -151,7 +151,9 @@ if __name__ == "__main__":
 
     # Create error file handler which logs error messages
     try:
-        error_file_handler = logging.FileHandler(os.path.join(log_dir, error_log_filename))
+        error_file_handler = logging.FileHandler(
+            os.path.join(log_dir, error_log_filename)
+        )
         error_file_handler.setLevel(logging.ERROR)
         error_file_formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -190,7 +192,7 @@ if __name__ == "__main__":
         provide_feedback=args.feedback,
         debate=args.debate,
         best_first=True,
-        model=model_settings
+        model=model_settings,
     )
 
     evaluate_search_and_code(

@@ -110,22 +110,27 @@ python -m moatless.benchmark.run_evaluation \
 
 You can optionally set the `--instance_id` to evaluate on a specific instance or a list of instances.
 
-Use `--use_testbed` if you got access to a testbed environment. Otherwise, tests will not be run.
-
 ## Examples
 
 ### Example: Basic Flow
-How to setup a basic flow similar to the moatless-tools agent.
+Basic setup similar to the moatless-tools agent.
 
 ```python
-from moatless.benchmark.swebench import load_instance, create_repository
-from moatless.completion.completion import CompletionModel
+from moatless.agent import CodingAgent
+from moatless.agent.code_prompts import SIMPLE_CODE_PROMPT
+from moatless.benchmark.swebench import create_repository
+from moatless.benchmark.utils import get_moatless_instance
+from moatless.completion import CompletionModel
+from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.search_tree import SearchTree
-from moatless.templates import create_basic_coding_tree
 from moatless.actions import FindClass, FindFunction, FindCodeSnippet, SemanticSearch, RequestMoreContext, RequestCodeChange, Finish, Reject
 
 index_store_dir = "/tmp/index_store"
+repo_base_dir = "/tmp/repos"
+persist_path = "trajectory.json"
+
+instance = get_moatless_instance("django__django-16379")
 
 completion_model = CompletionModel(model="gpt-4o", temperature=0.0)
 
@@ -136,22 +141,18 @@ code_index = CodeIndex.from_index_name(
 )
 
 actions = [
-    find_class = FindClass(code_index=code_index, repository=repository)
-    find_function = FindFunction(code_index=code_index, repository=repository)
-    find_code_snippet = FindCodeSnippet(code_index=code_index, repository=repository)
-    semantic_search = SemanticSearch(code_index=code_index, repository=repository)
-    request_context = RequestMoreContext(repository=repository)
-    request_code_change = RequestCodeChange(
-        repository=repository, completion_model=completion_model
-    )
-    finish = Finish()
-    reject = Reject()
+    FindClass(code_index=code_index, repository=repository),
+    FindFunction(code_index=code_index, repository=repository),
+    FindCodeSnippet(code_index=code_index, repository=repository),
+    SemanticSearch(code_index=code_index, repository=repository),
+    RequestMoreContext(repository=repository),
+    RequestCodeChange(repository=repository, completion_model=completion_model),
+    Finish(),
+    Reject()
 ]
 
 file_context = FileContext(repo=repository)
 agent = CodingAgent(actions=actions, completion=completion_model, system_prompt=SIMPLE_CODE_PROMPT)
-
-instance = load_instance("django__django-16379")
 
 search_tree = SearchTree.create(
     message=instance["problem_statement"],
@@ -170,44 +171,48 @@ print(node.observation.message)
 How to setup the evaluation flow with MCTS and testbeds.
 
 ```python
-from moatless.benchmark.swebench import load_instance, create_repository
-from moatless.completion.completion import CompletionModel
+from moatless.agent import CodingAgent
+from moatless.benchmark.swebench import create_repository
+from moatless.benchmark.utils import get_moatless_instance
+from moatless.completion import CompletionModel
+from moatless.discriminator import AgentDiscriminator
+from moatless.feedback import FeedbackGenerator
+from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.search_tree import SearchTree
-from moatless.templates import create_basic_coding_tree
-from moatless.actions import FindClass, FindFunction, FindCodeSnippet, SemanticSearch, RequestMoreContext, RequestCodeChange, Finish, Reject
+from moatless.selector import BestFirstSelector
+from moatless.actions import FindClass, FindFunction, FindCodeSnippet, SemanticSearch, RequestMoreContext, RequestCodeChange, Finish, Reject, RunTests
+from moatless.value_function import ValueFunction
 from testbeds.sdk import TestbedSDK
 from moatless.runtime.testbed import TestbedEnvironment
 
 index_store_dir = "/tmp/index_store"
+repo_base_dir = "/tmp/repos"
+persist_path = "trajectory.json"
 
-completion_model = CompletionModel(model="gpt-4o-mini", temperature=0.0)
+instance = get_moatless_instance("django__django-16379")
 
-repository = create_repository(instance)
+completion_model = CompletionModel(model="gpt-4o-mini", temperature=0.7)
+
+repository = create_repository(instance, repo_base_dir=repo_base_dir)
 
 code_index = CodeIndex.from_index_name(
     instance["instance_id"], index_store_dir=index_store_dir, file_repo=repository
 )
 
-
 file_context = FileContext(repo=repository)
-
 
 selector = BestFirstSelector()
 
 value_function = ValueFunction(completion=completion_model)
 
 discriminator = AgentDiscriminator(
-    create_completion=self._create_completion_model(),
-    debate_settings=DebateSettings(
-        n_agents=self.settings.debate_n_agents,
-        n_rounds=self.settings.debate_n_rounds,
-    )
+    completion=completion_model,
+    n_agents=5,
+    n_rounds=3,
 )
 
 feedback = FeedbackGenerator()
-
-instance = load_instance("django__django-16379")
 
 runtime = TestbedEnvironment(
     testbed_sdk=TestbedSDK(),
@@ -216,17 +221,15 @@ runtime = TestbedEnvironment(
 )
 
 actions = [
-    find_class = FindClass(code_index=code_index, repository=repository)
-    find_function = FindFunction(code_index=code_index, repository=repository)
-    find_code_snippet = FindCodeSnippet(code_index=code_index, repository=repository)
-    semantic_search = SemanticSearch(code_index=code_index, repository=repository)
-    request_context = RequestMoreContext(repository=repository)
-    request_code_change = RequestCodeChange(
-        repository=repository, completion_model=completion_model
-    )
-    run_tests = RunTests(code_index=code_index, repository=repository, runtime=runtime)
-    finish = Finish()
-    reject = Reject()
+    FindClass(code_index=code_index, repository=repository),
+    FindFunction(code_index=code_index, repository=repository),
+    FindCodeSnippet(code_index=code_index, repository=repository),
+    SemanticSearch(code_index=code_index, repository=repository),
+    RequestMoreContext(repository=repository),
+    RequestCodeChange(repository=repository, completion_model=completion_model),
+    RunTests(code_index=code_index, repository=repository, runtime=runtime),
+    Finish(),
+    Reject()
 ]
 
 agent = CodingAgent(actions=actions, completion=completion_model)
@@ -240,8 +243,9 @@ search_tree = SearchTree.create(
     discriminator=discriminator,
     feedback_generator=feedback,
     max_iterations=100,
-    max_expansions=5,
+    max_expansions=3,
     max_depth=25,
+    persist_path=persist_path,
 )
 
 node = search_tree.run_search()
