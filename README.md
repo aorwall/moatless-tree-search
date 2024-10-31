@@ -75,11 +75,14 @@ You can configure these settings by either:
 
 
 ## Streamlit
-
 To launch the Streamlit app, run:
 
 ```bash
-streamlit run -m moatless.streamlit_app
+# Launch with direct file loading
+moatless-streamlit path/to/trajectory.json
+
+# Launch interactive UI (file can be selected in browser)
+moatless-streamlit
 ```
 
 The following badges are used to indicate the status of a node:
@@ -93,23 +96,24 @@ The following badges are used to indicate the status of a node:
 
 ## Evaluation
 
-To run the evaluation script, use the following command:
+To run the evaluation script
 
 ```bash
-python -m moatless.benchmark.run_evaluation \
-        --model "gpt-4o-mini-2024-07-18" \
-        --repo_base_dir /tmp/repos \ 
-        --eval_dir "./evaluations" \
-        --eval_name mts \
-        --temp 0.7 \
-        --num_workers 1 \
-        --use_testbed \
-        --feedback \
-        --max_iterations 100 \
-        --max_expansions 5
-```
+moatless-evaluate \
+    --model "gpt-4" \
+    --repo_base_dir /tmp/repos \
+    --eval_dir "./evaluations" \
+    --eval_name mts \
+    --temp 0.7 \
+    --num_workers 1 \
+    --use_testbed \
+    --feedback \
+    --max_iterations 100 \
+    --max_expansions 5
 
 You can optionally set the `--instance_id` to evaluate on a specific instance or a list of instances.
+
+Use `--use_testbed` if you got access to a testbed environment. Otherwise, tests will not be run.
 
 ## Examples
 
