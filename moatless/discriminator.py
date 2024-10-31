@@ -99,8 +99,8 @@ Your task is to carefully evaluate each change and decide which one is the most 
                 output_format=AgentDiscriminatorChoice,
             )
         else:
-            response, completion = self.completion.create_text_completion(
-                messages, system_prompt=SYSTEM_MESSAGE
+            response, completion = self.completion.create_completion(
+                messages, system_prompt=SYSTEM_MESSAGE, actions=[AgentDiscriminatorChoice]
             )
 
         return response.ID, response.EXPLANATION

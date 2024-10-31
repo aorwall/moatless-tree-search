@@ -13,6 +13,7 @@ from moatless.repository.repository import Repository
 from moatless.runtime.runtime import TestResult, TestStatus
 from testbeds.schema import EvaluationResult, TraceItem
 from testbeds.sdk import TestbedSDK
+from testbeds.sdk.exceptions import TestbedError
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,10 @@ class TestbedEnvironment(RuntimeEnvironment):
 
                 return mapped_results
 
+        except TestbedError as e:
+            logger.error(f"Error running tests. Cause: {e}")
+            log_content += f"\n\n## Error:\n{e}"
+
         except Exception as e:
             logger.exception(f"Error running tests {test_files}")
             log_content += f"\n\n## Error:\n{e}"
@@ -139,6 +144,9 @@ class TestbedEnvironment(RuntimeEnvironment):
 
                 log_content += f"\n\n## Evaluation result:\n```json\n{evaluation_result.model_dump_json(indent=2)}\n```"
                 return evaluation_result
+        except TestbedError as e:
+            logger.error(f"Error running evaluation. Cause: {e}")
+            log_content += f"\n\n## Error:\n{e}"
         except Exception as e:
             logger.exception("Error running evaluation")
             log_content += f"\n\n## Error:\n{e}"

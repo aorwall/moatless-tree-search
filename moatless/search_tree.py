@@ -398,8 +398,8 @@ class SearchTree(BaseModel):
         if self.root.file_context is None:
             raise ValueError("SearchTree root node must have a file context.")
 
-        if self.root.file_context._repo is None:
-            raise ValueError("SearchTree root node file context must have a repository.")
+        #if self.root.file_context._repo is None:
+        #    raise ValueError("SearchTree root node file context must have a repository.")
 
         return True
 

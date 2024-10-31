@@ -381,6 +381,7 @@ class Evaluation:
                             self.settings.agent_model
                         ),
                         actions=actions,
+                        system_prompt=system_prompt,
                     )
 
                     if self.settings.best_first:
