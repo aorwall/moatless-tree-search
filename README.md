@@ -78,7 +78,7 @@ You can configure these settings by either:
 To launch the Streamlit app, run:
 
 ```bash
-streamlit run streamlit_app.py
+streamlit run -m moatless.streamlit_app
 ```
 
 The following badges are used to indicate the status of a node:
@@ -112,28 +112,10 @@ You can optionally set the `--instance_id` to evaluate on a specific instance or
 
 Use `--use_testbed` if you got access to a testbed environment. Otherwise, tests will not be run.
 
+## Examples
 
-## Description of the Flow
-The search algorithm operates in a loop, following these main steps to explore and evaluate possible actions:
-
-1. **Selection:** Choose the next `Node` to expand using a `Selector` strategy. The selector evaluates the available nodes (expandable descendants) and selects the most promising one based on predefined criteria.
-
-2. **Expansion:** Create a new child `Node` or select an existing unexecuted child.
-
-3. **Simulation:**
-   * **Action Generation and Execution:** Use the `Agent` to generate and execute an action for the `Node`:
-     - Generate possible actions for the node
-     - Create a system prompt and messages based on the node's history
-     - Use a `CompletionModel` to generate action arguments
-     - Execute the chosen action, updating the node's `FileContext` and creating an `Observation`
-   * **Reward Evaluation:** If a `ValueFunction` is defined, evaluate the outcome of the action execution, assigning a reward to the `Node`.
-
-4. **Backpropagation:** Propagate the obtained reward back up the tree, updating the value estimates and visit counts of ancestor nodes.
-
-When the search process finishes (based on predefined stopping criteria), the algorithm determines the best solution found using a `Discriminator`, which assesses the nodes based on their rewards and other factors.
-
-## Example: Basic Flow
-Basic setup similar to the moatless-tools agent.
+### Example: Basic Flow
+How to setup a basic flow similar to the moatless-tools agent.
 
 ```python
 from moatless.benchmark.swebench import load_instance, create_repository
@@ -185,8 +167,7 @@ print(node.observation.message)
 
 ### Example: MCTS Flow
 
-Evaluation flow with MCTS and testbeds.
-
+How to setup the evaluation flow with MCTS and testbeds.
 
 ```python
 from moatless.benchmark.swebench import load_instance, create_repository
