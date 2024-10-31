@@ -11,7 +11,7 @@ Note: The original development code can be found at [https://github.com/a-antoni
 [![Streamlit](https://img.shields.io/badge/STREAMLIT-7C4DFF?style=flat-square)](https://streamlit.moatless.ai/)
 [![Twitter](https://img.shields.io/badge/TWITTER-00ACEE?style=flat-square)](https://twitter.com/your-handle)
 [![YouTube](https://img.shields.io/badge/YOUTUBE-FF0000?style=flat-square)](https://www.youtube.com/watch?v=VcEHX_TNDgQ)
-![Discord](https://img.shields.io/discord/1298708115189010555)
+[![Discord](https://img.shields.io/badge/DISCORD-7289DA?style=flat-square)](https://discord.gg/74VX8ppBEg)
 </div>
 
 <div align="center">
