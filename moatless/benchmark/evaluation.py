@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from tqdm.auto import tqdm
 
 from moatless.agent.code_agent import CodingAgent
+from moatless.agent.code_prompts import SIMPLE_CODE_PROMPT, SYSTEM_PROMPT
 from moatless.benchmark.report import (
     BenchmarkResult,
     to_dataframe,
@@ -356,8 +357,10 @@ class Evaluation:
                         instance=instance,
                         log_dir=log_dir,
                     )
+                    system_prompt = SYSTEM_PROMPT # Use default system prompt
                 else:
                     runtime = None
+                    system_prompt = SIMPLE_CODE_PROMPT # Use simple code prompt
 
                 if os.path.exists(trajectory_path):
                     search_tree = SearchTree.from_file(trajectory_path, repository=repository, runtime=runtime, code_index=code_index)
@@ -366,7 +369,7 @@ class Evaluation:
 
                     actions = create_coding_actions(repository=repository, code_index=code_index, runtime=runtime, edit_completion_model=self._create_completion_model())
                     agent = CodingAgent(
-                        completion=self._create_completion_model(self.settings.agent_model), actions=actions
+                        completion=self._create_completion_model(self.settings.agent_model), actions=actions, system_prompt=system_prompt
                     )
 
                     if self.settings.best_first:

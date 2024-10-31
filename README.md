@@ -23,50 +23,54 @@ Note: The original development code can be found at [https://github.com/a-antoni
 
 ## Installation
 
-1. Clone the repository and create a conda environment:
+Install the package:
 
 ```bash
-git clone https://github.com/aorwall/moatless-tree-search.git
-cd moatless-tree-search
-conda create -n moatless python=3.11
-conda activate moatless
+pip install moatless-tree-search
 ```
 
-2. Install Poetry (if not already installed):
+### Environment Setup
 
-```bash
-conda install -c conda-forge poetry
-```
+Before running the evaluation, you'll need:
+1. At least one LLM provider API key (e.g., OpenAI, Anthropic, etc.)
+2. A Voyage AI API key from [voyageai.com](https://voyageai.com) to use the pre-embedded vector stores for SWE-Bench instances.
+3. (Optional) Access to a testbed environment - see [moatless-testbeds](https://github.com/aorwall/moatless-testbeds) for setup instructions
 
-3. Install dependencies using Poetry:
-    
-```bash
-poetry install
-```
+You can configure these settings by either:
 
-## Environment Setup
+1. Create a `.env` file in the project root (copy from `.env.example`):
 
-Before running the evaluation, you'll need to set up your environment variables. Add these to your `~/.bashrc` (bash) or `~/.zshrc` (zsh):
+   ```bash
+   cp .env.example .env
+   # Edit .env with your values
+   ```
 
-```bash
-# Base URL for custom LLM API service (optional)
-export CUSTOM_LLM_API_BASE="<your-base-url>"
-export CUSTOM_LLM_API_KEY="<your-key>"
+2. Or export the variables directly:
+   
+   ```bash
+   # Directory for storing vector index store files  
+   export INDEX_STORE_DIR="/tmp/index_store"    
 
-# API keys for various LLM providers (set the ones you need)
-export OPENAI_API_KEY="<your-key>"
-export ANTHROPIC_API_KEY="<your-key>"
-export HUGGINGFACE_API_KEY="<your-key>"
-export DEEPSEEK_API_KEY="<your-key>"
+   # Directory for storing clonedrepositories 
+   export REPO_DIR="/tmp/repos"
 
-# API Keys for Voyage Embeddings
-export VOYAGE_API_KEY="<your-key>"
-export INDEX_STORE_DIR="<your-index-store-dir>" # default: /tmp/index_store
+   # Required: At least one LLM provider API key
+   export OPENAI_API_KEY="<your-key>"
+   export ANTHROPIC_API_KEY="<your-key>"
+   export HUGGINGFACE_API_KEY="<your-key>"
+   export DEEPSEEK_API_KEY="<your-key>"
 
-# Configuration for test environment (if using the testbed)
-export TESTBED_API_KEY="<your-key>"
-export TESTBED_BASE_URL="<your-base-url>"
-```
+   # ...or Base URL for custom LLM API service (optional)
+   export CUSTOM_LLM_API_BASE="<your-base-url>"
+   export CUSTOM_LLM_API_KEY="<your-key>"
+
+   # Required: API Key for Voyage Embeddings
+   export VOYAGE_API_KEY="<your-key>"
+
+   # Optional: Configuration for testbed environment (https://github.com/aorwall/moatless-testbeds)
+   export TESTBED_API_KEY="<your-key>"
+   export TESTBED_BASE_URL="<your-base-url>"
+   ```
 
 
 ## Streamlit
@@ -98,12 +102,16 @@ python -m moatless.benchmark.run_evaluation \
         --eval_name mts \
         --temp 0.7 \
         --num_workers 1 \
+        --use_testbed \
         --feedback \
         --max_iterations 100 \
         --max_expansions 5
 ```
 
 You can optionally set the `--instance_id` to evaluate on a specific instance or a list of instances.
+
+Use `--use_testbed` if you got access to a testbed environment. Otherwise, tests will not be run.
+
 
 ## Description of the Flow
 The search algorithm operates in a loop, following these main steps to explore and evaluate possible actions:

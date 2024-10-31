@@ -20,9 +20,9 @@ logger = logging.getLogger(__name__)
 class CodingAgent(ActionAgent):
     def _create_system_prompt(self, possible_actions: List[Type[Action]]) -> str:
         if self.system_prompt:
-            return self.system_prompt
-
-        prompt = SYSTEM_PROMPT
+            prompt = self.system_prompt
+        else:
+            prompt = SYSTEM_PROMPT
 
         if self.completion.response_format == LLMResponseFormat.JSON:
             prompt += "\n\n" + FEW_SHOT_JSON

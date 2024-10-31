@@ -21,7 +21,7 @@ def evaluate_search_and_code(
     resolved_by: Optional[int] = None,
     instance_ids: Optional[list] = None,
     repo_base_dir: str | None = None,
-    use_testbed: bool = True,
+    use_testbed: bool = False,
     num_workers: int = 4,
     evaluation_name=None,
     evaluations_dir=None,
@@ -41,9 +41,6 @@ def evaluate_search_and_code(
             temp_bias=temperature,
             use_testbed=use_testbed,
         )
-
-    if not evaluations_dir:
-        evaluations_dir = os.getenv("MOATLESS_DIR")
 
     # Expect models with prefix openai/ to be custom
     if tree_search_settings.model.model.startswith("openai/"):
@@ -104,9 +101,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default=None)
     parser.add_argument("--temp", type=float, default=0.2)
-    parser.add_argument(
-        "--no_testbed", action="store_true", help="Disable testbed usage"
-    )
+    parser.add_argument("--use_testbed", action="store_true")
     parser.add_argument("--debate", action="store_true")
     parser.add_argument("--max_expansions", type=int, default=3)
     parser.add_argument("--max_iterations", type=int, default=50)
@@ -115,9 +110,9 @@ if __name__ == "__main__":
     parser.add_argument("--feedback", action="store_true")
     parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--date", type=str, default=None)
-    parser.add_argument("--eval_dir", type=str, default=None)
+    parser.add_argument("--eval_dir", type=str)
     parser.add_argument("--eval_name", type=str, default=None)
-    parser.add_argument("--repo_base_dir", type=str, default=None)
+    parser.add_argument("--repo_base_dir", type=str, default=os.getenv("REPO_DIR", "/tmp/repos"))
     parser.add_argument("--instance_ids", type=str, nargs="+", default=None)
     parser.add_argument("--sample_first", action="store_true")
     parser.add_argument("--resolved_by", type=int, default=None)
@@ -205,7 +200,7 @@ if __name__ == "__main__":
         tree_search_settings=tree_search_settings,
         instance_ids=args.instance_ids,
         date=args.date,
-        use_testbed=not args.no_testbed,
+        use_testbed=args.use_testbed,
         num_workers=args.num_workers,
         best_first=not args.sample_first,
         resolved_by=args.resolved_by,
