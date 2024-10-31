@@ -20,15 +20,15 @@ logger = logging.getLogger(__name__)
 class TestbedEnvironment(RuntimeEnvironment):
     def __init__(
         self,
-        testbed_sdk: TestbedSDK,
         repository: Repository,
-        instance: dict = None,
+        testbed_sdk: TestbedSDK | None = None,
+        instance: dict | None = None,
         log_dir: str | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
 
-        self.testbed_sdk = testbed_sdk
+        self.testbed_sdk = testbed_sdk or TestbedSDK()
         self.repository = repository
         self.instance = instance
         self.tests_to_ignore = []

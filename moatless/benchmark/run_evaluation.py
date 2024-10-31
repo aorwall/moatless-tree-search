@@ -5,7 +5,6 @@ from datetime import datetime
 from typing import Optional
 from pathlib import Path
 
-from dotenv import load_dotenv
 
 from moatless.benchmark.evaluation import (
     create_evaluation_name,
@@ -98,6 +97,12 @@ def ensure_dir(file_path):
 
 
 def main():
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except Exception as e:
+        pass
+
     parser = argparse.ArgumentParser(
         description="Run Moatless evaluation on SWE-Bench instances",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
@@ -309,15 +314,13 @@ def main():
     logging.getLogger("moatless.benchmark.run_evaluation").setLevel(logging.INFO)
     # logging.getLogger("mcts_tree").setLevel(logging.INFO)
 
-    load_dotenv()
-
     # Create ModelSettings instance
     model_settings = ModelSettings(model=args.model, temperature=args.temp)
 
     tree_search_settings = TreeSearchSettings(
         max_iterations=args.max_iterations,
-        min_finished_transitions=3,
-        max_finished_transitions=5,
+        min_finished_nodes=3,
+        max_finished_nodes=5,
         reward_threshold=args.reward_threshold,
         provide_feedback=args.feedback,
         debate=args.debate,

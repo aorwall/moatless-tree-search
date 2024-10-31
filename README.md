@@ -100,7 +100,7 @@ To run the evaluation script
 
 ```bash
 moatless-evaluate \
-    --model "gpt-4" \
+    --model "gpt-4o-mini" \
     --repo_base_dir /tmp/repos \
     --eval_dir "./evaluations" \
     --eval_name mts \
@@ -110,8 +110,9 @@ moatless-evaluate \
     --feedback \
     --max_iterations 100 \
     --max_expansions 5
+```
 
-You can optionally set the `--instance_id` to evaluate on a specific instance or a list of instances.
+You can optionally set the `--instance_ids` to evaluate on a specific instance or a list of instances.
 
 Use `--use_testbed` if you got access to a testbed environment. Otherwise, tests will not be run.
 

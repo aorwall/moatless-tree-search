@@ -350,19 +350,17 @@ class Evaluation:
                 code_index = create_index(instance, repository=repository)
 
                 if self.use_testbed:
-                    from testbeds.sdk import TestbedSDK
                     from moatless.runtime.testbed import TestbedEnvironment
 
                     runtime = TestbedEnvironment(
-                        testbed_sdk=TestbedSDK(),
                         repository=repository,
                         instance=instance,
                         log_dir=log_dir,
                     )
-                    system_prompt = SYSTEM_PROMPT # Use default system prompt
+                    system_prompt = SYSTEM_PROMPT  # Use default system prompt
                 else:
                     runtime = None
-                    system_prompt = SIMPLE_CODE_PROMPT # Use simple code prompt
+                    system_prompt = SIMPLE_CODE_PROMPT  # Use simple code prompt
 
                 if os.path.exists(trajectory_path):
                     search_tree = SearchTree.from_file(
@@ -398,7 +396,7 @@ class Evaluation:
 
                     # discriminator = MeanAwardDiscriminator()
                     discriminator = AgentDiscriminator(
-                        completion_model=self._create_completion_model(),
+                        completion=self._create_completion_model(),
                         n_agents=self.settings.debate_n_agents,
                         n_rounds=self.settings.debate_n_rounds,
                     )
