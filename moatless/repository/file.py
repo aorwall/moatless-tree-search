@@ -107,11 +107,31 @@ class FileRepository(Repository):
     def model_dump(self) -> Dict:
         return {"type": "file", "repo_path": self.repo_path}
 
-    def get_file_content(self, file_path: str) -> str | None:
-        if os.path.exists(os.path.join(self.repo_path, file_path)):
-            with open(os.path.join(self.repo_path, file_path)) as f:
-                return f.read()
+    def get_full_path(self, file_path: str) -> str:
+        """
+        Generates the full file path by combining repo_path and file_path.
+        All paths are treated as relative to repo_path, even if they start with '/'.
+        
+        Args:
+            file_path: The file path to process (e.g., 'file.py' or '/src/file.py')
+            
+        Returns:
+            str: The full path relative to repo_path
+        """
+        # Strip leading slash if present
+        file_path = file_path.lstrip('/')
+        
+        # If file_path starts with repo_dir, make it relative
+        if file_path.startswith(self.repo_dir):
+            file_path = file_path.replace(self.repo_dir, "").lstrip('/')
 
+        return os.path.join(self.repo_path, file_path)
+
+    def get_file_content(self, file_path: str) -> str | None:
+        full_path = self.get_full_path(file_path)
+        if os.path.exists(full_path):
+            with open(full_path) as f:
+                return f.read()
         return None
 
     def snapshot(self) -> dict:
@@ -125,8 +145,7 @@ class FileRepository(Repository):
         return self.repo_path
 
     def is_directory(self, path: str):
-        full_path = os.path.join(self.repo_path, path)
-        return os.path.isdir(full_path)
+        return os.path.isdir(self.get_full_path(path))
 
     def get_file(self, file_path: str):
         if file_path.startswith(self.repo_dir):
@@ -134,7 +153,7 @@ class FileRepository(Repository):
             if file_path.startswith("/"):
                 file_path = file_path[1:]
 
-        full_file_path = os.path.join(self.repo_path, file_path)
+        full_file_path = self.get_full_path(file_path)
         if not os.path.exists(full_file_path):
             logger.debug(f"File not found: {full_file_path}")
             return None
@@ -144,14 +163,14 @@ class FileRepository(Repository):
             return None
 
         file = CodeFile.from_file(file_path=file_path, repo_path=self.repo_path)
-
         return file
 
     def file_exists(self, file_path: str):
-        return os.path.exists(os.path.join(self.repo_path, file_path))
+        full_path = Path(self.get_full_path(file_path))
+        return full_path.exists()
 
     def create_empty_file(self, file_path: str):
-        full_file_path = os.path.join(self.repo_path, file_path)
+        full_file_path = self.get_full_path(file_path)
         if not os.path.exists(os.path.dirname(full_file_path)):
             logger.info(f"Creating directory for {full_file_path}")
             os.makedirs(os.path.dirname(full_file_path))
@@ -165,7 +184,7 @@ class FileRepository(Repository):
         if not self.file_exists(file_path):
             file = self.create_empty_file(file_path)
 
-        with open(os.path.join(self.repo_path, file_path), "w") as f:
+        with open(self.get_full_path(file_path), "w") as f:
             f.write(updated_content)
 
     def matching_files(self, file_pattern: str):

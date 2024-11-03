@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from tqdm.auto import tqdm
 
 from moatless.agent.code_agent import CodingAgent
-from moatless.agent.code_prompts import SIMPLE_CODE_PROMPT, SYSTEM_PROMPT
+from moatless.agent.code_prompts import SIMPLE_CODE_PROMPT, SYSTEM_PROMPT, CLAUDE_PROMPT
 from moatless.benchmark.report import (
     BenchmarkResult,
     to_dataframe,
@@ -33,7 +33,7 @@ from moatless.feedback import FeedbackGenerator
 from moatless.file_context import FileContext
 from moatless.search_tree import SearchTree
 from moatless.selector import BestFirstSelector, SoftmaxSelector
-from moatless.templates import create_coding_actions
+from moatless.templates import create_coding_actions, create_claude_coding_actions
 from moatless.value_function.base import ValueFunction
 
 logger = logging.getLogger(__name__)
@@ -375,16 +375,28 @@ class Evaluation:
                         code_index=code_index,
                     )
                 else:
-                    actions = create_coding_actions(
-                        repository=repository,
-                        code_index=code_index,
-                        runtime=runtime,
-                        edit_completion_model=self._create_completion_model(),
+
+                    completion_model = self._create_completion_model(
+                        self.settings.agent_model
                     )
+
+                    if completion_model.model == "claude-3-5-sonnet-20241022":
+                        actions = create_claude_coding_actions(
+                            repository=repository,
+                            code_index=code_index,
+                            runtime=runtime,
+                        )
+                        system_prompt = CLAUDE_PROMPT
+                    else:
+                        actions = create_coding_actions(
+                            repository=repository,
+                            code_index=code_index,
+                            runtime=runtime,
+                            edit_completion_model=self._create_completion_model(),
+                        )
+
                     agent = CodingAgent(
-                        completion=self._create_completion_model(
-                            self.settings.agent_model
-                        ),
+                        completion=completion_model,
                         actions=actions,
                         system_prompt=system_prompt,
                     )

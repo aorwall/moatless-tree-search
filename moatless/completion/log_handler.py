@@ -36,6 +36,7 @@ class LogHandler(CustomLogger):
             logger.error(f"Failed to write log: {e}")
 
     def log_pre_api_call(self, model, messages, kwargs):
+        print("Logging pre api call")
         data = {
             "model": model,
             "messages": messages,
@@ -44,6 +45,7 @@ class LogHandler(CustomLogger):
         self._write_to_file("pre_api_calls.json", data)
 
     def log_post_api_call(self, kwargs, response_obj, start_time, end_time):
+        print("Logging post api call")
         original_response = kwargs.get("original_response")
         response_content = None
         if original_response:

@@ -171,7 +171,7 @@ class RequestCodeChange(Action):
 
         if not args.file_path.endswith(".py"):
             return Observation(
-                message="Please provide a Python file path.",
+                message="Only Python files can be edited. Please provide a file path to a Python file.",
                 properties={"fail_reason": "not_python_file"},
                 expect_correction=True,
             )

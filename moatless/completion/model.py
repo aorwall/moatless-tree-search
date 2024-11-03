@@ -16,7 +16,8 @@ class Message(BaseModel):
 
 class ToolCall(BaseModel):
     name: str
-    input: dict[str, Any]
+    type: Optional[str] = None
+    input: Optional[dict[str, Any]] = None
 
 
 class AssistantMessage(Message):

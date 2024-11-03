@@ -11,7 +11,8 @@ import litellm
 import openai
 import tenacity
 from anthropic import Anthropic, AnthropicBedrock, NOT_GIVEN
-from anthropic.types import ToolUseBlock
+from anthropic.types import ToolUseBlock, TextBlock
+from anthropic.types.beta import BetaToolUseBlock, BetaTextBlock
 from instructor import OpenAISchema
 from instructor.exceptions import InstructorRetryException
 from litellm.types.utils import ModelResponse
@@ -415,7 +416,6 @@ class CompletionModel(BaseModel):
                 f"No action returned in response: {take_action}.",
                 last_completion=completion_response
             )
-        
 
 
     def function_call_system_prompt(self):
@@ -537,12 +537,19 @@ class CompletionModel(BaseModel):
             tools = []
             tool_choice = {"type": "any"}
             for action in actions:
-                tools.append(action.anthropic_schema)
+                if hasattr(action, "name") and action.name == "str_replace_editor":
+                    tools.append({
+                        "name": "str_replace_editor",
+                        "type": "text_editor_20241022"
+                    })
+                else:
+                    tools.append(action.anthropic_schema)
         else:
             tools = NOT_GIVEN
             tool_choice = NOT_GIVEN
 
-        completion_response = anthropic_client.beta.prompt_caching.messages.create(
+        betas = ["computer-use-2024-10-22", "prompt-caching-2024-07-31"]
+        completion_response = anthropic_client.beta.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
             temperature=self.temperature,
@@ -553,16 +560,18 @@ class CompletionModel(BaseModel):
                     "cache_control": {"type": "ephemeral"},
                 }
             ],
-            tool_choice=tool_choice,
+            # tool_choice=tool_choice,
             tools=tools,
             messages=messages,
+            betas=betas
         )
 
         try:
+            text = None
             if not actions:
                 return completion_response.content[0].text, completion_response
             for block in completion_response.content:
-                if isinstance(block, ToolUseBlock):
+                if isinstance(block, ToolUseBlock) or isinstance(block, BetaToolUseBlock):
                     action = None
                     for check_action in actions:
                         if check_action.openai_schema["name"] == block.name:
@@ -574,9 +583,13 @@ class CompletionModel(BaseModel):
 
                     action_args = action.model_validate(block.input)
 
+                    if hasattr(action_args, "scratch_pad") and text and not action_args.scratch_pad:
+                        action.scratch_pad = text
+
                     # TODO: We only support one action at the moment
                     return action_args, completion_response
-
+                elif isinstance(block, TextBlock) or isinstance(block, BetaTextBlock):
+                    text = block.text
                 else:
                     logger.warning(f"Unexpected block {block}]")
 
@@ -585,6 +598,8 @@ class CompletionModel(BaseModel):
                 f"Failed to parse action request from completion response. Completion: {completion_response}"
             )
             raise e
+
+        raise ValueError(f"No action found in completion response: {completion_response}")
 
     def _map_completion_messages(self, messages: list[Message]) -> list[dict]:
         tool_call_id = None

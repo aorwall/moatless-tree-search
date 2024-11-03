@@ -663,8 +663,7 @@ class CodeBlock:
                 and self.type == CodeBlockType.COMMENTED_OUT_CODE
             ):
                 return " " * 6
-
-            return str(line_number).ljust(6)
+            return f"{line_number:6}\t"
 
         # Just to write out the first line number when there are no pre_lines on first block
         if (

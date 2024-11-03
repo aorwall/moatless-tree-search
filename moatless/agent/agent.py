@@ -119,10 +119,13 @@ class ActionAgent(BaseModel):
 
         action_args = [action.args_schema for action in possible_actions]
 
-        action, completion_response = self._completion.create_completion(
-            messages, system_prompt=system_prompt, actions=action_args
-        )
-
+        try:
+            action, completion_response = self._completion.create_completion(
+                messages, system_prompt=system_prompt, actions=action_args
+            )
+        except ValidationError as e:
+            logger.warning(f"Failed to create completion: {e}")
+            raise RejectError(e.message) from e
         node.action = action
         node.completions["build_action"] = completion_response
 

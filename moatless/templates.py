@@ -2,6 +2,7 @@ from typing import Optional
 
 from moatless.actions.apply_change_and_test import ApplyCodeChangeAndTest
 from moatless.actions.code_change import RequestCodeChange
+from moatless.actions.edit import ClaudeEditTool
 from moatless.actions.find_class import FindClass
 from moatless.actions.find_code_snippet import FindCodeSnippet
 from moatless.actions.find_function import FindFunction
@@ -106,6 +107,37 @@ def create_coding_actions(
 
     return actions
 
+
+def create_claude_coding_actions(
+    repository: Repository,
+    code_index: CodeIndex | None = None,
+    runtime: RuntimeEnvironment | None = None,
+):
+    find_class = FindClass(code_index=code_index, repository=repository)
+    find_function = FindFunction(code_index=code_index, repository=repository)
+    find_code_snippet = FindCodeSnippet(code_index=code_index, repository=repository)
+    semantic_search = SemanticSearch(code_index=code_index, repository=repository)
+    request_context = RequestMoreContext(repository=repository)
+    request_code_change = ClaudeEditTool()
+
+    actions = [
+        semantic_search,
+        find_class,
+        find_function,
+        find_code_snippet,
+        request_context,
+        request_code_change
+    ]
+
+    if runtime:
+        actions.append(
+            RunTests(code_index=code_index, repository=repository, runtime=runtime)
+        )
+
+    actions.append(Finish())
+    actions.append(Reject())
+
+    return actions
 
 def create_mcts_coding_tree(
     message: str,
