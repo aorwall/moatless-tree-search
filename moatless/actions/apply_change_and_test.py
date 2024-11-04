@@ -149,7 +149,7 @@ class ApplyCodeChangeAndTest(RequestCodeChange):
             (
                 25,
                 49,
-                "The code change is acceptable but has noticeable issues; AND tests have noticeable failures that may have been foreseeable but can be addressed with effort.",
+                "The code change is acceptable but has noticeable issues; AND tests have noticeable failures that may have been foreseeable but can be addressed with effort, like missing import statements.",
             ),
             (
                 0,

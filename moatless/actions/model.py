@@ -7,7 +7,7 @@ from typing import Dict, Type, Any, Optional
 from instructor import OpenAISchema
 from instructor.utils import extract_json_from_codeblock, classproperty
 from openai.types.chat import ChatCompletion
-from pydantic import Field, BaseModel
+from pydantic import Field, BaseModel, model_validator
 
 from moatless.completion.model import ToolCall, Completion
 
@@ -18,7 +18,7 @@ _action_args: Dict[str, Type["ActionArguments"]] = {}
 
 
 class ActionArguments(OpenAISchema, ABC):
-    scratch_pad: str = Field(..., description="Your reasoning for the action.")
+    scratch_pad: str = Field("", description="Your reasoning for the action.")
 
     class Config:
         title = "Action"

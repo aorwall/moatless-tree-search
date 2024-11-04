@@ -149,7 +149,7 @@ def main():
     search_group.add_argument(
         "--max_cost", 
         type=float, 
-        default=5.0,
+        default=2.0,
         help="Maximum cost allowed for the search"
     )
     search_group.add_argument(

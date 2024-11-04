@@ -20,6 +20,30 @@ from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.search_tree import SearchTree
 
+def create_basic_coding_actions(
+    repository: Repository,
+    code_index: CodeIndex,
+    completion_model: CompletionModel
+):
+    find_class = FindClass(code_index=code_index, repository=repository, completion_model=completion_model)
+    find_function = FindFunction(code_index=code_index, repository=repository, completion_model=completion_model)
+    find_code_snippet = FindCodeSnippet(code_index=code_index, repository=repository, completion_model=completion_model)
+    semantic_search = SemanticSearch(code_index=code_index, repository=repository, completion_model=completion_model)
+    request_context = RequestMoreContext(repository=repository)
+    request_code_change = RequestCodeChange(repository=repository, completion_model=completion_model)
+    finish = Finish()
+    reject = Reject()
+
+    return [
+        find_class,
+        find_function,
+        find_code_snippet,
+        request_context,
+        request_code_change,
+        semantic_search,
+        finish,
+        reject,
+    ]
 
 def create_basic_coding_tree(
     message: str,
@@ -31,10 +55,10 @@ def create_basic_coding_tree(
     max_cost: float | None = None,
     perist_path: str | None = None,
 ):
-    find_class = FindClass(code_index=code_index, repository=repository)
-    find_function = FindFunction(code_index=code_index, repository=repository)
-    find_code_snippet = FindCodeSnippet(code_index=code_index, repository=repository)
-    semantic_search = SemanticSearch(code_index=code_index, repository=repository)
+    find_class = FindClass(code_index=code_index, repository=repository, completion_model=completion_model)
+    find_function = FindFunction(code_index=code_index, repository=repository, completion_model=completion_model)
+    find_code_snippet = FindCodeSnippet(code_index=code_index, repository=repository, completion_model=completion_model)
+    semantic_search = SemanticSearch(code_index=code_index, repository=repository, completion_model=completion_model)
     request_context = RequestMoreContext(repository=repository)
     request_code_change = RequestCodeChange(
         repository=repository, completion_model=completion_model
@@ -73,12 +97,13 @@ def create_coding_actions(
     repository: Repository,
     code_index: CodeIndex | None = None,
     runtime: RuntimeEnvironment | None = None,
+    identify_completion_model: CompletionModel | None = None,
     edit_completion_model: CompletionModel | None = None,
 ):
-    find_class = FindClass(code_index=code_index, repository=repository)
-    find_function = FindFunction(code_index=code_index, repository=repository)
-    find_code_snippet = FindCodeSnippet(code_index=code_index, repository=repository)
-    semantic_search = SemanticSearch(code_index=code_index, repository=repository)
+    find_class = FindClass(code_index=code_index, repository=repository, completion_model=identify_completion_model)
+    find_function = FindFunction(code_index=code_index, repository=repository, completion_model=identify_completion_model)
+    find_code_snippet = FindCodeSnippet(code_index=code_index, repository=repository, completion_model=identify_completion_model)
+    semantic_search = SemanticSearch(code_index=code_index, repository=repository, completion_model=identify_completion_model)
     request_context = RequestMoreContext(repository=repository)
 
     actions = [
@@ -112,11 +137,12 @@ def create_claude_coding_actions(
     repository: Repository,
     code_index: CodeIndex | None = None,
     runtime: RuntimeEnvironment | None = None,
+    completion_model: CompletionModel | None = None,
 ):
-    find_class = FindClass(code_index=code_index, repository=repository)
-    find_function = FindFunction(code_index=code_index, repository=repository)
-    find_code_snippet = FindCodeSnippet(code_index=code_index, repository=repository)
-    semantic_search = SemanticSearch(code_index=code_index, repository=repository)
+    find_class = FindClass(code_index=code_index, repository=repository, completion_model=completion_model)
+    find_function = FindFunction(code_index=code_index, repository=repository, completion_model=completion_model)
+    find_code_snippet = FindCodeSnippet(code_index=code_index, repository=repository, completion_model=completion_model)
+    semantic_search = SemanticSearch(code_index=code_index, repository=repository, completion_model=completion_model)
     request_context = RequestMoreContext(repository=repository)
     request_code_change = ClaudeEditTool()
 

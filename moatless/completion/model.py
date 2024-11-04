@@ -35,6 +35,7 @@ class Usage(BaseModel):
     completion_cost: float = 0
     completion_tokens: int = 0
     prompt_tokens: int = 0
+    cached_tokens: int | None = None
 
     @classmethod
     def from_completion_response(
@@ -62,6 +63,13 @@ class Usage(BaseModel):
         completion_tokens = usage.get("completion_tokens") or usage.get(
             "output_tokens", 0
         )
+
+        if usage.get("prompt_cache_hit_tokens"):
+            cached_tokens = usage["prompt_cache_hit_tokens"]
+        elif usage.get("cache_read_input_tokens"):
+            cached_tokens = usage["cache_read_input_tokens"]
+        else:
+            cached_tokens = None
 
         try:
             cost = litellm.completion_cost(
@@ -91,6 +99,7 @@ class Usage(BaseModel):
             completion_cost=cost,
             completion_tokens=completion_tokens,
             prompt_tokens=prompt_tokens,
+            cached_tokens=cached_tokens
         )
 
     def __add__(self, other: "Usage") -> "Usage":

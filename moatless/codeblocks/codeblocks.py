@@ -783,6 +783,11 @@ class CodeBlock:
 
         return self.full_path() == other.full_path()
 
+    def compare_indentation(self, other_block: "CodeBlock"):
+        existing_indentation = len(self.indentation)
+        new_indentation = len(other_block.indentation)
+        return existing_indentation - new_indentation
+
     def find_block_by_type(self, block_type: CodeBlockType) -> Optional["CodeBlock"]:
         if self.type == block_type:
             return self

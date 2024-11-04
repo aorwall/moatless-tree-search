@@ -6,7 +6,7 @@ from pydantic import BaseModel, PrivateAttr
 from moatless.actions.action import Action, RewardScaleEntry
 from moatless.completion.completion import CompletionModel
 from moatless.completion.model import Message, UserMessage, Completion
-from moatless.node import Node
+from moatless.node import Node, MessageHistoryType
 from moatless.value_function.model import Reward
 
 logger = logging.getLogger(__name__)
@@ -20,10 +20,32 @@ class ValueFunction(BaseModel):
         self._completion = completion
 
     def get_reward(self, node: Node) -> Tuple[Reward, Optional[Completion]]:
-        message = self._create_message(node)
+        messages = node.generate_message_history(
+            message_history_type=MessageHistoryType.MESSAGES,
+            include_extra_history=True,
+            include_file_context=False,
+            include_git_patch=False)
+
+        last_message = ""
+        if node.action.name == "Finish":
+            last_message += "<reasoning_for_completion>\n"
+            last_message += node.action.finish_reason
+            last_message += "</reasoning_for_completion>\n"
+        else:
+            last_message += "## Last Executed Action:\n"
+            last_message += "Here is the most recent action that was executed and its output. This is the subject of your evaluation.\n"
+            last_message += "\n<executed_action>\n"
+            last_message += node.action.to_prompt()
+            last_message += f"\n\n**Output:**\n{node.observation.message}"
+            if node.observation.extra:
+                last_message += f"\n{node.observation.extra}"
+            last_message += "\n</executed_action>\n\n"
+
+        messages.append(UserMessage(content=last_message))
+
         system_prompt = self._create_system_prompt(node)
 
-        return self._completion.create_completion_with_response_model(messages=[message], system_prompt=system_prompt, response_model=Reward)
+        return self._completion.create_completion_with_response_model(messages=messages, system_prompt=system_prompt, response_model=Reward)
 
     def _create_system_prompt(self, node: Node) -> str:
         return self._build_system_prompt(node)

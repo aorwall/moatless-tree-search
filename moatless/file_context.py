@@ -294,11 +294,10 @@ class ContextFile(BaseModel):
             # Apply changes from the hunk
             for line in hunk:
                 if line.is_context:
-                    if (
-                        line_no >= len(content_lines)
-                        or content_lines[line_no] != line.value
-                    ):
-                        raise Exception("Patch context mismatch")
+                    if line_no >= len(content_lines):
+                        raise Exception(f"Patch context mismatch. Line no {line_no} is larger than content_lines length {len(content_lines)}")
+                    elif line.value.strip() and content_lines[line_no] != line.value:
+                        raise Exception(f"Patch context mismatch. Line {line_no} does not match expected content. \"{content_lines[line_no]}\" != \"{line.value}\"")
                     new_content_lines.append(content_lines[line_no])
                     line_no += 1
                 elif line.is_added:
@@ -1190,17 +1189,19 @@ class FileContext(BaseModel):
         exclude_comments=False,
         show_outcommented_code=False,
         outcomment_code_comment: str = "...",
+        files: set | None = None,
     ):
         file_contexts = []
         for context_file in self.get_context_files():
-            content = context_file.to_prompt(
-                show_span_ids,
-                show_line_numbers,
-                exclude_comments,
-                show_outcommented_code,
-                outcomment_code_comment,
-            )
-            file_contexts.append(content)
+            if not files or context_file.file_path in files:
+                content = context_file.to_prompt(
+                    show_span_ids,
+                    show_line_numbers,
+                    exclude_comments,
+                    show_outcommented_code,
+                    outcomment_code_comment,
+                )
+                file_contexts.append(content)
 
         return "\n\n".join(file_contexts)
 

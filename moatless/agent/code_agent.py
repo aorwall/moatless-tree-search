@@ -4,6 +4,7 @@ import json
 
 from moatless.actions import FindClass, FindFunction, FindCodeSnippet, SemanticSearch, RequestMoreContext
 from moatless.actions.action import Action
+from moatless.actions.apply_change_and_test import ApplyCodeChangeAndTest
 from moatless.actions.code_change import RequestCodeChange
 from moatless.actions.finish import Finish
 from moatless.actions.reject import Reject
@@ -36,7 +37,7 @@ class CodingAgent(ActionAgent):
                 examples = action.get_few_shot_examples()
                 if examples:
                     few_shot_examples.extend(examples)
-            
+
             if few_shot_examples:
                 prompt += "\n\nHere are some examples of how to use the available actions:\n\n"
                 for example in few_shot_examples:
@@ -56,7 +57,7 @@ class CodingAgent(ActionAgent):
             possible_actions = [
                 action
                 for action in possible_actions
-                if action.__class__ not in [RequestCodeChange, RunTests]
+                if action.__class__ not in [ApplyCodeChangeAndTest, RequestCodeChange, RunTests]
             ]
 
         # Remove RunTests if it was just executed in the parent node

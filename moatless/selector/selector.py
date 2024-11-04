@@ -91,7 +91,7 @@ class Selector(BaseModel):
         description="Penalty applied to nodes on a trajectory that has already finished with a high reward, discouraging revisiting completed paths.",
     )
     expect_correction_bonus: float = Field(
-        default=100.0,
+        default=0.0,
         description="Bonus applied to nodes expecting correction, prioritizing exploration of potential fix paths.",
     )
     check_for_bad_child_actions: List[str] = Field(

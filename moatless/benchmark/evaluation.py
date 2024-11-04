@@ -15,6 +15,7 @@ import litellm
 from pydantic import BaseModel, Field
 from tqdm.auto import tqdm
 
+from moatless.agent.agent import MessageHistoryType
 from moatless.agent.code_agent import CodingAgent
 from moatless.agent.code_prompts import SIMPLE_CODE_PROMPT, SYSTEM_PROMPT, CLAUDE_PROMPT
 from moatless.benchmark.report import (
@@ -28,6 +29,7 @@ from moatless.benchmark.swebench import (
 )
 from moatless.benchmark.utils import get_moatless_instance
 from moatless.completion.completion import CompletionModel, LLMResponseFormat
+from moatless.completion.log_handler import LogHandler
 from moatless.discriminator import MeanAwardDiscriminator, AgentDiscriminator
 from moatless.feedback import FeedbackGenerator
 from moatless.file_context import FileContext
@@ -183,6 +185,9 @@ class Evaluation:
         self.dataset_name = dataset_name
         self.evaluation_name = evaluation_name
 
+        self.log_handler = LogHandler(evaluations_dir)
+        litellm.callbacks = [self.log_handler]
+
         self.use_testbed = use_testbed
 
         self.settings = settings
@@ -311,6 +316,10 @@ class Evaluation:
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
 
+        completion_log_dir = os.path.join(instance_dir, "completion_logs")
+        os.makedirs(completion_log_dir, exist_ok=True)
+        self.log_handler.log_dir = completion_log_dir
+
         eval_result_path = os.path.join(instance_dir, "eval_result.json")
         if os.path.exists(eval_result_path):
             with open(eval_result_path) as f:
@@ -385,6 +394,7 @@ class Evaluation:
                             repository=repository,
                             code_index=code_index,
                             runtime=runtime,
+                            completion_model=completion_model
                         )
                         system_prompt = CLAUDE_PROMPT
                     else:
@@ -392,13 +402,18 @@ class Evaluation:
                             repository=repository,
                             code_index=code_index,
                             runtime=runtime,
-                            edit_completion_model=self._create_completion_model(),
+                            identify_completion_model=completion_model,
+                            edit_completion_model=completion_model
                         )
 
                     agent = CodingAgent(
                         completion=completion_model,
                         actions=actions,
                         system_prompt=system_prompt,
+                        message_history_type=MessageHistoryType.MESSAGES,
+                        include_extra_history=True,
+                        include_file_context=False,
+                        include_git_patch=False,
                     )
 
                     if self.settings.best_first:

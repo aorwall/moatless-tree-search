@@ -94,6 +94,7 @@ class RequestMoreContext(Action):
 
         properties = {"files": {}}
         message = ""
+        found_files = set()
 
         for file_with_spans in args.files:
             file = file_context.get_file(file_with_spans.file_path)
@@ -175,6 +176,7 @@ class RequestMoreContext(Action):
             if found_span_ids:
                 message += f"\nAdded the following spans from {file.file_path} to context:\n{', '.join(found_span_ids)}"
 
+            found_files.add(file_with_spans.file_path)
             if file_with_spans.start_line and file_with_spans.end_line:
                 file_context.add_line_span_to_context(
                     file_with_spans.file_path,
@@ -199,9 +201,21 @@ class RequestMoreContext(Action):
                 "found_span_ids": list(found_span_ids),
             }
 
+        if found_files:
+            extra = "<updated_file_context>\n"
+            extra += file_context.create_prompt(
+                show_line_numbers=True,
+                exclude_comments=False,
+                show_outcommented_code=True,
+                outcomment_code_comment="... rest of the code",
+            )
+            extra += "\n</updated_file_context>"
+        else:
+            extra = None
+
         # TODO: Determine which scenarios where we should expect a correction
         return Observation(
-            message=message, properties=properties, expect_correction=False
+            message=message, extra=extra, properties=properties, expect_correction=False
         )
 
     def create_retry_message(self, file: ContextFile, message: str):

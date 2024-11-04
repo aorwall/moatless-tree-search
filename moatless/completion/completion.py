@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Optional, Union, List, Tuple, Any
 
 import instructor
+from jsonschema import ValidationError
 import litellm
 import openai
 import tenacity
@@ -379,18 +380,48 @@ class CompletionModel(BaseModel):
                 action: Union[tuple(actions)] = Field(...)
                 action_type: str = Field(..., description="The type of action being taken")
 
-                class Config:
-                    smart_union = True
+                @model_validator(mode='before')
+                def validate_action(cls, data: dict) -> dict:
+                    action_type = data.get('action_type')
+                    if not action_type:
+                        return data
+
+                    if len(actions) == 1:
+                        data['action'] = actions[0].model_validate(data['action'])
+                    else:
+                        avalabile_actions = [action for action in actions if hasattr(action, "name")]
+
+                        if not avalabile_actions:
+                            raise CompletionRuntimeError(f"No actions found in {actions}")
+
+                        # Find the correct action class based on action_type
+                        action_class = next(
+                            (action for action in avalabile_actions if action.name == action_type),
+                            None
+                        )
+                        if not action_class:
+                            action_names = [action.name for action in avalabile_actions]
+                            raise ValidationError(f"Unknown action type: {action_type}. Available actions: {', '.join(action_names)}")
+
+                        # Validate the action data using the specific action class
+                        data['action'] = action_class.model_validate(data['action'])
+                    return data
+
+                #class Config:
+                #    smart_union = True
 
             action_type = TakeAction
         else:
             action_type = None
 
+        def log_retry(state: tenacity.RetryCallState):
+            if state.attempt_number > 1:
+                logger.warning(state)
+
         retries = tenacity.Retrying(
             retry=tenacity.retry_if_not_exception_type((APIError, BadRequestError, NotFoundError, AuthenticationError)),
             stop=tenacity.stop_after_attempt(3),
-            before=lambda x: logger.info(x),
-            after=lambda x: logger.info(x),
+            after=log_retry,
         )
         take_action, completion_response = (
             client.chat.completions.create_with_completion(
@@ -416,7 +447,6 @@ class CompletionModel(BaseModel):
                 f"No action returned in response: {take_action}.",
                 last_completion=completion_response
             )
-
 
     def function_call_system_prompt(self):
         return """You are an AI language model tasked with transforming unstructured messages wrapped in the XML tag <message> into structured tool calls. Your guidelines are:
