@@ -6,6 +6,7 @@ import string
 from enum import Enum
 from typing import Optional, Union, List, Tuple, Any
 
+import anthropic
 import instructor
 from jsonschema import ValidationError
 import litellm
@@ -13,7 +14,7 @@ import openai
 import tenacity
 from anthropic import Anthropic, AnthropicBedrock, NOT_GIVEN
 from anthropic.types import ToolUseBlock, TextBlock
-from anthropic.types.beta import BetaToolUseBlock, BetaTextBlock
+from anthropic.types.beta import BetaToolUseBlock, BetaTextBlock, BetaMessageParam, BetaCacheControlEphemeralParam
 from instructor import OpenAISchema
 from instructor.exceptions import InstructorRetryException
 from litellm.types.utils import ModelResponse
@@ -579,22 +580,32 @@ class CompletionModel(BaseModel):
             tool_choice = NOT_GIVEN
 
         betas = ["computer-use-2024-10-22", "prompt-caching-2024-07-31"]
-        completion_response = anthropic_client.beta.messages.create(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-            system=[
-                {
-                    "text": system_prompt,
-                    "type": "text",
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            # tool_choice=tool_choice,
-            tools=tools,
-            messages=messages,
-            betas=betas
-        )
+        _inject_prompt_caching(messages)
+
+        system = [
+                    {
+                        "text": system_prompt,
+                        "type": "text",
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]
+
+        try:
+            completion_response = anthropic_client.beta.messages.create(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                system=system,
+                # tool_choice=tool_choice,
+                tools=tools,
+                messages=messages,
+                betas=betas
+            )
+        except anthropic.BadRequestError as e:
+            logger.error(
+                f"Failed to create completion: {e}. Input messages: {json.dumps(messages, indent=2)}"
+            )
+            raise CompletionRuntimeError(f"Failed to create completion: {e}") from e
 
         try:
             text = None
@@ -634,7 +645,7 @@ class CompletionModel(BaseModel):
     def _map_completion_messages(self, messages: list[Message]) -> list[dict]:
         tool_call_id = None
         completion_messages = []
-        for message in messages:
+        for i, message in enumerate(messages):
             if message.role == "user":
                 if tool_call_id and self.response_format in [
                     LLMResponseFormat.TOOLS,
@@ -647,6 +658,7 @@ class CompletionModel(BaseModel):
                             "content": message.content,
                         }
                     )
+                    tool_call_id = None
                 elif tool_call_id and self.response_format in [
                     LLMResponseFormat.TOOLS,
                     LLMResponseFormat.STRUCTURED_OUTPUT,
@@ -663,6 +675,7 @@ class CompletionModel(BaseModel):
                             ],
                         }
                     )
+                    tool_call_id = None
                 elif tool_call_id and self.response_format in [
                     LLMResponseFormat.ANTHROPIC_TOOLS,
                 ]:
@@ -679,13 +692,14 @@ class CompletionModel(BaseModel):
                             ],
                         }
                     )
+                    tool_call_id = None
                 else:
                     completion_messages.append(
                         {"role": "user", "content": message.content}
                     )
             elif message.role == "assistant":
                 if message.tool_call:
-                    tool_call_id = generate_call_id()
+                    tool_call_id = f"call_{i}"
                     if self.response_format == LLMResponseFormat.ANTHROPIC_TOOLS:
                         completion_messages.append(
                             {
@@ -796,13 +810,26 @@ class CompletionModel(BaseModel):
         return self
 
 
-def generate_call_id():
-    prefix = "call_"
-    chars = string.ascii_letters + string.digits
-    length = 24
 
-    random_chars = "".join(random.choices(chars, k=length))
+def _inject_prompt_caching(
+    messages: list[BetaMessageParam],
+):
+    """
+    Set cache breakpoints for the 3 most recent turns
+    one cache breakpoint is left for tools/system prompt, to be shared across sessions
+    """
 
-    random_string = prefix + random_chars
-
-    return random_string
+    breakpoints_remaining = 3
+    for message in reversed(messages):
+        if message["role"] == "user" and isinstance(
+            content := message["content"], list
+        ):
+            if breakpoints_remaining:
+                breakpoints_remaining -= 1
+                content[-1]["cache_control"] = BetaCacheControlEphemeralParam(
+                    {"type": "ephemeral"}
+                )
+            else:
+                content[-1].pop("cache_control", None)
+                # we'll only every have one extra turn per loop
+                break

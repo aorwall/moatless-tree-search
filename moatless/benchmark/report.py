@@ -108,7 +108,7 @@ class TrajectoryStats(BaseModel):
     failed_edits: int = 0
 
     missing_test_files: int = 0
-
+    
     max_tests_run: int = 0
     max_failed_tests: int = 0
     initial_failed_tests: Optional[int] = None
@@ -116,6 +116,8 @@ class TrajectoryStats(BaseModel):
 
     largest_span: Optional[int] = None
     smallest_span: Optional[int] = None
+
+    max_build_tokens: int = 0
 
     test_count: int = 0
     fail_to_pass_count: int = 0
@@ -164,6 +166,8 @@ class BenchmarkResult(BaseModel):
     test_count: int = 0
     fail_to_pass_count: int = 0
     pass_to_pass_count: int = 0
+
+    max_build_tokens: int = 0
 
     alternative_solutions: int = 0
     reward: Optional[float] = None
@@ -244,6 +248,9 @@ def create_trajectory_stats(
                         result.test_edits += 1
                     else:
                         result.edits += 1
+
+            if "build_action" in node.completions:
+                result.max_build_tokens = max(result.max_build_tokens, node.completions["build_action"].usage.prompt_tokens + node.completions["build_action"].usage.completion_tokens)
 
         missing_test_files = get_missing_files(instance["test_file_spans"], test_files)
 
@@ -351,6 +358,7 @@ def to_result(
 
         result = BenchmarkResult(
             instance_id=instance["instance_id"],
+            trajectories = [],
             status=status,
             previous_resolved=previous_resolved,
             duration=info.get("duration", 0),
@@ -370,14 +378,14 @@ def to_result(
             error=best_stats.message if best_stats and best_stats.message else "",
         )
 
-        trajectories = []
-        for transition in search_tree.get_leaf_nodes():
+        
+        for leaf_node in search_tree.get_leaf_nodes():
             traj = create_trajectory_stats(
-                transition,
+                leaf_node,
                 instance,
-                eval_report.get("node_results", {}).get(str(transition.node_id)),
+                eval_report.get("node_results", {}).get(str(leaf_node.node_id)),
             )
-            trajectories.append(traj)
+            result.trajectories.append(traj)
 
             if traj.status == "finished":
                 result.solutions += 1
@@ -422,6 +430,7 @@ def to_result(
 
             if traj.failed_edits > 0:
                 result.failed_edits += 1
+
 
         if "error" in eval_report:
             result.error = eval_report["error"].split("\n")[0]

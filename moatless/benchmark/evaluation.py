@@ -322,8 +322,15 @@ class Evaluation:
 
         eval_result_path = os.path.join(instance_dir, "eval_result.json")
         if os.path.exists(eval_result_path):
-            with open(eval_result_path) as f:
-                eval_result = json.load(f)
+            try:
+                with open(eval_result_path) as f:
+                    eval_result = json.load(f)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse eval result from {eval_result_path}. Will remove file to start over. Error: {e}")
+                os.remove(eval_result_path)
+                eval_result = {
+                    "node_results": {},
+                }
         else:
             eval_result = {
                 "node_results": {},
@@ -342,10 +349,14 @@ class Evaluation:
             search_tree = None
 
             if os.path.exists(trajectory_path):
-                persisted_tree = SearchTree.from_file(trajectory_path)
-                if persisted_tree.is_finished():
-                    logger.info(f"Found completed search tree for {instance_id}")
-                    search_tree = persisted_tree
+                try:
+                    persisted_tree = SearchTree.from_file(trajectory_path)
+                    if persisted_tree.is_finished():
+                        logger.info(f"Found completed search tree for {instance_id}")
+                        search_tree = persisted_tree
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse search tree from {trajectory_path}. Will remove file to start over. Error: {e}")
+                    os.remove(trajectory_path)
 
             if not search_tree:
                 self.log_event(instance_id, "workspace_creation_started")
@@ -389,7 +400,7 @@ class Evaluation:
                         self.settings.agent_model
                     )
 
-                    if completion_model.model == "claude-3-5-sonnet-20241022":
+                    if completion_model.model in ["claude-3-5-sonnet-20241022"]:
                         actions = create_claude_coding_actions(
                             repository=repository,
                             code_index=code_index,
@@ -476,21 +487,19 @@ class Evaluation:
                 eval_result["duration"] = time.time() - start_time
                 search_tree.persist(trajectory_path)
 
-            finished_nodes = search_tree.get_finished_nodes()
+            leaf_nodes = search_tree.get_leaf_nodes()
             patch_results = {}
             logger.info(
-                f"Will evaluate {len(finished_nodes)} finished nodes for instance {instance_id}"
+                f"Will evaluate {len(leaf_nodes)} leaf nodes for instance {instance_id}"
             )
 
             if "node_results" not in eval_result:
                 eval_result["node_results"] = {}
 
             if self.use_testbed:
-                if len(eval_result.get("node_results")) == len(
-                    search_tree.get_finished_nodes()
-                ):
+                if len(eval_result.get("node_results")) == len(leaf_nodes):
                     logger.info(
-                        f"Already evaluated results for {len(search_tree.get_finished_nodes())} nodes in {instance_id}"
+                        f"Already evaluated results for {len(leaf_nodes)} nodes in {instance_id}"
                     )
                 else:
                     if not runtime:
@@ -508,23 +517,23 @@ class Evaluation:
                             enable_cache=True,
                         )
 
-                    for i, finished_node in enumerate(finished_nodes):
+                    for i, leaf_node in enumerate(leaf_nodes):
                         logger.info(
-                            f"Evaluate finished Node{finished_node.node_id} {i+1}/{len(finished_nodes)} for instance {instance_id}"
+                            f"Evaluate finished Node{leaf_node.node_id} {i+1}/{len(leaf_nodes)} for instance {instance_id}"
                         )
 
-                        if finished_node.node_id in eval_result["node_results"]:
+                        if leaf_node.node_id in eval_result["node_results"]:
                             continue
 
-                        patch = finished_node.file_context.generate_git_patch()
+                        patch = leaf_node.file_context.generate_git_patch()
                         patch_hash = create_sha256_hash(patch)
 
                         if patch:
                             if patch_hash in patch_results:
                                 logger.info(
-                                    f"Use already evaluated patch for Node{finished_node.node_id} in {instance_id}"
+                                    f"Use already evaluated patch for Node{leaf_node.node_id} in {instance_id}"
                                 )
-                                eval_result["node_results"][finished_node.node_id] = (
+                                eval_result["node_results"][leaf_node.node_id] = (
                                     patch_results[patch_hash]
                                 )
                             else:
@@ -536,7 +545,7 @@ class Evaluation:
                                     )
                                     continue
 
-                                eval_result["node_results"][finished_node.node_id] = (
+                                eval_result["node_results"][leaf_node.node_id] = (
                                     result.model_dump()
                                 )
                                 patch_results[patch_hash] = result.model_dump()
@@ -544,13 +553,13 @@ class Evaluation:
                                     f"Evaluated patch in {time.time() - start_time} seconds (resolved: {result.resolved})"
                                 )
 
-                        if best_node and finished_node.node_id == best_node.node_id:
+                        if best_node and leaf_node.node_id == best_node.node_id:
                             self.save_prediction(instance_id, patch)
-                            eval_result["selected_node"] = finished_node.node_id
+                            eval_result["selected_node"] = leaf_node.node_id
 
-                            if eval_result["node_results"].get(finished_node.node_id):
+                            if eval_result["node_results"].get(leaf_node.node_id):
                                 eval_result["resolved"] = eval_result["node_results"][
-                                    finished_node.node_id
+                                    leaf_node.node_id
                                 ]["resolved"]
 
                                 if eval_result.get("resolved"):

@@ -197,37 +197,46 @@ class FileRepository(Repository):
         Returns:
             List[str]: A list of relative file paths matching the pattern.
         """
-        # Split pattern into directory and filename parts
-        pattern_parts = file_pattern.split('/')
-        filename = pattern_parts[-1]
-        
-        # If filename doesn't contain wildcards, it should be an exact match
-        has_wildcards = any(c in filename for c in '*?[]')
-        if not has_wildcards:
-            # Prepend **/ only to the directory part if it exists
-            if len(pattern_parts) > 1:
-                dir_pattern = '/'.join(pattern_parts[:-1])
-                if not dir_pattern.startswith(("/", "\\", "**/")) and "**/" not in dir_pattern:
-                    file_pattern = f"**/{dir_pattern}/{filename}"
+
+        try:
+            # If absolute path, log warning and remove first slash
+            if file_pattern.startswith("/"):
+                logger.warning(f"Converting absolute path {file_pattern} to relative path")
+                file_pattern = file_pattern[1:]
+
+            # Split pattern into directory and filename parts
+            pattern_parts = file_pattern.split('/')
+            filename = pattern_parts[-1]
+            
+            # If filename doesn't contain wildcards, it should be an exact match
+            has_wildcards = any(c in filename for c in '*?[]')
+            if not has_wildcards:
+                # Prepend **/ only to the directory part if it exists
+                if len(pattern_parts) > 1:
+                    dir_pattern = '/'.join(pattern_parts[:-1])
+                    if not dir_pattern.startswith(("/", "\\", "**/")) and "**/" not in dir_pattern:
+                        file_pattern = f"**/{dir_pattern}/{filename}"
+                    else:
+                        file_pattern = f"{dir_pattern}/{filename}"
                 else:
-                    file_pattern = f"{dir_pattern}/{filename}"
+                    file_pattern = f"**/{filename}"
             else:
-                file_pattern = f"**/{filename}"
-        else:
-            # Original behavior for patterns with wildcards
-            if not file_pattern.startswith(("/", "\\", "**/")) and "**/" not in file_pattern:
-                file_pattern = f"**/{file_pattern}"
+                # Original behavior for patterns with wildcards
+                if not file_pattern.startswith(("/", "\\", "**/")) and "**/" not in file_pattern:
+                    file_pattern = f"**/{file_pattern}"
 
-        repo_path = Path(self.repo_path)
-        matched_files = []
-        for path in repo_path.glob(file_pattern):
-            if path.is_file():
-                # For exact filename matches, verify the filename matches exactly
-                if not has_wildcards and path.name != filename:
-                    continue
-                relative_path = str(path.relative_to(self.repo_path)).replace(os.sep, "/")
-                matched_files.append(relative_path)
-
+            repo_path = Path(self.repo_path)
+            matched_files = []
+            for path in repo_path.glob(file_pattern):
+                if path.is_file():
+                    # For exact filename matches, verify the filename matches exactly
+                    if not has_wildcards and path.name != filename:
+                        continue
+                    relative_path = str(path.relative_to(self.repo_path)).replace(os.sep, "/")
+                    matched_files.append(relative_path)
+        except Exception as e:
+            raise RuntimeError(f"Error matching files for pattern {file_pattern}") from e
+    
         return matched_files
 
     def find_files(self, file_patterns: list[str]) -> set[str]:

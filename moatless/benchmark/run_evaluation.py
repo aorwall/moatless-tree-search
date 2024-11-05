@@ -210,7 +210,7 @@ def main():
         "--resolved_by", 
         type=int, 
         default=None,
-        help="Filter instances by resolution time (in hours)"
+        help="Filter instances by resolved solutions (e.g., 1, 2, 3, ...)"
     )
 
     # Other settings

@@ -176,17 +176,18 @@ class RequestMoreContext(Action):
             if found_span_ids:
                 message += f"\nAdded the following spans from {file.file_path} to context:\n{', '.join(found_span_ids)}"
 
-            found_files.add(file_with_spans.file_path)
             if file_with_spans.start_line and file_with_spans.end_line:
                 file_context.add_line_span_to_context(
                     file_with_spans.file_path,
                     file_with_spans.start_line,
                     file_with_spans.end_line,
                 )
+                found_files.add(file_with_spans.file_path)
 
             for span_id in file_with_spans.span_ids:
                 if not file_context.has_span(file_with_spans.file_path, span_id):
                     file_context.add_span_to_context(file_with_spans.file_path, span_id)
+                    found_files.add(file_with_spans.file_path)
 
             if missing_span_ids:
                 logger.info(
@@ -208,6 +209,7 @@ class RequestMoreContext(Action):
                 exclude_comments=False,
                 show_outcommented_code=True,
                 outcomment_code_comment="... rest of the code",
+                files=found_files,
             )
             extra += "\n</updated_file_context>"
         else:

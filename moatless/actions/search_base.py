@@ -158,16 +158,18 @@ class SearchBaseAction(Action):
                 message += f"\nIdentified the following relevant code spans:\n"
                 for identified_spans in identified_code.identified_spans:
                     search_hit_str += f"\n- File: {identified_spans.file_path}\n  Span IDs:"
-                    found_files.add(identified_spans.file_path)
                     for span_id in identified_spans.span_ids:
-                        file_context.add_span_to_context(identified_spans.file_path, span_id)
+                        if not file_context.has_span(identified_spans.file_path, span_id):
+                            found_files.add(identified_spans.file_path)
+                            file_context.add_span_to_context(identified_spans.file_path, span_id)
                         search_hit_str += f"\n  - {span_id}"
         else:
             for hit in search_result.hits:
-                found_files.add(hit.file_path)
                 search_hit_str += f"\n- File: {hit.file_path}\n  Span IDs:"
                 for span in hit.spans:
-                    file_context.add_span_to_context(hit.file_path, span.span_id)
+                    if not file_context.has_span(hit.file_path, span.span_id):
+                        found_files.add(hit.file_path)
+                        file_context.add_span_to_context(hit.file_path, span.span_id)
                     search_hit_str += f"\n  - {span.span_id}"
 
         message += f"\n{search_hit_str}"
@@ -179,6 +181,7 @@ class SearchBaseAction(Action):
                 exclude_comments=False,
                 show_outcommented_code=True,
                 outcomment_code_comment="... rest of the code",
+                files=found_files,
             )
             extra += "\n</updated_file_context>"
         else:
