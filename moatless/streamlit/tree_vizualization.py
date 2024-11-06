@@ -631,9 +631,9 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                                     st.code(selected_node.observation.extra)
                             
                             # Add reward feedback section
-                            if selected_node.reward and selected_node.reward.feedback:
+                            if selected_node.feedback:
                                 st.subheader("Feedback")
-                                st.write(selected_node.reward.feedback)
+                                st.write(selected_node.feedback)
 
                     if "FileContext" in tabs:
                         with tab_contents[tabs.index("FileContext")]:
