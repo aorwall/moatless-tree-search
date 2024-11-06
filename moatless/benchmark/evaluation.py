@@ -410,7 +410,8 @@ class Evaluation:
                     )
 
                     if self.settings.selector == "llm_selector":
-                        selector = LLMSelector(completion=self._create_completion_model())
+                        selector = LLMSelector(completion=self._create_completion_model(),
+                                               max_iterations=self.settings.max_iterations)
                     elif self.settings.best_first:
                         selector = BestFirstSelector()
                     else:
