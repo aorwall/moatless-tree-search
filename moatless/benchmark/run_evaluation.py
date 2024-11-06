@@ -301,15 +301,16 @@ def main():
 
     # Create console handler with a higher log level
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.WARN)
+    console_handler.setLevel(logging.INFO)
     console_formatter = logging.Formatter("%(levelname)s - %(message)s")
     console_handler.setFormatter(console_formatter)
     logger.addHandler(console_handler)
 
     # Adjust log levels for specific loggers
+    logging.getLogger().setLevel(logging.WARNING)
     logging.getLogger("LiteLLM").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("moatless").setLevel(logging.INFO)
+    logging.getLogger("moatless").setLevel(logging.WARNING)
     logging.getLogger("moatless.benchmark.evaluation").setLevel(logging.INFO)
     logging.getLogger("moatless.benchmark.run_evaluation").setLevel(logging.INFO)
     # logging.getLogger("mcts_tree").setLevel(logging.INFO)

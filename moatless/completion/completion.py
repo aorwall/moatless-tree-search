@@ -121,6 +121,8 @@ class CompletionModel(BaseModel):
                 last_completion=e.last_completion,
                 messages=e.messages
             )
+        except CompletionRejectError as e:
+            raise e
         except Exception as e:
             if isinstance(e, APIError):
                 logger.error(
@@ -574,7 +576,14 @@ class CompletionModel(BaseModel):
                         "type": "text_editor_20241022"
                     })
                 else:
-                    tools.append(action.anthropic_schema)
+                    schema = action.anthropic_schema
+
+                    # Remove scratch pad field, use regular text block for thoughts
+                    if "scratch_pad" in schema["input_schema"]["properties"]:
+                        del schema["input_schema"]["properties"]["scratch_pad"]
+
+                    tools.append(schema)
+
         else:
             tools = NOT_GIVEN
             tool_choice = NOT_GIVEN
@@ -589,7 +598,7 @@ class CompletionModel(BaseModel):
                         "cache_control": {"type": "ephemeral"},
                     }
                 ]
-
+        completion_response = None
         try:
             completion_response = anthropic_client.beta.messages.create(
                 model=self.model,
@@ -640,7 +649,10 @@ class CompletionModel(BaseModel):
             )
             raise e
 
-        raise ValueError(f"No action found in completion response: {completion_response}")
+        if not text:
+            text = f"No action found in completion response"
+
+        raise CompletionRejectError(text, last_completion=completion_response)
 
     def _map_completion_messages(self, messages: list[Message]) -> list[dict]:
         tool_call_id = None
@@ -821,7 +833,8 @@ def _inject_prompt_caching(
 
     breakpoints_remaining = 3
     for message in reversed(messages):
-        if message["role"] == "user" and isinstance(
+        # message["role"] == "user" and
+        if isinstance(
             content := message["content"], list
         ):
             if breakpoints_remaining:

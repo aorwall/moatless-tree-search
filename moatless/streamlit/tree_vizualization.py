@@ -31,12 +31,12 @@ def decide_badge(node_info):
     """
     if node_info.get("resolved") is not None:
         if node_info.get("resolved", False):
-            return ("star", "green")
+            return ("star", "gold")
         else:
             return ("x", "red")
 
     if node_info.get("warning"):
-        return ("x", "red")
+        return ("circle", "red")
 
     if node_info.get("context_status") in ["found_spans"]:
         if node_info.get("patch_status") == "wrong_files":
@@ -94,12 +94,8 @@ def build_graph(
             elif "fail_reason" in node.observation.properties:
                 warning = f"Fail: {node.observation.properties['fail_reason']}"
 
-        if node.action and node.action.name == "Finish":
-            resolved = is_resolved(node.node_id)
-            logger.info(f"Node {node.node_id} resolved: {resolved}")
-        else:
-            resolved = None
-
+        resolved = is_resolved(node.node_id)
+       
         G.add_node(
             node_id,
             name=action_name,

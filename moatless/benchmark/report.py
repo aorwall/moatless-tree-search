@@ -377,7 +377,6 @@ def to_result(
             actions=best_stats.actions if best_stats else {},
             error=best_stats.message if best_stats and best_stats.message else "",
         )
-
         
         for leaf_node in search_tree.get_leaf_nodes():
             traj = create_trajectory_stats(
@@ -430,7 +429,6 @@ def to_result(
 
             if traj.failed_edits > 0:
                 result.failed_edits += 1
-
 
         if "error" in eval_report:
             result.error = eval_report["error"].split("\n")[0]

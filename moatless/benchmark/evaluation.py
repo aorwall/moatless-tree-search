@@ -519,19 +519,22 @@ class Evaluation:
 
                     for i, leaf_node in enumerate(leaf_nodes):
                         logger.info(
-                            f"Evaluate finished Node{leaf_node.node_id} {i+1}/{len(leaf_nodes)} for instance {instance_id}"
+                            f"Evaluate Node{leaf_node.node_id} {i+1}/{len(leaf_nodes)} for instance {instance_id}"
                         )
 
                         if leaf_node.node_id in eval_result["node_results"]:
+                            logger.info(
+                                f"Skip Node{leaf_node.node_id} {i + 1}/{len(leaf_nodes)} for instance {instance_id} that has already been evaluated "
+                            )
                             continue
 
                         patch = leaf_node.file_context.generate_git_patch()
-                        patch_hash = create_sha256_hash(patch)
+                        if patch and patch.strip():
+                            patch_hash = create_sha256_hash(patch)
 
-                        if patch:
                             if patch_hash in patch_results:
                                 logger.info(
-                                    f"Use already evaluated patch for Node{leaf_node.node_id} in {instance_id}"
+                                    f"Skip Node{leaf_node.node_id} {i + 1}/{len(leaf_nodes)} for instance {instance_id} as patch has already been evaluated."
                                 )
                                 eval_result["node_results"][leaf_node.node_id] = (
                                     patch_results[patch_hash]
@@ -552,6 +555,10 @@ class Evaluation:
                                 logger.info(
                                     f"Evaluated patch in {time.time() - start_time} seconds (resolved: {result.resolved})"
                                 )
+                        else:
+                            logger.info(
+                                f"Skip Node{leaf_node.node_id} {i + 1}/{len(leaf_nodes)} for instance {instance_id} with no patch."
+                            )
 
                         if best_node and leaf_node.node_id == best_node.node_id:
                             self.save_prediction(instance_id, patch)
