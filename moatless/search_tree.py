@@ -269,11 +269,11 @@ class SearchTree(BaseModel):
                 )
                 return child
 
-        # if self.feedback_generator:
-        #     feedback = self.feedback_generator.generate_feedback(node)
-        # else:
-        #     feedback = None
-        feedback = node.reward.feedback if node.reward else None
+        if self.feedback_generator:
+            feedback = self.feedback_generator.generate_feedback(node)
+        else:
+            feedback = None
+        # feedback = node.reward.feedback if node.reward else None
 
         child_node = Node(
             node_id=self._generate_unique_id(),
