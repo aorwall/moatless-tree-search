@@ -12,7 +12,7 @@ from moatless.file_context import FileContext
 from moatless.index.code_index import CodeIndex
 from moatless.node import Node, generate_ascii_tree
 from moatless.repository.repository import Repository
-from moatless.selector import BestFirstSelector, Selector, SoftmaxSelector
+from moatless.selector import BestFirstSelector, Selector, SoftmaxSelector, LLMSelector
 from moatless.value_function.base import ValueFunction
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.exceptions import RuntimeError, RejectError
@@ -132,6 +132,8 @@ class SearchTree(BaseModel):
                     obj["selector"] = BestFirstSelector.model_validate(obj["selector"])
                 elif selector_type == "SoftmaxSelector":
                     obj["selector"] = SoftmaxSelector.model_validate(obj["selector"])
+                elif selector_type == "LLMSelector":
+                    obj["selector"] = LLMSelector.model_validate(obj["selector"])
                 else:
                     raise ValueError(f"Unknown selector type: {selector_type}")
 
@@ -218,6 +220,7 @@ class SearchTree(BaseModel):
                 break
 
             node = self._select(self.root)
+
             if node:
                 new_node = self._expand(node)
                 self._simulate(new_node)
@@ -243,12 +246,17 @@ class SearchTree(BaseModel):
         """Select a node for expansion using the UCT algorithm."""
         expandable_nodes = node.get_expandable_descendants()
 
-        filtered_nodes = [n for n in expandable_nodes if n.get_depth() < self.max_depth]
+        # filtered_nodes = [n for n in expandable_nodes if n.get_depth() < self.max_depth]
+        filtered_nodes = expandable_nodes
 
         if not filtered_nodes:
             logger.info("No expandable nodes found.")
             return None
 
+        search_tree = generate_ascii_tree(self.root, 
+                                          include_explanation=True)
+        print(f"search_tree:\n{search_tree}")
+        
         return self.selector.select(filtered_nodes)
 
     def _expand(self, node: Node) -> Node:
@@ -261,10 +269,11 @@ class SearchTree(BaseModel):
                 )
                 return child
 
-        if self.feedback_generator:
-            feedback = self.feedback_generator.generate_feedback(node)
-        else:
-            feedback = None
+        # if self.feedback_generator:
+        #     feedback = self.feedback_generator.generate_feedback(node)
+        # else:
+        #     feedback = None
+        feedback = node.reward.feedback if node.reward else None
 
         child_node = Node(
             node_id=self._generate_unique_id(),

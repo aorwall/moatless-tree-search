@@ -32,7 +32,7 @@ from moatless.discriminator import MeanAwardDiscriminator, AgentDiscriminator
 from moatless.feedback import FeedbackGenerator
 from moatless.file_context import FileContext
 from moatless.search_tree import SearchTree
-from moatless.selector import BestFirstSelector, SoftmaxSelector
+from moatless.selector import BestFirstSelector, SoftmaxSelector, LLMSelector
 from moatless.templates import create_coding_actions
 from moatless.value_function.base import ValueFunction
 
@@ -101,6 +101,12 @@ class TreeSearchSettings(BaseModel):
     agent_model: Optional[ModelSettings] = Field(
         default=None,
         description="The model the agent will use.",
+    )
+    
+    selector: str = Field(
+        "llm_selector",
+        options=["best_first", "softmax", "llm_selector"],
+        description="The selector to use for the tree search.",
     )
 
     value_function_model: Optional[ModelSettings] = Field(
@@ -176,6 +182,7 @@ class Evaluation:
         litellm_callback: Optional[str] = None,
         num_workers: int = 1,
         use_testbed: bool = False,
+        overwrite: bool = False,
     ):
         self.evaluations_dir = evaluations_dir
         self.num_workers = num_workers
@@ -206,6 +213,8 @@ class Evaluation:
         self.file_lock = threading.Lock()
         self.statuses = defaultdict(dict)
         self.events = defaultdict(list)
+
+        self.overwrite = overwrite
 
     def update_status(self, instance_id: str, status: str):
         with self.file_lock:
@@ -303,6 +312,14 @@ class Evaluation:
         instance_id = instance["instance_id"]
         instance_dir = os.path.join(self.evaluation_dir, f"{instance_id}")
         trajectory_path = os.path.join(instance_dir, "trajectory.json")
+        eval_result_path = os.path.join(instance_dir, "eval_result.json")
+
+        if not self.overwrite and os.path.exists(eval_result_path):
+            with open(eval_result_path) as f:
+                eval_result = json.load(f)
+                if eval_result.get("status") == "completed":
+                    logger.info(f"Skipping completed instance {instance_id} (use --overwrite to force re-evaluation)")
+                    return eval_result
 
         if not os.path.exists(self.evaluation_dir):
             os.makedirs(trajectory_path)
@@ -311,8 +328,11 @@ class Evaluation:
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
 
-        eval_result_path = os.path.join(instance_dir, "eval_result.json")
-        if os.path.exists(eval_result_path):
+        if self.overwrite and os.path.exists(eval_result_path):
+            eval_result = {
+                "node_results": {},
+            }
+        elif os.path.exists(eval_result_path):
             with open(eval_result_path) as f:
                 eval_result = json.load(f)
         else:
@@ -389,7 +409,9 @@ class Evaluation:
                         system_prompt=system_prompt,
                     )
 
-                    if self.settings.best_first:
+                    if self.settings.selector == "llm_selector":
+                        selector = LLMSelector(completion=self._create_completion_model())
+                    elif self.settings.best_first:
                         selector = BestFirstSelector()
                     else:
                         selector = SoftmaxSelector()

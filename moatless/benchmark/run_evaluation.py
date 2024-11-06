@@ -26,6 +26,7 @@ def evaluate_search_and_code(
     evaluations_dir=None,
     date=None,
     tree_search_settings: TreeSearchSettings = None,
+    overwrite: bool = False,
     **kwargs,
 ):
     temperature = tree_search_settings.model.temperature or kwargs.get("temp_bias", 0.2)
@@ -80,6 +81,7 @@ def evaluate_search_and_code(
         max_file_context_tokens=16000,
         num_workers=num_workers,
         use_testbed=use_testbed,
+        overwrite=overwrite,
     )
 
     evaluation.run_evaluation(
@@ -137,7 +139,7 @@ def main():
     search_group.add_argument(
         "--max_expansions", 
         type=int, 
-        default=3,
+        default=10,
         help="Maximum number of expansions per node"
     )
     search_group.add_argument(
@@ -226,6 +228,11 @@ def main():
         type=str, 
         default=None,
         help="Custom date for the evaluation name"
+    )
+    other_group.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite existing evaluation results if they exist"
     )
 
     args = parser.parse_args()
@@ -339,6 +346,7 @@ def main():
         num_workers=args.num_workers,
         best_first=not args.sample_first,
         resolved_by=args.resolved_by,
+        overwrite=args.overwrite,
     )
 
 if __name__ == "__main__":

@@ -13,5 +13,5 @@ class Reward(OpenAISchema):
     )
     value: int = Field(
         ...,
-        description="As ingle integer value between -100 and 100 based on your confidence in the correctness of the action and its likelihood of resolving the issue",
+        description="A single integer value between -100 and 100 based on your confidence in the correctness of the action and its likelihood of resolving the issue",
     )

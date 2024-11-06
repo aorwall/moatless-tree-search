@@ -8,10 +8,61 @@ import numpy as np
 from pydantic import BaseModel, Field, PrivateAttr
 
 from moatless.selector.similarity import calculate_similarity
-from moatless.node import Node
+from moatless.node import Node, generate_ascii_tree
 
 logger = logging.getLogger(__name__)
 
+def build_ascii_tree(self, node: Node, prefix: str = "", is_last: bool = True) -> str:
+    """
+    Build an ASCII representation of the search tree starting from the given node.
+    
+    Args:
+        node: The current node to process
+        prefix: The prefix to use for the current line (for indentation)
+        is_last: Whether this node is the last child of its parent
+    
+    Returns:
+        A string containing the ASCII tree representation
+    """
+    # Start with the current line's prefix
+    current_prefix = "└─" if is_last else "├─"
+    
+    # Build the node information string
+    node_info = f"[{node.node_id}] {node.action.__class__.__name__ if node.action else 'Pending'}"
+    node_info += f" (depth: {node.get_depth()}, visits: {node.visits}"
+    node_info += f", value: {node.reward.value:.2f}" if node.reward else ", value: 0.00"
+    
+    # Calculate average reward if the node has been visited
+    if node.visits > 0:
+        total_reward = sum(child.reward.value for child in node.get_descendants() if child.reward)
+        total_nodes = sum(1 for _ in node.get_descendants() if _.reward)
+        avg_reward = total_reward / total_nodes if total_nodes > 0 else 0
+        node_info += f", avg: {avg_reward:.2f}"
+    
+    node_info += ")"
+    
+    # Combine prefix and node information
+    result = f"{prefix}{current_prefix}{node_info}\n"
+    
+    # Add feedback if it exists
+    if node.observation and node.observation.feedback:
+        feedback_lines = node.observation.feedback.split('\n')
+        feedback_prefix = prefix + ("    " if is_last else "│   ")
+        for line in feedback_lines:
+            if line.strip():  # Only add non-empty lines
+                result += f"{feedback_prefix}{line.strip()}\n"
+    
+    # Process children
+    children = list(node.children)
+    for i, child in enumerate(children):
+        next_prefix = prefix + ("    " if is_last else "│   ")
+        result += self.build_ascii_tree(
+            child,
+            prefix=next_prefix,
+            is_last=(i == len(children) - 1)
+        )
+    
+    return result
 
 @dataclass
 class UCTScore:
@@ -153,7 +204,7 @@ class Selector(BaseModel):
             depth_bonus=depth_bonus,
             depth_penalty=depth_penalty,
             high_value_leaf_bonus=high_value_leaf_bonus,
-            high_value_bad_children_bonus=high_value_bad_children_bonus,
+        high_value_bad_children_bonus=high_value_bad_children_bonus,
             high_value_child_penalty=high_value_child_penalty,
             high_value_parent_bonus=high_value_parent_bonus,
             finished_trajectory_penalty=finished_trajectory_penalty,
@@ -388,6 +439,8 @@ class Selector(BaseModel):
                 return BestFirstSelector(**obj)
             elif selector_type == "SoftmaxSelector":
                 return SoftmaxSelector(**obj)
+            elif selector_type == "LLMSelector":
+                return LLMSelector(**obj)
             else:
                 raise ValueError(f"Unknown selector type: {selector_type}")
         return super().model_validate(obj)
@@ -437,7 +490,7 @@ class SoftmaxSelector(Selector):
     def select(self, expandable_nodes: List[Node]) -> Node:
         if len(expandable_nodes) == 1:
             return expandable_nodes[0]
-
+        
         nodes_with_scores = [(node, self.uct_score(node)) for node in expandable_nodes]
         uct_scores = [score.final_score for _, score in nodes_with_scores]
 
@@ -471,3 +524,144 @@ class SoftmaxSelector(Selector):
         )
 
         return selected_node
+    
+
+from instructor import OpenAISchema
+from pydantic import Field
+
+class NodeSelection(OpenAISchema):
+    """
+
+    Scores range from -100 to 100.
+    Select expandable nodes.
+
+    OUTPUT FORMAT:
+    <node_id>: Selected node ID
+    <explanation>: Adress the agent responsible for generating the next action directly (e.g. "You should ...") with the following information:
+        ANCESTRY: Parent context, sibling outcomes, path differences.
+        CURRENT: Node state/potential, relation to successful paths.
+        DESCENDANTS: Child outcomes, pitfalls, unexplored directions.
+        GUIDANCE: Specific recommendations for the next action based on the information gathered from the tree.
+    """
+    node_id: int = Field(description="The ID of the selected node")
+    explanation: str = Field(
+        description="Analysis of node's context in tree: ancestry, current state, descendants, and guidance"
+    )
+    
+from instructor import OpenAISchema
+from pydantic import Field
+from moatless.node import Node, generate_ascii_tree
+from moatless.completion.model import Message
+from moatless.completion.completion import CompletionModel
+
+class LLMSelector(Selector):
+    type: Literal["LLMSelector"] = "LLMSelector"
+    completion: CompletionModel = Field(description="The completion model used to generate responses")
+
+    def get_action_definitions(self) -> str:
+        """
+        Build a formatted string containing descriptions of all available actions.
+        """
+        try:
+            from moatless.actions.action import Action
+            
+            definitions = "\nAvailable Actions:\n"
+            for action_name in Action.get_available_actions():
+                action = Action.get_action_by_name(action_name)
+                try:
+                    schema = action.args_schema.model_json_schema()
+                    definitions += f"\n* **{schema['title']}**: {schema['description']}"
+                    
+                    # Add parameter descriptions if they exist
+                    if 'properties' in schema:
+                        for param_name, param_info in schema['properties'].items():
+                            if 'description' in param_info:
+                                definitions += f"\n  - {param_name}: {param_info['description']}"
+                    
+                except Exception as e:
+                    logger.error(f"Error getting schema for action {action_name}: {e}")
+                    continue
+            
+            return definitions
+        except Exception as e:
+            logger.error(f"Error building action definitions: {e}")
+            return "\nAction definitions unavailable."
+
+    def build_ascii_tree(self, node: Node, previous_attempts: str = "") -> NodeSelection:
+        # Generate ASCII tree representation
+        ascii_tree = generate_ascii_tree(
+            node, 
+            include_explanation=True,
+            use_color=False,
+        )
+        
+        # Create messages for LLM
+        messages = [
+            Message(
+                role="system",
+                content="You are an AI tasked with analyzing a Monte Carlo Tree Search (MCTS) tree and selecting the most promising node for expansion. "
+                        "Consider the node's reward, number of visits, and the potential of its action. "
+                        "Be specific and provide context, since the software delevoper agent will only have the information you provide to it from the rest of the tree. "
+                        "The goal of the software developer agent is to make progress towards finding a solution by reaching multiple diverse 'finished' nodes that increase the likelihood of finding a good solution. "
+                        "Avoid suggesting repetitive actions that cause the agent to fall into loops."
+                        f"{self.get_action_definitions()}"  # Add action definitions to system prompt
+            ),
+            Message(
+                role="user",
+                content=f"Given the following MCTS tree, select the most promising node for expansion:\n\n{ascii_tree}\n\n"
+                        f"{previous_attempts}"  # Include previous attempts if any
+                        "Analyze the tree structure, rewards, and visit counts to make your decision. "
+                        "Consider both exploration (nodes with few visits) and exploitation (nodes with high rewards)."
+            )
+        ]
+
+        # Get completion from LLM
+        action_request, completion = self.completion.create_completion(
+            messages=messages,
+            system_prompt="You are an AI tasked with analyzing Monte Carlo Tree Search (MCTS) trees.",
+            actions=[NodeSelection]
+        )
+
+        # Parse the response - action_request should already be a NodeSelection instance
+        if action_request:
+            return action_request
+        
+        # Fallback to first node if parsing fails
+        return NodeSelection(node_id=0, explanation="Failed to parse LLM response")
+    
+    def select(self, nodes: List[Node]) -> Node:
+        if len(nodes) == 1:
+            return nodes[0]
+
+        max_retries = 3
+        available_node_ids = [node.node_id for node in nodes]
+        previous_attempts = ""
+        
+        for attempt in range(max_retries):
+            # Get the selection from LLM
+            selection = self.build_ascii_tree(nodes[0], previous_attempts)
+            print(f"Attempt {attempt + 1}: Selected Node {selection.node_id}: {selection.explanation}")
+
+            # Find and return the selected node
+            for node in nodes:
+                if node.node_id == selection.node_id:
+                    try:
+                        node.reward.feedback = selection.explanation
+                        print(f"Setting explanation for node {node.node_id}: {selection.explanation}")
+                    except AttributeError:
+                        print(f"Node {node.node_id}, node: {node}, has no reward attribute")
+                    return node
+            
+            # If we get here, the selected node wasn't in the list
+            print(f"Selected node {selection.node_id} not in available nodes {available_node_ids}, retrying...")
+            
+            # Add feedback about available nodes for next attempt
+            previous_attempts += (
+                f"\nPrevious attempt selected node {selection.node_id} which is not available for expansion. "
+                f"Please select from these nodes: {available_node_ids}\n"
+            )
+        
+        # If we've exhausted all retries, fall back to the first available node
+        print(f"Failed to select valid node after {max_retries} attempts, falling back to first available node")
+        return nodes[0]
+            

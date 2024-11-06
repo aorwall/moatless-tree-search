@@ -294,20 +294,38 @@ class Node(BaseModel):
         return node
 
 
-def generate_ascii_tree(root: Node, current: Node | None = None) -> str:
+def generate_ascii_tree(
+    root: Node, 
+    current: Node | None = None, 
+    include_explanation: bool = False,
+    use_color: bool = True
+) -> str:
     tree_lines = ["MCTS Tree"]
-    _append_ascii_node(root, "", True, tree_lines, current)
+    _append_ascii_node(
+        root, 
+        "", 
+        True, 
+        tree_lines, 
+        current, 
+        include_explanation,
+        use_color
+    )
     return "\n".join(tree_lines)
 
 
 def _append_ascii_node(
-    node: Node, prefix: str, is_last: bool, tree_lines: list[str], current: Node | None
-):
+    node: Node, 
+    prefix: str, 
+    is_last: bool, 
+    tree_lines: list[str], 
+    current: Node | None,
+    include_explanation: bool = False,
+    use_color: bool = True
+) -> None:
+    # Build node information
     state_params = []
-
     if node.action:
         state_params.append(node.action.name)
-
         if node.observation and node.observation.expect_correction:
             state_params.append("expect_correction")
 
@@ -317,43 +335,80 @@ def _append_ascii_node(
     else:
         state_info += f"()"
 
-    if current and node.node_id == current.node_id:
+    if use_color and current and node.node_id == current.node_id:
         state_info = color_white(state_info)
 
+    # Build reward string
     if not node.reward:
         reward_str = "0"
-    elif node.reward.value >= 75:
-        reward_str = color_green(node.reward.value)
-    elif node.reward.value <= 0:
-        reward_str = color_red(node.reward.value)
-    else:
-        reward_str = color_yellow(node.reward.value)
-
-    # avg_reward = node.get_mean_traj_reward()
-    if not node.reward:
         node_str = f"Node{node.node_id} [-]"
-    elif node.reward.value >= 75:
-        node_str = color_green(f"Node{node.node_id} [{node.reward.value}]")
-    elif node.reward.value < 0:
-        node_str = color_red(f"Node{node.node_id} [{node.reward.value}]")
     else:
-        node_str = color_yellow(f"Node{node.node_id} [{node.reward.value}]")
+        if use_color:
+            if node.reward.value >= 75:
+                reward_str = color_green(node.reward.value)
+                node_str = color_green(f"Node{node.node_id} [{node.reward.value}]")
+            elif node.reward.value <= 0:
+                reward_str = color_red(node.reward.value)
+                node_str = color_red(f"Node{node.node_id} [{node.reward.value}]")
+            else:
+                reward_str = color_yellow(node.reward.value)
+                node_str = color_yellow(f"Node{node.node_id} [{node.reward.value}]")
+        else:
+            reward_str = str(node.reward.value)
+            node_str = f"Node{node.node_id} [{node.reward.value}]"
 
-    if node.is_duplicate:
-        tree_lines.append(
-            f"{prefix}{'└── ' if is_last else '├── '}Node{node.node_id} {state_info} (duplicate)"
-        )
-    else:
-        tree_lines.append(
-            f"{prefix}{'└── ' if is_last else '├── '}{node_str} {state_info} (expansions: {node.expanded_count()}, reward: {reward_str}, visits: {node.visits})"
-        )
+    # Add expandable status
+    expandable_str = "expandable" if node.is_expandable() else "not-expandable"
+    if use_color:
+        expandable_str = color_green(expandable_str) if node.is_expandable() else color_red(expandable_str)
 
-        child_prefix = prefix + ("    " if is_last else "│   ")
-        children = node.children
-        for i, child in enumerate(node.children):
-            _append_ascii_node(
-                child, child_prefix, i == len(children) - 1, tree_lines, current
-            )
+    # Calculate the current node's connection prefix
+    connection = "└── " if is_last else "├── "
+    
+    # Add the node line with expandable status
+    tree_lines.append(f"{prefix}{connection}{node_str} {state_info} "
+                     f"(expansions: {node.expanded_count()}, reward: {reward_str}, "
+                     f"visits: {node.visits}, {expandable_str})")
+    
+    # Calculate the explanation prefix - should align with the node's content
+    explanation_prefix = prefix + ("    " if is_last else "│   ")
+    
+    # Add explanation if available
+    if include_explanation and node.reward and node.reward.explanation:
+        # Split and wrap explanation text
+        explanation_text = node.reward.explanation.strip()
+        words = explanation_text.split()
+        current_line = []
+        current_length = 0
+        max_line_length = 100
+        
+        for word in words:
+            if current_length + len(word) + 1 <= max_line_length:
+                current_line.append(word)
+                current_length += len(word) + 1
+            else:
+                tree_lines.append(f"{explanation_prefix}{' '.join(current_line)}")
+                current_line = [word]
+                current_length = len(word)
+        
+        if current_line:
+            tree_lines.append(f"{explanation_prefix}{' '.join(current_line)}")
+    
+    # Calculate the prefix for children
+    child_prefix = prefix + ("    " if is_last else "│   ")
+    
+    # Process children
+    children = node.children
+    for i, child in enumerate(children):
+        _append_ascii_node(
+            child,
+            child_prefix,
+            i == len(children) - 1,
+            tree_lines,
+            current,
+            include_explanation,
+            use_color
+        )
 
 
 def color_red(text: Any) -> str:
