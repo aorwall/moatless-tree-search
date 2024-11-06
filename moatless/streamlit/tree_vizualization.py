@@ -58,6 +58,9 @@ def build_graph(
 ):
     G = nx.DiGraph()
 
+    # Add new layout logic for linear trajectory
+    is_linear = getattr(root_node, 'max_expansions', None) == 1
+
     def is_resolved(node_id):
         if not eval_result:
             return None
@@ -109,6 +112,7 @@ def build_graph(
             context_status=context_stats.status if context_stats else None,
             patch_status=context_stats.patch_status if context_stats else None,
             explanation=node.reward.explanation if node.reward else "",
+            is_linear=is_linear
         )
 
         for child in node.children:
@@ -133,6 +137,10 @@ def show_completion(completion):
             if "content" in input_msg:
                 if isinstance(input_msg["content"], str):
                     content = input_msg["content"]
+                elif isinstance(input_msg["content"], list) and input_msg['role'] == 'user':
+                    content_list = [c.get("content") for c in input_msg["content"]]
+
+                    content = "\n\n".join(content_list)
                 else:
                     content = json.dumps(input_msg["content"], indent=2)
 
@@ -202,7 +210,27 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
             )
             G = build_graph(search_tree.root, eval_result, instance)
             G_subset = G.subgraph([f"Node{node.node_id}" for node in nodes_to_show])
-            pos = nx.nx_agraph.graphviz_layout(G, prog="dot")
+
+            # Create the figure first
+
+            # Calculate positions based on layout type
+            is_linear = getattr(search_tree.root, 'max_expansions', None) == 1
+            if is_linear:
+                # Calculate positions for linear layout with increased spacing
+                sorted_nodes = list(nx.topological_sort(G))
+                pos = {}
+                
+                # Increase horizontal spacing between nodes
+                spacing_factor = 2.0  # Increase this value to add more space between nodes
+                
+                for i, node in enumerate(sorted_nodes):
+                    # Position nodes in a zigzag pattern to prevent label overlap
+                    y_offset = 0.1 if i % 2 == 0 else -0.1  # Alternate between slightly up and down
+                    pos[node] = (i * spacing_factor, y_offset)
+
+            else:
+                # Existing tree layout code...
+                pos = nx.nx_agraph.graphviz_layout(G, prog="dot")
 
             selected_transition_ids = []
             # TODO: Add support selected trajectory
@@ -274,8 +302,8 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                 # Set node color based on reward/status
                 if node_info.get("name") == "Reject":
                     node_colors.append("red")
-                elif node_info.get("type") == "action":
-                    node_colors.append("#6c7aaa")  # Grayish blue
+                elif search_tree.max_expansions == 1:
+                    node_colors.append("green")
                 elif node_info.get("visits", 0) == 0:
                     node_colors.append("gray")
                 else:
@@ -364,7 +392,6 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
 
                     node_labels.append(f"{node}<br>{node_info.get('name', 'unknown')}")
 
-            # Create the figure without FigureWidget
             fig = go.Figure(make_subplots())
 
             # Add edge trace
@@ -431,17 +458,36 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                 )
                 fig.add_trace(badge_trace)
 
-            fig.update_layout(
-                title="Search Tree",
-                titlefont_size=16,
-                showlegend=False,
-                hovermode="closest",
-                margin=dict(b=20, l=5, r=5, t=40),
-                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                height=600
-                * height_scale,  # Adjust the height based on the number of nodes
-            )
+            # Update layout settings after adding traces
+            if is_linear:
+                fig.update_layout(
+                    width=max(1000, len(sorted_nodes) * 100),  # Adjust base width per node
+                    height=400,  # Reduced height since we're using a linear layout
+                    margin=dict(l=50, r=50, t=50, b=50),
+                    autosize=False,
+                    showlegend=False,
+                    hovermode="closest",
+                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                )
+                
+                # Update node trace text positioning
+                node_trace.update(
+                    textposition=["bottom center" if i % 2 == 0 else "top center" for i in range(len(node_x))],
+                    textfont=dict(size=10),
+                )
+            else:
+                fig.update_layout(
+                    title="Search Tree",
+                    titlefont_size=16,
+                    showlegend=False,
+                    hovermode="closest",
+                    margin=dict(b=20, l=5, r=5, t=40),
+                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                    height=600
+                           * height_scale,  # Adjust the height based on the number of nodes
+                )
 
             col1, col2, col3, col4, col5, col6 = st.columns(6)
             with col1:
