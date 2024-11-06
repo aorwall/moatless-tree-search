@@ -43,7 +43,7 @@ def test_determine_possible_actions():
     agent = CodingAgent(actions=actions, completion=Mock(CompletionModel))
 
     # Test 1: Basic case with empty file context
-    actions = agent._determine_possible_actions(node)
+    actions = agent.determine_possible_actions(node)
     assert set(actions) == {
         SemanticSearch,
         FindClass,
@@ -58,7 +58,7 @@ def test_determine_possible_actions():
     file_context = FileContext(repo=mock_repo)
     file_context.add_span_to_context("test.py", "hello")
     node = Node.stub(file_context=file_context)
-    actions = agent._determine_possible_actions(node)
+    actions = agent.determine_possible_actions(node)
     assert set(actions) == {
         SemanticSearch,
         FindClass,
@@ -76,7 +76,7 @@ def test_determine_possible_actions():
     file_context.add_span_to_context("test.py", "hello")
     file_context.get_file("test.py").apply_changes("updated")
     node = Node.stub(file_context=file_context)
-    actions = agent._determine_possible_actions(node)
+    actions = agent.determine_possible_actions(node)
     assert set(actions) == {
         SemanticSearch,
         FindClass,
@@ -92,7 +92,7 @@ def test_determine_possible_actions():
     # Test 4: With a finished child
     finished_child = Node.stub(action=Finish())
     node.children.append(finished_child)
-    actions = agent._determine_possible_actions(node)
+    actions = agent.determine_possible_actions(node)
     assert Finish not in actions
 
 
@@ -107,7 +107,7 @@ def test_determine_possible_actions_duplicate_actions():
     parent.children.append(first_child)
     parent.children.append(duplicate_child)
     node.parent = parent
-    actions = agent._determine_possible_actions(node)
+    actions = agent.determine_possible_actions(node)
     assert SemanticSearch not in actions
 
 
@@ -204,7 +204,7 @@ def test_create_system_prompt_with_few_shot_examples():
     agent = CodingAgent(actions=actions, completion=completion_model)
     
     # Get the system prompt
-    prompt = agent._create_system_prompt([FindClass, FindFunction, RequestCodeChange])
+    prompt = agent.generate_system_prompt([FindClass, FindFunction, RequestCodeChange])
     print(prompt)
     
     # Verify the prompt structure
@@ -228,3 +228,9 @@ def test_create_system_prompt_with_few_shot_examples():
     assert "class_name" in prompt
     assert "function_name" in prompt
     assert "file_path" in prompt
+    assert "action_type" in prompt
+    
+    # Verify action types are present
+    assert "FindClass" in prompt
+    assert "FindFunction" in prompt
+    assert "RequestCodeChange" in prompt

@@ -4,7 +4,7 @@ import pkgutil
 from abc import ABC
 from typing import List, Type, Tuple, Any, Dict, Optional, ClassVar
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from moatless.actions.model import ActionArguments, Observation, RewardScaleEntry, FewShotExample
 from moatless.file_context import FileContext

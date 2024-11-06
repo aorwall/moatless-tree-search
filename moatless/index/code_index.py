@@ -196,10 +196,16 @@ class CodeIndex:
             else:
                 exclude_files = []
 
-            matching_files = self._file_repo.matching_files(file_pattern)
-            matching_files = [
-                file for file in matching_files if file not in exclude_files
-            ]
+            try:
+                matching_files = self._file_repo.matching_files(file_pattern)
+                matching_files = [
+                    file for file in matching_files if file not in exclude_files
+                ]
+            except Exception as e:
+                return SearchCodeResponse(
+                    message=f"The file pattern {file_pattern} is invalid.",
+                    hits=[],
+                )
 
             if not matching_files:
                 if "*" not in file_pattern and not self._file_repo.file_exists(

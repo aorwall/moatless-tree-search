@@ -663,8 +663,7 @@ class CodeBlock:
                 and self.type == CodeBlockType.COMMENTED_OUT_CODE
             ):
                 return " " * 6
-
-            return str(line_number).ljust(6)
+            return f"{line_number:6}\t"
 
         # Just to write out the first line number when there are no pre_lines on first block
         if (
@@ -783,6 +782,11 @@ class CodeBlock:
             return False
 
         return self.full_path() == other.full_path()
+
+    def compare_indentation(self, other_block: "CodeBlock"):
+        existing_indentation = len(self.indentation)
+        new_indentation = len(other_block.indentation)
+        return existing_indentation - new_indentation
 
     def find_block_by_type(self, block_type: CodeBlockType) -> Optional["CodeBlock"]:
         if self.type == block_type:

@@ -65,10 +65,11 @@ class RunTests(Action):
             )
 
         if args.test_files:
+
             existing_test_files = [
                 test_file
                 for test_file in args.test_files
-                if self._repository.file_exists(test_file)
+                if file_context.get_file(test_file) is not None
             ]
 
             missing_test_files = set(args.test_files).difference(

@@ -46,6 +46,7 @@ def test_take_action():
     assert "properties" in schema
     assert "action" in schema["properties"]
 
+
 def test_get_action_by_args_class():
     assert Action.get_action_by_args_class(FinishArgs) == Finish
     assert Action.get_action_by_args_class(RequestCodeChangeArgs) == RequestCodeChange

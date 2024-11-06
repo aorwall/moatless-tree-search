@@ -15,8 +15,9 @@ import litellm
 from pydantic import BaseModel, Field
 from tqdm.auto import tqdm
 
+from moatless.agent.agent import MessageHistoryType
 from moatless.agent.code_agent import CodingAgent
-from moatless.agent.code_prompts import SIMPLE_CODE_PROMPT, SYSTEM_PROMPT
+from moatless.agent.code_prompts import SIMPLE_CODE_PROMPT, SYSTEM_PROMPT, CLAUDE_PROMPT
 from moatless.benchmark.report import (
     BenchmarkResult,
     to_dataframe,
@@ -28,12 +29,13 @@ from moatless.benchmark.swebench import (
 )
 from moatless.benchmark.utils import get_moatless_instance
 from moatless.completion.completion import CompletionModel, LLMResponseFormat
+from moatless.completion.log_handler import LogHandler
 from moatless.discriminator import MeanAwardDiscriminator, AgentDiscriminator
 from moatless.feedback import FeedbackGenerator
 from moatless.file_context import FileContext
 from moatless.search_tree import SearchTree
 from moatless.selector import BestFirstSelector, SoftmaxSelector, LLMSelector
-from moatless.templates import create_coding_actions
+from moatless.templates import create_coding_actions, create_claude_coding_actions
 from moatless.value_function.base import ValueFunction
 
 logger = logging.getLogger(__name__)
@@ -190,6 +192,9 @@ class Evaluation:
         self.dataset_name = dataset_name
         self.evaluation_name = evaluation_name
 
+        self.log_handler = LogHandler(evaluations_dir)
+        litellm.callbacks = [self.log_handler]
+
         self.use_testbed = use_testbed
 
         self.settings = settings
@@ -328,13 +333,21 @@ class Evaluation:
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
 
-        if self.overwrite and os.path.exists(eval_result_path):
-            eval_result = {
-                "node_results": {},
-            }
-        elif os.path.exists(eval_result_path):
-            with open(eval_result_path) as f:
-                eval_result = json.load(f)
+        completion_log_dir = os.path.join(instance_dir, "completion_logs")
+        os.makedirs(completion_log_dir, exist_ok=True)
+        self.log_handler.log_dir = completion_log_dir
+
+        eval_result_path = os.path.join(instance_dir, "eval_result.json")
+        if os.path.exists(eval_result_path):
+            try:
+                with open(eval_result_path) as f:
+                    eval_result = json.load(f)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse eval result from {eval_result_path}. Will remove file to start over. Error: {e}")
+                os.remove(eval_result_path)
+                eval_result = {
+                    "node_results": {},
+                }
         else:
             eval_result = {
                 "node_results": {},
@@ -353,10 +366,14 @@ class Evaluation:
             search_tree = None
 
             if os.path.exists(trajectory_path):
-                persisted_tree = SearchTree.from_file(trajectory_path)
-                if persisted_tree.is_finished():
-                    logger.info(f"Found completed search tree for {instance_id}")
-                    search_tree = persisted_tree
+                try:
+                    persisted_tree = SearchTree.from_file(trajectory_path)
+                    if persisted_tree.is_finished():
+                        logger.info(f"Found completed search tree for {instance_id}")
+                        search_tree = persisted_tree
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse search tree from {trajectory_path}. Will remove file to start over. Error: {e}")
+                    os.remove(trajectory_path)
 
             if not search_tree:
                 self.log_event(instance_id, "workspace_creation_started")
@@ -395,18 +412,36 @@ class Evaluation:
                         code_index=code_index,
                     )
                 else:
-                    actions = create_coding_actions(
-                        repository=repository,
-                        code_index=code_index,
-                        runtime=runtime,
-                        edit_completion_model=self._create_completion_model(),
+
+                    completion_model = self._create_completion_model(
+                        self.settings.agent_model
                     )
+
+                    if completion_model.model in ["claude-3-5-sonnet-20241022"]:
+                        actions = create_claude_coding_actions(
+                            repository=repository,
+                            code_index=code_index,
+                            runtime=runtime,
+                            completion_model=completion_model
+                        )
+                        system_prompt = CLAUDE_PROMPT
+                    else:
+                        actions = create_coding_actions(
+                            repository=repository,
+                            code_index=code_index,
+                            runtime=runtime,
+                            identify_completion_model=completion_model,
+                            edit_completion_model=completion_model
+                        )
+
                     agent = CodingAgent(
-                        completion=self._create_completion_model(
-                            self.settings.agent_model
-                        ),
+                        completion=completion_model,
                         actions=actions,
                         system_prompt=system_prompt,
+                        message_history_type=MessageHistoryType.MESSAGES,
+                        include_extra_history=True,
+                        include_file_context=False,
+                        include_git_patch=False,
                     )
 
                     if self.settings.selector == "llm_selector":
@@ -472,21 +507,19 @@ class Evaluation:
                 eval_result["duration"] = time.time() - start_time
                 search_tree.persist(trajectory_path)
 
-            finished_nodes = search_tree.get_finished_nodes()
+            leaf_nodes = search_tree.get_leaf_nodes()
             patch_results = {}
             logger.info(
-                f"Will evaluate {len(finished_nodes)} finished nodes for instance {instance_id}"
+                f"Will evaluate {len(leaf_nodes)} leaf nodes for instance {instance_id}"
             )
 
             if "node_results" not in eval_result:
                 eval_result["node_results"] = {}
 
             if self.use_testbed:
-                if len(eval_result.get("node_results")) == len(
-                    search_tree.get_finished_nodes()
-                ):
+                if len(eval_result.get("node_results")) == len(leaf_nodes):
                     logger.info(
-                        f"Already evaluated results for {len(search_tree.get_finished_nodes())} nodes in {instance_id}"
+                        f"Already evaluated results for {len(leaf_nodes)} nodes in {instance_id}"
                     )
                 else:
                     if not runtime:
@@ -504,23 +537,26 @@ class Evaluation:
                             enable_cache=True,
                         )
 
-                    for i, finished_node in enumerate(finished_nodes):
+                    for i, leaf_node in enumerate(leaf_nodes):
                         logger.info(
-                            f"Evaluate finished Node{finished_node.node_id} {i+1}/{len(finished_nodes)} for instance {instance_id}"
+                            f"Evaluate Node{leaf_node.node_id} {i+1}/{len(leaf_nodes)} for instance {instance_id}"
                         )
 
-                        if finished_node.node_id in eval_result["node_results"]:
+                        if leaf_node.node_id in eval_result["node_results"]:
+                            logger.info(
+                                f"Skip Node{leaf_node.node_id} {i + 1}/{len(leaf_nodes)} for instance {instance_id} that has already been evaluated "
+                            )
                             continue
 
-                        patch = finished_node.file_context.generate_git_patch()
-                        patch_hash = create_sha256_hash(patch)
+                        patch = leaf_node.file_context.generate_git_patch()
+                        if patch and patch.strip():
+                            patch_hash = create_sha256_hash(patch)
 
-                        if patch:
                             if patch_hash in patch_results:
                                 logger.info(
-                                    f"Use already evaluated patch for Node{finished_node.node_id} in {instance_id}"
+                                    f"Skip Node{leaf_node.node_id} {i + 1}/{len(leaf_nodes)} for instance {instance_id} as patch has already been evaluated."
                                 )
-                                eval_result["node_results"][finished_node.node_id] = (
+                                eval_result["node_results"][leaf_node.node_id] = (
                                     patch_results[patch_hash]
                                 )
                             else:
@@ -532,21 +568,25 @@ class Evaluation:
                                     )
                                     continue
 
-                                eval_result["node_results"][finished_node.node_id] = (
+                                eval_result["node_results"][leaf_node.node_id] = (
                                     result.model_dump()
                                 )
                                 patch_results[patch_hash] = result.model_dump()
                                 logger.info(
                                     f"Evaluated patch in {time.time() - start_time} seconds (resolved: {result.resolved})"
                                 )
+                        else:
+                            logger.info(
+                                f"Skip Node{leaf_node.node_id} {i + 1}/{len(leaf_nodes)} for instance {instance_id} with no patch."
+                            )
 
-                        if best_node and finished_node.node_id == best_node.node_id:
+                        if best_node and leaf_node.node_id == best_node.node_id:
                             self.save_prediction(instance_id, patch)
-                            eval_result["selected_node"] = finished_node.node_id
+                            eval_result["selected_node"] = leaf_node.node_id
 
-                            if eval_result["node_results"].get(finished_node.node_id):
+                            if eval_result["node_results"].get(leaf_node.node_id):
                                 eval_result["resolved"] = eval_result["node_results"][
-                                    finished_node.node_id
+                                    leaf_node.node_id
                                 ]["resolved"]
 
                                 if eval_result.get("resolved"):

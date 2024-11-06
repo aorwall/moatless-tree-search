@@ -286,15 +286,24 @@ class ContextFile(BaseModel):
         new_content_lines = []
         line_no = 0  # 0-based index
 
-        try:
-            for hunk in patched_file:
-                # Copy unchanged lines before the hunk
-                while line_no < hunk.source_start - 1:
-                    if line_no < len(content_lines):
-                        new_content_lines.append(content_lines[line_no])
-                    else:
-                        logger.warning(f"Line number {line_no} exceeds content length {len(content_lines)} while copying unchanged lines")
-                        break
+        for hunk in patched_file:
+            # Copy unchanged lines before the hunk
+            while line_no < hunk.source_start - 1:
+                new_content_lines.append(content_lines[line_no])
+                line_no += 1
+
+            # Apply changes from the hunk
+            for line in hunk:
+                if line.is_context:
+                    if line_no >= len(content_lines):
+                        raise Exception(f"Patch context mismatch. Line no {line_no} is larger than content_lines length {len(content_lines)}")
+                    elif line.value.strip() and content_lines[line_no] != line.value:
+                        raise Exception(f"Patch context mismatch. Line {line_no} does not match expected content. \"{content_lines[line_no]}\" != \"{line.value}\"")
+                    new_content_lines.append(content_lines[line_no])
+                    line_no += 1
+                elif line.is_added:
+                    new_content_lines.append(line.value)
+                elif line.is_removed:
                     line_no += 1
 
                 # Apply changes from the hunk
@@ -321,12 +330,6 @@ class ContextFile(BaseModel):
                 new_content_lines.extend(content_lines[line_no:])
 
             return "".join(new_content_lines)
-
-        except Exception as e:
-            logger.error(f"Error applying patch: {str(e)}")
-            logger.error(f"Content length: {len(content_lines)}, Current line: {line_no}")
-            # Return original content if patch fails
-            return content
 
     def generate_full_patch(self) -> str:
         """
@@ -1208,17 +1211,19 @@ class FileContext(BaseModel):
         exclude_comments=False,
         show_outcommented_code=False,
         outcomment_code_comment: str = "...",
+        files: set | None = None,
     ):
         file_contexts = []
         for context_file in self.get_context_files():
-            content = context_file.to_prompt(
-                show_span_ids,
-                show_line_numbers,
-                exclude_comments,
-                show_outcommented_code,
-                outcomment_code_comment,
-            )
-            file_contexts.append(content)
+            if not files or context_file.file_path in files:
+                content = context_file.to_prompt(
+                    show_span_ids,
+                    show_line_numbers,
+                    exclude_comments,
+                    show_outcommented_code,
+                    outcomment_code_comment,
+                )
+                file_contexts.append(content)
 
         return "\n\n".join(file_contexts)
 

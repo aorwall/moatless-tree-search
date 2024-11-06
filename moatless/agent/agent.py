@@ -12,15 +12,10 @@ from moatless.completion.completion import CompletionModel
 from moatless.completion.model import Message, AssistantMessage, UserMessage, Completion
 from moatless.exceptions import RuntimeError, RejectError, CompletionError
 from moatless.index.code_index import CodeIndex
-from moatless.node import Node
+from moatless.node import Node, MessageHistoryType
 from moatless.repository.repository import Repository
 
 logger = logging.getLogger(__name__)
-
-
-class MessageHistoryType(Enum):
-    MESSAGES = "messages"  # Provides all messages in sequence
-    SUMMARY = "summary"  # Generates one message with summarized history
 
 
 class ActionAgent(BaseModel):
@@ -29,12 +24,20 @@ class ActionAgent(BaseModel):
     )
     actions: List[Action] = Field(default_factory=list)
     message_history_type: MessageHistoryType = Field(
-        default=MessageHistoryType.SUMMARY,
+        default=MessageHistoryType.MESSAGES,
         description="Determines how message history is generated"
     )
     include_extra_history: bool = Field(
-        default=False,
+        default=True,
         description="Whether to include extra execution details in message history"
+    )
+    include_file_context: bool = Field(
+        default=False,
+        description="Whether to include the full file context in the last message"
+    )
+    include_git_patch: bool = Field(
+        default=False,
+        description="Whether to include the full git patch in the last message"
     )
 
     _completion: CompletionModel = PrivateAttr()
@@ -45,16 +48,14 @@ class ActionAgent(BaseModel):
         completion: CompletionModel,
         system_prompt: str | None = None,
         actions: List[Action] | None = None,
-        message_history_type: MessageHistoryType = MessageHistoryType.SUMMARY,
-        include_extra_history: bool = False,
+        **data
     ):
         actions = actions or []
         actions_map = {action.args_schema: action for action in actions}
         super().__init__(
             actions=actions, 
             system_prompt=system_prompt,
-            message_history_type=message_history_type,
-            include_extra_history=include_extra_history
+            **data
         )
         self._completion = completion
         self._action_map = actions_map
@@ -112,17 +113,26 @@ class ActionAgent(BaseModel):
             return
 
         possible_actions = self.determine_possible_actions(node)
+        # possible_actions = self.actions
         node.possible_actions = [action.name for action in possible_actions]
 
         system_prompt = self.generate_system_prompt(possible_actions)
-        messages = self.generate_message_history(node)
+        messages = node.generate_message_history(
+            message_history_type=self.message_history_type,
+            include_extra_history=self.include_extra_history,
+            include_file_context=self.include_file_context,
+            include_git_patch=self.include_git_patch,
+        )
 
         action_args = [action.args_schema for action in possible_actions]
 
-        action, completion_response = self._completion.create_completion(
-            messages, system_prompt=system_prompt, actions=action_args
-        )
-
+        try:
+            action, completion_response = self._completion.create_completion(
+                messages, system_prompt=system_prompt, actions=action_args
+            )
+        except ValidationError as e:
+            logger.warning(f"Failed to create completion: {e}")
+            raise RejectError(e.message) from e
         node.action = action
         node.completions["build_action"] = completion_response
 
@@ -159,127 +169,7 @@ class ActionAgent(BaseModel):
         """Generate a system prompt for the agent."""
         return self.system_prompt
 
-    def generate_message_history(self, node: Node) -> list[Message]:
-        """Generate message history based on the configured message_history_type."""
-        messages = [UserMessage(content=f"<task>\n{node.get_root().message}\n</task>\n\n")]
-        
-        previous_nodes = node.get_trajectory()[:-1]
-        if self.message_history_type == MessageHistoryType.SUMMARY:
-            messages.extend(self.generate_summary_history(previous_nodes, node))
-        else:  # MessageHistoryType.FULL
-            messages.extend(self.generate_full_history(previous_nodes, node))
-            
-        return messages
 
-    def generate_summary_history(self, previous_nodes: List[Node], current_node: Node) -> list[Message]:
-        """Generate a single message containing summarized history."""
-        formatted_history: List[str] = []
-        counter = 0
-        
-        # Generate history
-        for i, previous_node in enumerate(previous_nodes):
-            if previous_node.action:
-                counter += 1
-                formatted_state = f"\n## {counter}. Action: {previous_node.action.name}\n"
-                formatted_state += previous_node.action.to_prompt()
-
-                if previous_node.observation:
-                    formatted_state += f"\n\nOutput: {previous_node.observation.message}"
-                    if (i == len(previous_nodes) - 1) or self.include_extra_history:
-                        if previous_node.observation.extra:
-                            formatted_state += "\n\n"
-                            formatted_state += previous_node.observation.extra
-                    formatted_history.append(formatted_state)
-                else:
-                    logger.warning(f"No output found for Node{previous_node.node_id}")
-
-        content = "Below is the history of previously executed actions and their outputs.\n"
-        content += "<history>\n"
-        content += "\n".join(formatted_history)
-        content += "\n</history>\n\n"
-        
-        content += self._format_file_context(current_node)
-        content += self._format_git_patch(current_node)
-        content += self._format_feedback(current_node)
-        return [UserMessage(content=content)]
-
-    def generate_full_history(self, previous_nodes: List[Node], current_node: Node) -> list[Message]:
-        """Generate a sequence of messages representing the full conversation history."""
-        messages: list[Message] = []
-        
-        for i, previous_node in enumerate(previous_nodes):
-            if previous_node.action:
-                tool_call = previous_node.action.to_tool_call()
-                messages.append(AssistantMessage(tool_call=tool_call))
-
-                content = ""
-                if previous_node.message:
-                    content = f"<issue>\n{previous_node.message}\n</issue>"
-
-                if previous_node.observation:
-                    content += previous_node.observation.message
-                    if (i == len(previous_nodes) - 1) or self.include_extra_history:
-                        if previous_node.observation.extra:
-                            content += "\n" + previous_node.observation.extra
-
-                if not content:
-                    logger.warning(
-                        f"Node{previous_node.node_id}: No content to add to messages"
-                    )
-
-                messages.append(UserMessage(content=content))
-
-        # Add file context, git patch, and feedback as the final message
-        context = self._format_file_context(current_node)
-        git_patch = self._format_git_patch(current_node)
-        feedback = self._format_feedback(current_node)
-        
-        if context or git_patch or feedback:
-            messages.append(UserMessage(content=context + git_patch + feedback))
-            
-        return messages
-
-    def _format_file_context(self, node: Node) -> str:
-        """Generate formatted string for file context."""
-        if not node.file_context:
-            return ""
-        
-        if node.file_context.is_empty():
-            file_context_str = "No files added to file context yet."
-        else:
-            file_context_str = node.file_context.create_prompt(
-                show_span_ids=False,
-                show_line_numbers=True,
-                exclude_comments=False,
-                show_outcommented_code=True,
-                outcomment_code_comment="... rest of the code",
-            )
-        return f"# Current file context:\n\n<file_context>\n{file_context_str}\n</file_context>\n\n"
-
-    def _format_git_patch(self, node: Node) -> str:
-        """Generate formatted string for git patch."""
-        if not node.file_context:
-            return ""
-
-        full_patch = node.file_context.generate_git_patch()
-        message = "Changes made to the codebase so far:\n"
-        if full_patch.strip():
-            message += "<git_patch>\n"
-            message += full_patch
-            message += "\n</git_patch>\n\n"
-        else:
-            message += "<git_patch>\n"
-            message += "No changes made yet."
-            message += "\n</git_patch>\n\n"
-        return message
-
-    def _format_feedback(self, node: Node) -> str:
-        """Generate formatted string for feedback."""
-        if not node.feedback:
-            return ""
-        
-        logger.info(f"Node{node.node_id}: Feedback provided: {node.feedback}")
-        return f"\n\n{node.feedback}"
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         dump = super().model_dump(**kwargs)

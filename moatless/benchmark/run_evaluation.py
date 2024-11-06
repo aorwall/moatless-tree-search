@@ -151,7 +151,7 @@ def main():
     search_group.add_argument(
         "--max_cost", 
         type=float, 
-        default=5.0,
+        default=2.0,
         help="Maximum cost allowed for the search"
     )
     search_group.add_argument(
@@ -212,7 +212,7 @@ def main():
         "--resolved_by", 
         type=int, 
         default=None,
-        help="Filter instances by resolution time (in hours)"
+        help="Filter instances by resolved solutions (e.g., 1, 2, 3, ...)"
     )
 
     # Other settings
@@ -308,15 +308,16 @@ def main():
 
     # Create console handler with a higher log level
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.WARN)
+    console_handler.setLevel(logging.INFO)
     console_formatter = logging.Formatter("%(levelname)s - %(message)s")
     console_handler.setFormatter(console_formatter)
     logger.addHandler(console_handler)
 
     # Adjust log levels for specific loggers
+    logging.getLogger().setLevel(logging.WARNING)
     logging.getLogger("LiteLLM").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("moatless").setLevel(logging.INFO)
+    logging.getLogger("moatless").setLevel(logging.WARNING)
     logging.getLogger("moatless.benchmark.evaluation").setLevel(logging.INFO)
     logging.getLogger("moatless.benchmark.run_evaluation").setLevel(logging.INFO)
     # logging.getLogger("mcts_tree").setLevel(logging.INFO)

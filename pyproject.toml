@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "moatless-tree-search"
-version = "0.0.2"
+version = "0.0.3"
 description = ""
 authors = [ "Albert Örwall <albert@moatless.ai>", "Antonis Antoniades <antonis@ucsb.edu>"]
 readme = "README.md"
@@ -24,7 +24,7 @@ extend-exclude = [ "tests", "evaluations", "notebooks",]
 python = ">=3.10,<=3.13"
 
 pydantic = "^2.8.2"
-litellm = "^1.44.22"
+litellm = "^1.51.2"
 instructor = "^1.3.7"
 tiktoken = "^0.7.0"
 networkx = "^3.3"
@@ -40,7 +40,7 @@ pylint = "^3.2.6"
 
 # LLMs
 openai = "^1.41.0"
-anthropic = "^0.34.1"
+anthropic = "^0.38.0"
 
 # Index
 llama-index = "^0.10.65"
@@ -48,11 +48,11 @@ llama-index-embeddings-openai = "^0.1.11"
 llama-index-embeddings-voyageai = "^0.1.4"
 llama-index-readers-file = "^0.1.33"
 faiss-cpu = "^1.8.0.post1"
+tenacity = ">=8.2.0,<9.0.0"
 
 jsonref = "^1.1.0"
 
 # Testbeds
-moatless-testbeds = "^0.0.5"
 
 # Visualizations
 scipy = "^1.14.0"

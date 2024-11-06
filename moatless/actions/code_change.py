@@ -6,11 +6,12 @@ from pydantic import Field, PrivateAttr, model_validator
 
 from moatless.actions.action import Action
 from moatless.actions.model import ActionArguments, FewShotExample, Observation, RewardScaleEntry
-from moatless.codeblocks import CodeBlock, get_parser_by_path
+from moatless.codeblocks import CodeBlock, get_parser_by_path, PythonParser
 from moatless.codeblocks.codeblocks import CodeBlockTypeGroup, CodeBlockType
 from moatless.codeblocks.module import Module
 from moatless.completion.completion import CompletionModel
-from moatless.completion.model import AssistantMessage, UserMessage
+from moatless.completion.model import AssistantMessage, UserMessage, Completion
+from moatless.exceptions import RejectError
 from moatless.file_context import FileContext, ContextFile
 from moatless.repository.file import do_diff, remove_duplicate_lines
 from moatless.repository.repository import Repository
@@ -106,7 +107,7 @@ class RequestCodeChangeArgs(ActionArguments):
     @classmethod
     def set_missing_end_line(cls, data: Any) -> Any:
         if isinstance(data, dict):
-            if not data.get("end_line"):
+            if not data.get("end_line") and data.get("start_line"):
                 data["end_line"] = data["start_line"]
 
         return data
@@ -171,12 +172,12 @@ class RequestCodeChange(Action):
 
         if not args.file_path.endswith(".py"):
             return Observation(
-                message="Please provide a Python file path.",
+                message="Only Python files can be edited. Please provide a file path to a Python file.",
                 properties={"fail_reason": "not_python_file"},
                 expect_correction=True,
             )
 
-        if not self._repository.file_exists(args.file_path):
+        if args.change_type != ChangeType.addition and not self._repository.file_exists(args.file_path):
             return Observation(
                 message=f"File {args.file_path} not found.",
                 properties={"fail_reason": "file_not_found"},
@@ -213,53 +214,55 @@ class RequestCodeChange(Action):
             return self._apply_changes(context_file, updated_content, args.file_path)
         else:
             # TODO: Verify if the code span is in context
-
+            # TODO: Check for hallucinations
             retry_message = self.verify_request(
-                context_file, args.start_line, args.end_line, args.change_type
+                context_file, args
             )
             if retry_message:
-                return Observation(message=retry_message, expect_correction=True)
-
-            if context_file.module:
-                start_line, end_line, change_type = self.get_line_span(
-                    args.change_type,
-                    context_file,
-                    args.start_line,
-                    args.end_line,
-                    self.max_tokens_in_edit_prompt,
+                extra = context_file.to_prompt(
+                    show_line_numbers=True,
+                    show_span_ids=True,
+                    exclude_comments=False,
+                    show_outcommented_code=False,
+                    outcomment_code_comment="... other code",
                 )
-            else:
-                start_line, end_line, change_type = (
-                    args.start_line,
-                    args.end_line,
-                    args.change_type,
-                )
+                return Observation(message=retry_message, extra=extra, expect_correction=True)
 
-            span_ids = []
-            span_to_update = context_file.module.find_spans_by_line_numbers(
-                start_line, end_line
-            )
-            if span_to_update:
-                # Pin the spans that are planned to be updated to context
-                for span in span_to_update:
-                    if span.span_id not in span_ids:
-                        span_ids.append(span.span_id)
-                file_context.add_spans_to_context(
-                    args.file_path, span_ids=set(span_ids), pinned=True
-                )
+            completion = None
+            replace_block, args = self._get_replace_block_from_pseudo_code(args, context_file)
+            if not replace_block:
+                if context_file.module:
+                    args.start_line, args.end_line, args.change_type = self.get_line_span(
+                        args.change_type,
+                        context_file,
+                        args.start_line,
+                        args.end_line,
+                        self.max_tokens_in_edit_prompt,
+                    )
 
-            logger.info(
-                f"Requesting code change in {args.file_path} from {start_line} to {end_line}"
-            )
+                response, completion = self._generate_replace_block(context_file, args, args.start_line, args.end_line)
 
-            return self._update_content(
+                if "<reject>" in response:
+                    rejection_message = response.split("<reject>")[1].split("</reject>")[0]
+                    logger.info(f"Rejected the instructions. Reason: {rejection_message}")
+                    return Observation(
+                        message=f"Failed to apply changes using search/replace blocks. {rejection_message}",
+                        properties={"fail_reason": "rejected"},
+                        execution_completion=completion,
+                    )
+
+                replace_block = response.split("<replace>")[1].split("</replace>")[0]
+
+            observation = self._update_content(
                 context_file,
-                start_line,
-                end_line,
-                change_type,
-                args.instructions,
-                args.pseudo_code,
+                replace_block,
+                args.start_line,
+                args.end_line,
+                args.change_type
             )
+
+            observation.execution_completion = completion
+            return observation
 
     def create_replacement_block(
         self, messages: List[Union[UserMessage, AssistantMessage]]
@@ -283,40 +286,48 @@ class RequestCodeChange(Action):
 
         return system_prompt
 
-    def _update_content(
-        self,
-        context_file: ContextFile,
-        start_line: int,
-        end_line: int | None,
-        change_type: ChangeType,
-        instructions: str,
-        pseudo_code: str,
-    ) -> Observation:
+    def _generate_replace_block(self, context_file: ContextFile, args: RequestCodeChangeArgs, start_line: int, end_line: int) -> Tuple[str, Completion]:
+        span_ids = []
+        span_to_update = context_file.module.find_spans_by_line_numbers(
+            start_line, end_line
+        )
+        if span_to_update:
+            # Pin the spans that are planned to be updated to context
+            for span in span_to_update:
+                if span.span_id not in span_ids:
+                    span_ids.append(span.span_id)
+            context_file.add_spans(
+                span_ids=set(span_ids), pinned=True
+            )
+
+        logger.info(
+            f"Requesting code change in {args.file_path} from {start_line} to {end_line}"
+        )
+
         messages = []
         search_block = self.create_search_block(
-            context_file, start_line, end_line, change_type
+            context_file, start_line, end_line, args.change_type
         )
 
         user_message = self.create_message(
-            context_file, search_block, start_line, end_line, instructions, pseudo_code
+            context_file, search_block, start_line, end_line, args.instructions, args.pseudo_code
         )
+
         messages.append(UserMessage(content=user_message))
         response, completion = self._completion_model.create_text_completion(
             messages=messages,
             system_prompt=self._system_prompt(),
         )
+        return response, completion
 
-        if "<reject>" in response:
-            rejection_message = response.split("<reject>")[1].split("</reject>")[0]
-            logger.info(f"Rejected the instructions. Reason: {rejection_message}")
-            return Observation(
-                message=f"Failed to apply changes using search/replace blocks. {rejection_message}",
-                extra=f"\nThis search block was rejected:\n<search>\n{search_block}\n</search>",
-                properties={"fail_reason": "rejected"},
-                execution_completion=completion,
-            )
-
-        replace_block = response.split("<replace>\n")[1].split("</replace>")[0]
+    def _update_content(
+        self,
+        context_file: ContextFile,
+        replace_block: str,
+        start_line: int,
+        end_line: int | None,
+        change_type: ChangeType,
+    ) -> Observation:
         if replace_block:
             updated_content = self._update_content_by_line_numbers(
                 context_file, start_line - 1, end_line, replace_block
@@ -346,7 +357,6 @@ class RequestCodeChange(Action):
                     output = self._apply_changes(
                         context_file, updated_content, context_file.file_path
                     )
-                    output.execution_completion = completion
                     return output
 
         else:
@@ -357,10 +367,16 @@ class RequestCodeChange(Action):
         return Observation(
             message=f"Failed to apply changes using search/replace blocks. Reason: {invalid_response}"
             f"Verify that the right lines are provided and that the code that should changed is in the context.",
-            extra=f"\n<search>\n{search_block}\n</search>\n<replace>{replace_block}</replace>\n",
             properties={"fail_reason": invalid_reason},
-            execution_completion=completion,
         )
+
+    def _parse_pseudo_code_block(self, args: RequestCodeChangeArgs):
+        try:
+            parser = PythonParser(apply_gpt_tweaks=True)
+            return parser.parse(args.pseudo_code, file_path=args.file_path)
+        except Exception as e:
+            logger.warning(f"Failed to parse pseudo code with error {e}. Pseudo code:\n{args.pseudo_code}")
+            return None
 
     def create_message(
         self,
@@ -421,57 +437,113 @@ class RequestCodeChange(Action):
     def verify_request(
         self,
         context_file: ContextFile,
-        start_line: int,
-        end_line: int,
-        change_type: ChangeType,
+        args: RequestCodeChangeArgs
     ) -> Optional[str]:
-        # try:
-        #    parser = PythonParser(apply_gpt_tweaks=True)
-        #    pseudo_code_block = parser.parse(self.pseudo_code, file_path=self.file_path)
-        # except Exception as e:
-        #    return "The pseude code syntax is invalid."
 
-        # existing_hallucinated_spans = self.find_hallucinated_spans(
-        #    pseudo_code_block, context_file
-        # )
-        # if existing_hallucinated_spans:
-        #    context_file.add_spans(existing_hallucinated_spans)
-        #    return f"""There where code in the pseudo code that wasn't present in the file context.
-        # The following code spans where added to file context: {', '.join(existing_hallucinated_spans)}.
-        # Please provide instructions for the code change again."""
-
-        if not start_line:
+        if not args.start_line:
             message = "You must specify the start line and end line of the code change in the variables start_line and end_line. If you want to update the first line in the file, set start line to 1. If you believe that the lines you want to edit isn't in the file context, you can request more context by providing the file path and the line numbers or span ids to the RequestMoreContext function."
             return message
 
-        if not end_line:
-            if change_type != ChangeType.addition:
+        if not args.end_line:
+            if args.change_type != ChangeType.addition:
                 return f"If your intention is to modify an existing code span you must provide the end line for the code change in end_line."
 
-            logger.info(f"End line not set, set to start line {start_line}")
-            end_line = start_line
+            logger.info(f"End line not set, set to start line {args.start_line}")
+            args.end_line = args.start_line
+
+        pseudo_code_block = self._parse_pseudo_code_block(args)
+        existing_hallucinated_spans = self.find_hallucinated_spans(
+           pseudo_code_block, context_file, args.start_line, args.end_line
+        )
+        if existing_hallucinated_spans:
+           context_file.add_spans(existing_hallucinated_spans)
+           return f"""There where code in the pseudo code that wasn't present in the file context.
+The following code spans where added to file context: {', '.join(existing_hallucinated_spans)}.
+Please provide instructions for the code change again."""
 
         # Verify that the code that is supposed to be changed is in the context
-        if context_file.module and change_type != ChangeType.addition:
-            code_block = self.find_smallest_covering_block(context_file.module, start_line, end_line)
+        if context_file.module and args.change_type != ChangeType.addition:
+            code_block = self.find_smallest_covering_block(context_file.module, args.start_line, args.end_line)
             if code_block and code_block.belongs_to_span and code_block.belongs_to_span.span_id not in context_file.span_ids:
-                return f"The code span {code_block.belongs_to_span.span_id} between lines {start_line} - {end_line} is not in the context. Please use the RequestMoreContext to add the correct line numbers or span ids to context."
+                return f"The code span {code_block.belongs_to_span.span_id} between lines {args.start_line} - {args.end_line} is not in the context. Please use the RequestMoreContext to add the correct line numbers or span ids to context."
             # TODO: Handle if no code block is found
 
         code_lines = context_file.content.split("\n")
-        lines_to_edit = code_lines[start_line - 1 : end_line]
+        lines_to_edit = code_lines[args.start_line - 1 : args.end_line + 1]
         code_to_edit = "\n".join(lines_to_edit)
+
+        # Verify if change has already been implemented
+        existing_content = code_to_edit.expandtabs()
+        new_content = args.pseudo_code.expandtabs()
+        occurrences = existing_content.count(new_content)
+        if occurrences:
+            return f"The pseudo code does already exist in the existing code base indicating that the change has already been implemented. Existing content at lines {args.start_line} : {args.end_line}\n{existing_content}"
+
 
         tokens = count_tokens(code_to_edit)
         if tokens > self.max_tokens_in_edit_prompt:
             clarify_msg = (
-                f"The code span between lines {start_line} - {end_line} has {tokens} tokens, which is higher than the "
+                f"The code span between lines {args.start_line} - {args.end_line} has {tokens} tokens, which is higher than the "
                 f"maximum allowed {self.max_tokens_in_edit_prompt} tokens. "
             )
             logger.info(f"{clarify_msg}. Ask for clarification.")
             return f"The change request was rejected! {clarify_msg}. Narrow down the instructions and specify the exact part of the code that needs to be updated to fulfill the change. "
 
         return None
+
+    def _get_replace_block_from_pseudo_code(self, args: RequestCodeChangeArgs, context_file: ContextFile) -> Tuple[Optional[str], RequestCodeChangeArgs]:
+        pseudo_code_block = self._parse_pseudo_code_block(args)
+        if not pseudo_code_block:
+            return None, args
+
+        if (len(pseudo_code_block.has_placeholders()) > 0 or
+                len(pseudo_code_block.children) > 1 or
+                pseudo_code_block.children[0].type.group != CodeBlockTypeGroup.STRUCTURE):
+            return None, args
+
+        pseudo_code_block = pseudo_code_block.children[0]
+
+        existing_block = None
+        if args.change_type == ChangeType.modification:
+            block_to_replace = self._get_block_to_replace(context_file, args.start_line, args.end_line)
+            if block_to_replace and block_to_replace.type == pseudo_code_block.type and block_to_replace.identifier == block_to_replace.identifier:
+                logger.info(f"Found existing block {block_to_replace.path_string()} at start line {args.start_line} to be replaced by the pseudo code.")
+                existing_block = block_to_replace
+        elif args.change_type == ChangeType.addition:
+            block_at_start_line = context_file.module.find_first_by_start_line(args.start_line)
+            if block_at_start_line:
+                if block_at_start_line.type.group == CodeBlockTypeGroup.STRUCTURE:
+                    logger.info(f"Found existing block {block_at_start_line.path_string()} at start line {args.start_line}. Add the new block after this block on line {block_at_start_line.end_line}.")
+                    args.start_line = block_at_start_line.end_line + 1
+                    args.end_line = args.start_line
+                    existing_block = block_at_start_line
+                else:
+                    logger.warning(f"Existing block {block_at_start_line.path_string()} at start line {args.start_line} has a different type than the pseudo code block {pseudo_code_block.path_string()}.")
+            else:
+                structure_block = self.find_smallest_covering_block(
+                    context_file.module, args.start_line, args.start_line
+                )
+
+                if structure_block and structure_block.type in [CodeBlockType.CLASS, CodeBlockType.MODULE]:
+                    existing_blocks = structure_block.find_blocks_with_type(pseudo_code_block.type)
+                    if existing_blocks:
+                        # TODO: Pick the closest one
+                        existing_block = existing_blocks[0]
+                    else:
+                        logger.warning(f"No existing block of type {pseudo_code_block.type.display_name} found in {structure_block.path_string()}.")
+
+        if existing_block:
+            indentation_diff = existing_block.compare_indentation(pseudo_code_block)
+            if indentation_diff:
+                replace_block = self._apply_indentation_fix(args.pseudo_code, indentation_diff)
+            else:
+                replace_block = args.pseudo_code
+
+            replace_block = "\n" + replace_block + "\n"
+            return replace_block, args
+        else:
+            return None, args
+
 
     def _apply_changes(
         self, file: ContextFile, updated_content: str, file_path: str
@@ -620,7 +692,6 @@ class RequestCodeChange(Action):
         Find out if the suggested code block contains any identifiers that are not present in the context.
         """
 
-        logger.info(context_file.module.to_tree(show_spans=True))
         existing_hallucinated_spans = set()
         for child_block in code_block.children:
             # Only verify structure blocks like classed and functions
@@ -715,6 +786,8 @@ class RequestCodeChange(Action):
             # It's a code block within the line range
             if block.start_line >= start_line and block.end_line <= end_line:
                 lines.extend(range(block.start_line, block.end_line + 1))
+            elif not block.children and block.end_line >= start_line and block.start_line <= end_line:
+                lines.extend(range(block.start_line, block.end_line + 1))
 
         traverse_blocks(code_block)
         return sorted(set(lines))
@@ -801,11 +874,7 @@ class RequestCodeChange(Action):
         existing_block = self._get_block_to_replace(context_file, start_line, end_line)
         if existing_block:
             new_block = updated_module.find_first_by_start_line(start_line)
-
-            existing_indentation = len(existing_block.indentation)
-            new_indentation = len(new_block.indentation)
-
-            indentation_diff = existing_indentation - new_indentation
+            indentation_diff = existing_block.compare_indentation(new_block)
             if (
                 indentation_diff != 0
                 and new_block.identifier == existing_block.identifier
@@ -816,6 +885,7 @@ class RequestCodeChange(Action):
                 return indentation_diff
 
         return None
+
 
     def _apply_indentation_fix(self, content: str, indentation_diff: int) -> str:
         lines = content.split("\n")

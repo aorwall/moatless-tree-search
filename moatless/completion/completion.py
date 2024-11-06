@@ -6,12 +6,15 @@ import string
 from enum import Enum
 from typing import Optional, Union, List, Tuple, Any
 
+import anthropic
 import instructor
+from jsonschema import ValidationError
 import litellm
 import openai
 import tenacity
 from anthropic import Anthropic, AnthropicBedrock, NOT_GIVEN
-from anthropic.types import ToolUseBlock
+from anthropic.types import ToolUseBlock, TextBlock
+from anthropic.types.beta import BetaToolUseBlock, BetaTextBlock, BetaMessageParam, BetaCacheControlEphemeralParam
 from instructor import OpenAISchema
 from instructor.exceptions import InstructorRetryException
 from litellm.types.utils import ModelResponse
@@ -118,6 +121,8 @@ class CompletionModel(BaseModel):
                 last_completion=e.last_completion,
                 messages=e.messages
             )
+        except CompletionRejectError as e:
+            raise e
         except Exception as e:
             if isinstance(e, APIError):
                 logger.error(
@@ -378,18 +383,48 @@ class CompletionModel(BaseModel):
                 action: Union[tuple(actions)] = Field(...)
                 action_type: str = Field(..., description="The type of action being taken")
 
-                class Config:
-                    smart_union = True
+                @model_validator(mode='before')
+                def validate_action(cls, data: dict) -> dict:
+                    action_type = data.get('action_type')
+                    if not action_type:
+                        return data
+
+                    if len(actions) == 1:
+                        data['action'] = actions[0].model_validate(data['action'])
+                    else:
+                        avalabile_actions = [action for action in actions if hasattr(action, "name")]
+
+                        if not avalabile_actions:
+                            raise CompletionRuntimeError(f"No actions found in {actions}")
+
+                        # Find the correct action class based on action_type
+                        action_class = next(
+                            (action for action in avalabile_actions if action.name == action_type),
+                            None
+                        )
+                        if not action_class:
+                            action_names = [action.name for action in avalabile_actions]
+                            raise ValidationError(f"Unknown action type: {action_type}. Available actions: {', '.join(action_names)}")
+
+                        # Validate the action data using the specific action class
+                        data['action'] = action_class.model_validate(data['action'])
+                    return data
+
+                #class Config:
+                #    smart_union = True
 
             action_type = TakeAction
         else:
             action_type = None
 
+        def log_retry(state: tenacity.RetryCallState):
+            if state.attempt_number > 1:
+                logger.warning(state)
+
         retries = tenacity.Retrying(
             retry=tenacity.retry_if_not_exception_type((APIError, BadRequestError, NotFoundError, AuthenticationError)),
             stop=tenacity.stop_after_attempt(3),
-            before=lambda x: logger.info(x),
-            after=lambda x: logger.info(x),
+            after=log_retry,
         )
         take_action, completion_response = (
             client.chat.completions.create_with_completion(
@@ -415,8 +450,6 @@ class CompletionModel(BaseModel):
                 f"No action returned in response: {take_action}.",
                 last_completion=completion_response
             )
-        
-
 
     def function_call_system_prompt(self):
         return """You are an AI language model tasked with transforming unstructured messages wrapped in the XML tag <message> into structured tool calls. Your guidelines are:
@@ -537,32 +570,58 @@ class CompletionModel(BaseModel):
             tools = []
             tool_choice = {"type": "any"}
             for action in actions:
-                tools.append(action.anthropic_schema)
+                if hasattr(action, "name") and action.name == "str_replace_editor":
+                    tools.append({
+                        "name": "str_replace_editor",
+                        "type": "text_editor_20241022"
+                    })
+                else:
+                    schema = action.anthropic_schema
+
+                    # Remove scratch pad field, use regular text block for thoughts
+                    if "scratch_pad" in schema["input_schema"]["properties"]:
+                        del schema["input_schema"]["properties"]["scratch_pad"]
+
+                    tools.append(schema)
+
         else:
             tools = NOT_GIVEN
             tool_choice = NOT_GIVEN
 
-        completion_response = anthropic_client.beta.prompt_caching.messages.create(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-            system=[
-                {
-                    "text": system_prompt,
-                    "type": "text",
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            tool_choice=tool_choice,
-            tools=tools,
-            messages=messages,
-        )
+        betas = ["computer-use-2024-10-22", "prompt-caching-2024-07-31"]
+        _inject_prompt_caching(messages)
+
+        system = [
+                    {
+                        "text": system_prompt,
+                        "type": "text",
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]
+        completion_response = None
+        try:
+            completion_response = anthropic_client.beta.messages.create(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                system=system,
+                # tool_choice=tool_choice,
+                tools=tools,
+                messages=messages,
+                betas=betas
+            )
+        except anthropic.BadRequestError as e:
+            logger.error(
+                f"Failed to create completion: {e}. Input messages: {json.dumps(messages, indent=2)}"
+            )
+            raise CompletionRuntimeError(f"Failed to create completion: {e}") from e
 
         try:
+            text = None
             if not actions:
                 return completion_response.content[0].text, completion_response
             for block in completion_response.content:
-                if isinstance(block, ToolUseBlock):
+                if isinstance(block, ToolUseBlock) or isinstance(block, BetaToolUseBlock):
                     action = None
                     for check_action in actions:
                         if check_action.openai_schema["name"] == block.name:
@@ -574,9 +633,13 @@ class CompletionModel(BaseModel):
 
                     action_args = action.model_validate(block.input)
 
+                    if hasattr(action_args, "scratch_pad") and text and not action_args.scratch_pad:
+                        action.scratch_pad = text
+
                     # TODO: We only support one action at the moment
                     return action_args, completion_response
-
+                elif isinstance(block, TextBlock) or isinstance(block, BetaTextBlock):
+                    text = block.text
                 else:
                     logger.warning(f"Unexpected block {block}]")
 
@@ -586,10 +649,15 @@ class CompletionModel(BaseModel):
             )
             raise e
 
+        if not text:
+            text = f"No action found in completion response"
+
+        raise CompletionRejectError(text, last_completion=completion_response)
+
     def _map_completion_messages(self, messages: list[Message]) -> list[dict]:
         tool_call_id = None
         completion_messages = []
-        for message in messages:
+        for i, message in enumerate(messages):
             if message.role == "user":
                 if tool_call_id and self.response_format in [
                     LLMResponseFormat.TOOLS,
@@ -602,6 +670,7 @@ class CompletionModel(BaseModel):
                             "content": message.content,
                         }
                     )
+                    tool_call_id = None
                 elif tool_call_id and self.response_format in [
                     LLMResponseFormat.TOOLS,
                     LLMResponseFormat.STRUCTURED_OUTPUT,
@@ -618,6 +687,7 @@ class CompletionModel(BaseModel):
                             ],
                         }
                     )
+                    tool_call_id = None
                 elif tool_call_id and self.response_format in [
                     LLMResponseFormat.ANTHROPIC_TOOLS,
                 ]:
@@ -634,13 +704,14 @@ class CompletionModel(BaseModel):
                             ],
                         }
                     )
+                    tool_call_id = None
                 else:
                     completion_messages.append(
                         {"role": "user", "content": message.content}
                     )
             elif message.role == "assistant":
                 if message.tool_call:
-                    tool_call_id = generate_call_id()
+                    tool_call_id = f"call_{i}"
                     if self.response_format == LLMResponseFormat.ANTHROPIC_TOOLS:
                         completion_messages.append(
                             {
@@ -751,13 +822,27 @@ class CompletionModel(BaseModel):
         return self
 
 
-def generate_call_id():
-    prefix = "call_"
-    chars = string.ascii_letters + string.digits
-    length = 24
 
-    random_chars = "".join(random.choices(chars, k=length))
+def _inject_prompt_caching(
+    messages: list[BetaMessageParam],
+):
+    """
+    Set cache breakpoints for the 3 most recent turns
+    one cache breakpoint is left for tools/system prompt, to be shared across sessions
+    """
 
-    random_string = prefix + random_chars
-
-    return random_string
+    breakpoints_remaining = 3
+    for message in reversed(messages):
+        # message["role"] == "user" and
+        if isinstance(
+            content := message["content"], list
+        ):
+            if breakpoints_remaining:
+                breakpoints_remaining -= 1
+                content[-1]["cache_control"] = BetaCacheControlEphemeralParam(
+                    {"type": "ephemeral"}
+                )
+            else:
+                content[-1].pop("cache_control", None)
+                # we'll only every have one extra turn per loop
+                break
