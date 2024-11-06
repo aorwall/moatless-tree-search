@@ -5,6 +5,7 @@ import logging
 import os
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Set, Union
+import re
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from unidiff import PatchSet
@@ -285,30 +286,47 @@ class ContextFile(BaseModel):
         new_content_lines = []
         line_no = 0  # 0-based index
 
-        for hunk in patched_file:
-            # Copy unchanged lines before the hunk
-            while line_no < hunk.source_start - 1:
-                new_content_lines.append(content_lines[line_no])
-                line_no += 1
-
-            # Apply changes from the hunk
-            for line in hunk:
-                if line.is_context:
-                    if (
-                        line_no >= len(content_lines)
-                        or content_lines[line_no] != line.value
-                    ):
-                        raise Exception("Patch context mismatch")
-                    new_content_lines.append(content_lines[line_no])
-                    line_no += 1
-                elif line.is_added:
-                    new_content_lines.append(line.value)
-                elif line.is_removed:
+        try:
+            for hunk in patched_file:
+                # Copy unchanged lines before the hunk
+                while line_no < hunk.source_start - 1:
+                    if line_no < len(content_lines):
+                        new_content_lines.append(content_lines[line_no])
+                    else:
+                        logger.warning(f"Line number {line_no} exceeds content length {len(content_lines)} while copying unchanged lines")
+                        break
                     line_no += 1
 
-        # Copy remaining lines after the last hunk
-        new_content_lines.extend(content_lines[line_no:])
-        return "".join(new_content_lines)
+                # Apply changes from the hunk
+                for line in hunk:
+                    if line.is_context:
+                        if line_no >= len(content_lines):
+                            logger.warning(f"Context line {line_no} not found in content of length {len(content_lines)}")
+                            raise Exception("Patch context mismatch: line number exceeds content length")
+                        if content_lines[line_no] != line.value:
+                            logger.warning(f"Context mismatch at line {line_no}")
+                            raise Exception("Patch context mismatch: line content differs")
+                        new_content_lines.append(content_lines[line_no])
+                        line_no += 1
+                    elif line.is_added:
+                        new_content_lines.append(line.value)
+                    elif line.is_removed:
+                        if line_no >= len(content_lines):
+                            logger.warning(f"Trying to remove line {line_no} but content length is {len(content_lines)}")
+                            raise Exception("Patch context mismatch: cannot remove line beyond content length")
+                        line_no += 1
+
+            # Copy remaining lines after the last hunk
+            if line_no < len(content_lines):
+                new_content_lines.extend(content_lines[line_no:])
+
+            return "".join(new_content_lines)
+
+        except Exception as e:
+            logger.error(f"Error applying patch: {str(e)}")
+            logger.error(f"Content length: {len(content_lines)}, Current line: {line_no}")
+            # Return original content if patch fails
+            return content
 
     def generate_full_patch(self) -> str:
         """
