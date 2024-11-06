@@ -62,7 +62,6 @@ plotly = "^5.24.0"
 streamlit = "^1.38.0"
 matplotlib = "^3.9.2"
 pygraphviz = "^1.14"
-moatless-testbeds = "^0.0.8"
 
 [tool.ruff.lint]
 select = [ "B", "DTZ", "E", "F", "I", "LOG", "N", "PLE", "SIM", "T20", "UP",]
