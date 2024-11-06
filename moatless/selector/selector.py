@@ -556,7 +556,18 @@ from moatless.completion.completion import CompletionModel
 
 class LLMSelector(Selector):
     type: Literal["LLMSelector"] = "LLMSelector"
-    completion: CompletionModel = Field(description="The completion model used to generate responses")
+    completion: Optional[CompletionModel] = Field(default=None, description="The completion model used to generate responses")
+    max_iterations: Optional[int] = Field(default=None, description="Maximum number of iterations for the selector")
+
+    def __init__(self, completion: CompletionModel = None, max_iterations: int = None, **kwargs):
+        # Initialize with all fields, including those from base class
+        all_kwargs = {
+            "type": "LLMSelector",
+            "completion": completion,
+            "max_iterations": max_iterations,
+            **kwargs
+        }
+        super().__init__(**all_kwargs)
 
     def get_action_definitions(self) -> str:
         """
@@ -587,7 +598,7 @@ class LLMSelector(Selector):
             logger.error(f"Error building action definitions: {e}")
             return "\nAction definitions unavailable."
 
-    def build_ascii_tree(self, node: Node, previous_attempts: str = "") -> NodeSelection:
+    def build_ascii_tree(self, node: Node, previous_attempts: str = "", n_iterations: int = 0) -> NodeSelection:
         # Generate ASCII tree representation
         ascii_tree = generate_ascii_tree(
             node, 
@@ -602,8 +613,9 @@ class LLMSelector(Selector):
                 content="You are an AI tasked with analyzing a Monte Carlo Tree Search (MCTS) tree and selecting the most promising node for expansion. "
                         "Consider the node's reward, number of visits, and the potential of its action. "
                         "Be specific and provide context, since the software delevoper agent will only have the information you provide to it from the rest of the tree. "
-                        "The goal of the software developer agent is to make progress towards finding a solution by reaching multiple diverse 'finished' nodes that increase the likelihood of finding a good solution. "
-                        "Avoid suggesting repetitive actions that cause the agent to fall into loops."
+                        "The goal of the software developer agent is to reach multiple diverse 'finished' nodes that increase the likelihood of finding a good solution. "
+                        "Avoid causing the agent to fall into loops with repetitive actions."
+                        f"\n\nIteration Status: Currently in iteration {n_iterations} out of {self.max_iterations} available iterations."  # Add iteration count
                         f"{self.get_action_definitions()}"  # Add action definitions to system prompt
             ),
             Message(
@@ -634,22 +646,23 @@ class LLMSelector(Selector):
             return nodes[0]
 
         max_retries = 3
+        n_iterations = len(nodes)
         available_node_ids = [node.node_id for node in nodes]
         previous_attempts = ""
         
         for attempt in range(max_retries):
-            # Get the selection from LLM
-            selection = self.build_ascii_tree(nodes[0], previous_attempts)
+            # Get the selection from LLM, now passing n_iterations
+            selection = self.build_ascii_tree(nodes[0], previous_attempts, n_iterations)
             print(f"Attempt {attempt + 1}: Selected Node {selection.node_id}: {selection.explanation}")
 
             # Find and return the selected node
             for node in nodes:
                 if node.node_id == selection.node_id:
-                    try:
-                        node.reward.feedback = selection.explanation
-                        print(f"Setting explanation for node {node.node_id}: {selection.explanation}")
-                    except AttributeError:
-                        print(f"Node {node.node_id}, node: {node}, has no reward attribute")
+                    # try:
+                    #     node.reward.feedback = selection.explanation
+                    #     print(f"Setting explanation for node {node.node_id}: {selection.explanation}")
+                    # except AttributeError:
+                    #     print(f"Node {node.node_id}, node: {node}, has no reward attribute")
                     return node
             
             # If we get here, the selected node wasn't in the list
