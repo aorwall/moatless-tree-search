@@ -93,6 +93,31 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
 
         occurrences = file_content.count(indented_old_str)
         if occurrences == 0:
+            # Try to find the same code with different indentation
+            stripped_old_str = '\n'.join(line.strip() for line in old_str.splitlines())
+            indentation_matches = []
+            
+            # Check each line in the file for a potential match
+            file_lines = file_content.splitlines()
+            for i in range(len(file_lines)):
+                # Try to match the stripped content starting from this line
+                if i + len(stripped_old_str.splitlines()) <= len(file_lines):
+                    potential_match = '\n'.join(file_lines[i:i + len(stripped_old_str.splitlines())])
+                    stripped_potential = '\n'.join(line.strip() for line in potential_match.splitlines())
+                    if stripped_potential == stripped_old_str:
+                        indentation_matches.append(potential_match)
+
+            if len(indentation_matches) == 1:
+                # Calculate leading spaces for each line in the found match
+                found_indentation = [len(line) - len(line.lstrip()) for line in indentation_matches[0].splitlines()]
+                indentation_info = "\n".join(f"Line {i+1}: {spaces} spaces" for i, spaces in enumerate(found_indentation))
+                
+                return Observation(
+                    message=f"Found the code with different indentation. Did you mean to replace this string?\n\n```\n{indentation_matches[0]}\n```\n\nCorrect indentation spaces:\n{indentation_info}\n\nPlease provide old_str with this indentation!",
+                    properties={"fail_reason": "different_indentation_found"},
+                    expect_correction=True,
+                )
+
             new_str_occurrences = file_content.count(indented_new_str)
             if new_str_occurrences > 0:
                 return Observation(

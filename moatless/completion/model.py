@@ -90,7 +90,7 @@ class Usage(BaseModel):
                 )
                 cost = 0
             except Exception as e:
-                logger.error(
+                logger.debug(
                     f"Failed to calculate cost for completion response: {completion_response}. Error: {e}"
                 )
                 cost = 0
