@@ -59,7 +59,7 @@ def generate_summary(df: pd.DataFrame):
                     scale=alt.Scale(
                         domain=[
                             f'Resolved ({status_counts.get("Resolved", 0)})',
-                            f'Running with Resolved Solutions ({status_counts.get("Running with Resolved Solutions", 0)})',
+                            f'Finished ({status_counts.get("Finished", 0)})',
                             f'Partially Resolved ({status_counts.get("Partially Resolved", 0)})',
                             f'Running ({status_counts.get("Running", 0)})',
                             f'Failed ({status_counts.get("Failed", 0)})',
@@ -115,6 +115,8 @@ def trajectory_table(report_path: str):
         if row["status"] == "rejected"
         else "Running"
         if row["status"] == "running"
+        else "Finished"
+        if row["status"] == "finished"
         else "Failed",
         axis=1,
     )

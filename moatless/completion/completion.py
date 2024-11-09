@@ -4,10 +4,11 @@ import os
 import random
 import string
 from enum import Enum
-from typing import Optional, Union, List, Tuple, Any
+from typing import Optional, Union, List, Tuple, Any, Self
 
 import anthropic
 import instructor
+from instructor.utils import extract_json_from_codeblock
 from jsonschema import ValidationError
 import litellm
 import openai
@@ -129,7 +130,7 @@ class CompletionModel(BaseModel):
             logger.warning(
                 f"Instructor failed after {e.n_attempts} attempts. Last completion: {e.last_completion}. Messages: {e.messages}")
             raise CompletionRejectError(
-                f"Instructor failed after {e.n_attempts} attempts",
+                f"Failed to parse response. Did {e.n_attempts} attempts. ",
                 last_completion=e.last_completion,
                 messages=e.messages
             )
@@ -382,7 +383,7 @@ class CompletionModel(BaseModel):
     ) -> Tuple[OpenAISchema, ModelResponse]:
         if self.response_format == LLMResponseFormat.JSON:
             client = instructor.from_litellm(
-                litellm.completion, mode=instructor.Mode.JSON
+                litellm.completion, mode=instructor.Mode.MD_JSON
             )
         else:
             client = instructor.from_litellm(
@@ -421,6 +422,38 @@ class CompletionModel(BaseModel):
                         # Validate the action data using the specific action class
                         data['action'] = action_class.model_validate(data['action'])
                     return data
+
+                @classmethod
+                def model_validate_json(
+                        cls,
+                        json_data: str | bytes | bytearray,
+                        **kwarg,
+                ) -> Self:
+                    message = json_data
+                    logger.info(f"parse_json() Original message: {repr(message)}")
+
+                    # Clean control characters from the message, preserving tabs and newlines
+                    cleaned_message = ''.join(char for char in message if ord(char) >= 32 or char in '\n\r')
+                    if cleaned_message != message:
+                        logger.info(f"parse_json() Cleaned control chars: {repr(message)} -> {repr(cleaned_message)}")
+                    message = cleaned_message
+
+                    # Extract JSON from codeblock if present
+                    json_message = extract_json_from_codeblock(message)
+                    if json_message != message:
+                        logger.info(f"parse_json() Extracted JSON: {repr(json_message)}")
+                    message = json_message
+
+                    # Normalize line endings to \n
+                    message = message.replace('\r\n', '\n').replace('\r', '\n')
+
+                    logger.debug(f"parse_json() Final message to validate: {repr(message)}")
+
+                    __tracebackhide__ = True
+                    return super().model_validate_json(
+                        message,
+                        **kwarg
+                    )
 
                 #class Config:
                 #    smart_union = True
@@ -792,7 +825,6 @@ class CompletionModel(BaseModel):
                         }
                         json_content = json.dumps(action_json, indent=2)
 
-                        # TODO Only if self.model.startswith("deepseek"): ?
                         json_content = f"```json\n{json_content}\n```"
 
                         completion_messages.append(

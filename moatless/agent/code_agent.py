@@ -49,7 +49,7 @@ class CodingAgent(ActionAgent):
                         "action": example.action.model_dump(),
                         "action_type": example.action.name
                     }
-                    prompt += f"User: {example.user_input}\nAssistant:\n{json.dumps(action_json, indent=2)}\n"
+                    prompt += f"User: {example.user_input}\nAssistant:\n```json\n{json.dumps(action_json, indent=2)}\n```\n\n"
 
         return prompt
 

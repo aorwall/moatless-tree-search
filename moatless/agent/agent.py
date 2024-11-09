@@ -10,7 +10,7 @@ from moatless.actions.model import ActionArguments, Observation
 from moatless.actions.reject import RejectArgs, Reject
 from moatless.completion.completion import CompletionModel
 from moatless.completion.model import Message, AssistantMessage, UserMessage, Completion
-from moatless.exceptions import RuntimeError, RejectError, CompletionError
+from moatless.exceptions import RuntimeError, RejectError, CompletionError, CompletionRejectError
 from moatless.index.code_index import CodeIndex
 from moatless.node import Node, MessageHistoryType
 from moatless.repository.repository import Repository
@@ -51,14 +51,17 @@ class ActionAgent(BaseModel):
         **data
     ):
         actions = actions or []
-        actions_map = {action.args_schema: action for action in actions}
         super().__init__(
             actions=actions, 
             system_prompt=system_prompt,
             **data
         )
+        self.set_actions(actions)
         self._completion = completion
-        self._action_map = actions_map
+
+    def set_actions(self, actions: List[Action]):
+        self.actions = actions
+        self._action_map = {action.args_schema: action for action in actions}
 
     @model_validator(mode="after")
     def verify_system_prompt(self) -> "ActionAgent":
@@ -96,6 +99,12 @@ class ActionAgent(BaseModel):
             rejection_reason = str(e)
             node.action = RejectArgs(rejection_reason=rejection_reason)
             self.execute_action(node)
+
+            if isinstance(e, CompletionRejectError):
+                if not node.observation.properties:
+                    node.observation.properties = {}
+                node.observation.properties["last_completion"] = e.last_completion
+
         except RuntimeError as e:
             logger.error(f"Node{node.node_id}: Runtime error: {e.message}")
             raise  #
@@ -152,7 +161,7 @@ class ActionAgent(BaseModel):
                 )
         else:
             logger.error(
-                f"Node{node.node_id}: Action {node.action} not found in action map. "
+                f"Node{node.node_id}: Action {node.action.name} not found in action map. "
                 f"Available actions: {self._action_map.keys()}"
             )
             raise Exception(f"Action {node.action} not found in action map.")

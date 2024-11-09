@@ -2,7 +2,7 @@ import importlib
 import logging
 import pkgutil
 from abc import ABC
-from typing import Dict, Type, Any, Optional
+from typing import Dict, Type, Any, Optional, Self
 
 from instructor import OpenAISchema
 from instructor.utils import extract_json_from_codeblock, classproperty
@@ -68,27 +68,6 @@ class ActionArguments(OpenAISchema, ABC):
         return data
 
     @classmethod
-    def parse_json(
-        cls: type[BaseModel],
-        completion: ChatCompletion,
-        validation_context: Optional[dict[str, Any]] = None,
-        strict: Optional[bool] = None,
-    ) -> BaseModel:
-        message = completion.choices[0].message.content or ""
-
-        # Because Qwen-2.5-72B-Instruct keeps adding those to the responses...
-        if '\x00' in message:
-            logger.info(f"parse_json() Replace \x00 in: {message}")
-            message = message.replace('\x00', '')
-        message = extract_json_from_codeblock(message)
-
-        return cls.model_validate_json(
-            message,
-            context=validation_context,
-            strict=strict,
-        )
-
-    @classmethod
     def get_action_args(cls, action_name: str) -> Type["ActionArguments"]:
         """
         Dynamically import and return the appropriate ActionArguments class for the given action.
@@ -131,6 +110,36 @@ class ActionArguments(OpenAISchema, ABC):
 
 
     @classmethod
+    def model_validate_json(
+        cls,
+        json_data: str | bytes | bytearray,
+        **kwarg,
+    ) -> Self:
+        message = json_data
+        logger.info(f"parse_json() Original message: {repr(message)}")
+
+        # Clean control characters from the message
+        cleaned_message = ''.join(char for char in message if ord(char) >= 32 or char in '\n\r\t')
+        if cleaned_message != message:
+            logger.info(f"parse_json() Cleaned control chars: {repr(message)} -> {repr(cleaned_message)}")
+        message = cleaned_message
+
+        # Extract JSON from codeblock if present
+        json_message = extract_json_from_codeblock(message)
+        if json_message != message:
+            logger.info(f"parse_json() Extracted JSON: {repr(json_message)}")
+        message = json_message
+
+        logger.debug(f"parse_json() Final message to validate: {repr(message)}")
+
+        __tracebackhide__ = True
+        return super().model_validate_json(
+            message,
+            **kwarg
+        )
+
+
+    @classmethod
     def parse_json(
         cls: type[BaseModel],
         completion: ChatCompletion,
@@ -138,13 +147,21 @@ class ActionArguments(OpenAISchema, ABC):
         strict: Optional[bool] = None,
     ) -> BaseModel:
         message = completion.choices[0].message.content or ""
+        logger.info(f"parse_json() Original message: {repr(message)}")
 
-        # Because Qwen-2.5-72B-Instruct keeps adding those to the responses...
-        if "\x00" in message:
-            logger.info(f"parse_json() Replace \x00 in: {message}")
-            message = message.replace("\x00", "")
-        message = extract_json_from_codeblock(message)
+        # Clean control characters from the message
+        cleaned_message = ''.join(char for char in message if ord(char) >= 32 or char in '\n\r\t')
+        if cleaned_message != message:
+            logger.info(f"parse_json() Cleaned control chars: {repr(message)} -> {repr(cleaned_message)}")
+        message = cleaned_message
+        
+        # Extract JSON from codeblock if present
+        json_message = extract_json_from_codeblock(message)
+        if json_message != message:
+            logger.info(f"parse_json() Extracted JSON: {repr(json_message)}")
+        message = json_message
 
+        logger.debug(f"parse_json() Final message to validate: {repr(message)}")
         return cls.model_validate_json(
             message,
             context=validation_context,

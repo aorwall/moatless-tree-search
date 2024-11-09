@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 from typing import Optional, List
 
-from pydantic import Field, PrivateAttr
+from pydantic import Field, PrivateAttr, model_validator
 
 from moatless.actions.action import Action
 from moatless.actions.model import ActionArguments, Observation, FewShotExample
@@ -29,10 +29,29 @@ class StringReplaceArgs(ActionArguments):
     * The old_str must be unique within the file - include enough surrounding context to ensure uniqueness
     * The new_str parameter contains the replacement text that will replace old_str
     * No changes will be made if old_str appears multiple times or cannot be found
+    * Do not include line numbers in old_str or new_str - provide only the actual code content
     """
     path: str = Field(..., description="Path to the file to edit")
-    old_str: str = Field(..., description="Exact string from the file to replace - must match exactly and be unique")
-    new_str: str = Field(..., description="New string to replace the old_str with")
+    old_str: str = Field(..., description="Exact string from the file to replace - must match exactly, be unique, include proper indentation, and contain no line numbers")
+    new_str: str = Field(..., description="New string to replace the old_str with - must use proper indentation and contain no line numbers")
+
+    @model_validator(mode="after")
+    def validate_line_numbers(self) -> 'StringReplaceArgs':
+        import re
+
+        def remove_line_numbers(text: str) -> str:
+            lines = text.split('\n')
+            # Pattern to match line numbers at start of line
+            line_number_pattern = r'^\s*\d+'
+            
+            # Remove line numbers if found
+            cleaned_lines = [re.sub(line_number_pattern, '', line) for line in lines]
+            return '\n'.join(cleaned_lines)
+
+        self.old_str = remove_line_numbers(self.old_str)
+        self.new_str = remove_line_numbers(self.new_str)
+            
+        return self
 
     class Config:
         title = "StringReplace"
@@ -68,24 +87,21 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
         old_str = args.old_str.expandtabs()
         new_str = args.new_str.expandtabs()
 
-        if old_str == new_str:
-            return Observation(
-                message="The replacement string is the same as the original string. No changes were made.",
-                properties={"fail_reason": "no_changes"},
-                expect_correction=True,
-            )
+        indentation_changes = None
+        indented_new_str = new_str
+        indented_old_str = old_str
 
-        occurrences = file_content.count(old_str)
+        occurrences = file_content.count(indented_old_str)
         if occurrences == 0:
-            new_str_occurrences = file_content.count(new_str)
+            new_str_occurrences = file_content.count(indented_new_str)
             if new_str_occurrences > 0:
                 return Observation(
-                    message=f"New string '{new_str}' already exists in {path}. No changes were made.",
+                    message=f"New string '{indented_new_str}' already exists in {path}. No changes were made.",
                     properties={"fail_reason": "string_already_exists"}
                 )
 
             return Observation(
-                message=f"String '{old_str}' not found in {path}",
+                message=f"String '{indented_old_str}' not found in {path}",
                 properties={"fail_reason": "string_not_found"},
                 expect_correction=True,
             )
@@ -94,24 +110,25 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
             lines = []
             pos = 0
             while True:
-                pos = file_content.find(old_str, pos)
+                pos = file_content.find(indented_old_str, pos)
                 if pos == -1:
                     break
                 # Count newlines before this occurrence to get line number
                 line_number = file_content.count('\n', 0, pos) + 1
                 lines.append(line_number)
-                pos += len(old_str)
+                pos += len(indented_old_str)
 
+            lines_str = "\n".join(f"- Line {line}" for line in lines)
             return Observation(
-                message=f"Multiple occurrences of string found at lines {lines}",
+                message=f"Multiple occurrences of string found:\n{lines_str}\nTry including more surrounding lines to create a unique match.",
                 properties={"fail_reason": "multiple_occurrences"},
                 expect_correction=True,
             )
 
         # Find the line numbers of the change
-        change_pos = file_content.find(old_str)
-        start_line = file_content.count('\n', 0, change_pos) + 1
-        end_line = start_line + old_str.count('\n')
+        change_pos = file_content.find(indented_old_str)
+        start_line = file_content.count('\n', 0, change_pos)
+        end_line = start_line + indented_old_str.count('\n')
 
         # Check if the lines to be modified are in context
         if not context_file.lines_is_in_context(start_line, end_line):
@@ -121,15 +138,16 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                 expect_correction=True,
             )
 
-        new_file_content = file_content.replace(old_str, new_str)
+
+        new_file_content = file_content.replace(indented_old_str, indented_new_str)
         diff = do_diff(str(path), file_content, new_file_content)
         
         context_file.apply_changes(new_file_content)
 
         # Create a snippet of the edited section
-        start_line = max(0, start_line - SNIPPET_LINES - 1)
-        end_line = start_line + SNIPPET_LINES + new_str.count('\n')
-        snippet = "\n".join(new_file_content.split("\n")[start_line:end_line])
+        snippet_start_line = max(0, start_line - SNIPPET_LINES - 1)
+        end_line = start_line + SNIPPET_LINES + indented_new_str.count('\n')
+        snippet = "\n".join(new_file_content.split("\n")[snippet_start_line:end_line])
 
         # Format the snippet with line numbers
         snippet_with_lines = self.format_snippet_with_lines(snippet, start_line + 1)
@@ -140,9 +158,22 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
             "Review the changes and make sure they are as expected. Edit the file again if necessary."
         )
 
+        # Add indentation info to the observation
+        if indentation_changes:
+            indentation_msg = "\nIndentation corrections made:"
+            for line_info in indentation_changes.values():
+                indentation_msg += f"\nLine {line_info['line_number']}: "
+                indentation_msg += f"Changed from {line_info['provided']} to {line_info['original']} spaces"
+            
+            success_msg += indentation_msg
+
         observation = Observation(
             message=success_msg,
-            properties={"diff": diff, "success": True},
+            properties={
+                "diff": diff, 
+                "success": True,
+                "indentation_changes": indentation_changes
+            },
         )
 
         return self.run_tests_and_update_observation(
