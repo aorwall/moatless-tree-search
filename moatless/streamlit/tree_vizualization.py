@@ -41,6 +41,7 @@ def decide_badge(node_info):
     if node_info.get("warning"):
         return ("circle", "yellow")
 
+
     if node_info.get("context_status") in ["found_spans"]:
         if node_info.get("patch_status") == "wrong_files":
             return ("circle", "yellow")
@@ -687,14 +688,8 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                                 st.code(selected_node.observation.message)
                                 if selected_node.observation.extra:
                                     st.code(selected_node.observation.extra)
-
-                                    if selected_node.message:
+                        if selected_node.message:
                             st.write(selected_node.message)
-                            
-                            # Add reward feedback section
-                            if selected_node.feedback:
-                                st.subheader("Feedback")
-                                st.write(selected_node.feedback)
 
                     if "FileContext" in tabs:
                         with tab_contents[tabs.index("FileContext")]:

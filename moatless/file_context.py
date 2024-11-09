@@ -680,6 +680,9 @@ class ContextFile(BaseModel):
         return added_spans
     
     def lines_is_in_context(self, start_line: int, end_line: int) -> bool:
+        if self.show_all_spans:
+            return True
+
         blocks = self.module.find_blocks_by_line_numbers(
             start_line, end_line, include_parents=True
         )

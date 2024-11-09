@@ -37,9 +37,9 @@ class RunTestsArgs(ActionArguments):
 class RunTests(Action):
     args_schema = RunTestsArgs
 
-    _code_index: CodeIndex
-    _repository: Repository
-    _runtime: RuntimeEnvironment
+    _code_index: CodeIndex = PrivateAttr()
+    _repository: Repository = PrivateAttr()
+    _runtime: RuntimeEnvironment = PrivateAttr()
 
     def __init__(
         self,
