@@ -182,22 +182,26 @@ class Node(BaseModel):
         return total_usage
 
     def generate_message_history(self, 
-                                 message_history_type: MessageHistoryType,
+                                 message_history_type: MessageHistoryType = MessageHistoryType.MESSAGES,
                                  include_file_context: bool = True,
                                  include_extra_history: bool = True,
                                  include_git_patch: bool = True) -> list[Message]:
-        messages = [UserMessage(content=f"<task>\n{self.get_root().message}\n</task>\n\n")]
+        # TODO: Move this to the generate summary history and set task on creation to be able to show file context properly if its provided on creation
+        messages = [
+            UserMessage(
+                content=f"<task>\n{self.get_root().message}\n</task>\n\n")
+        ]
 
         previous_nodes = self.get_trajectory()[:-1]
 
         if message_history_type == MessageHistoryType.SUMMARY:
-            messages.extend(self.generate_summary_history(previous_nodes, include_extra_history, include_file_context, include_git_patch))
+            messages.extend(self._generate_summary_history(previous_nodes, include_extra_history, include_file_context, include_git_patch))
         else:  # MessageHistoryType.MESSAGES
-            messages.extend(self.generate_full_history(previous_nodes, include_extra_history, include_file_context, include_git_patch))
+            messages.extend(self._generate_message_history(previous_nodes))
 
         return messages
 
-    def generate_summary_history(self, previous_nodes: List["Node"], include_extra_history: bool = True, include_file_context: bool = True, include_git_patch: bool = True) -> list[Message]:
+    def _generate_summary_history(self, previous_nodes: List["Node"], include_extra_history: bool = True, include_file_context: bool = True, include_git_patch: bool = True) -> list[Message]:
         """Generate a single message containing summarized history."""
         formatted_history: List[str] = []
         counter = 0
@@ -215,9 +219,17 @@ class Node(BaseModel):
                         if previous_node.observation.extra:
                             formatted_state += "\n\n"
                             formatted_state += previous_node.observation.extra
-                    formatted_history.append(formatted_state)
                 else:
                     logger.warning(f"No output found for Node{previous_node.node_id}")
+                    formatted_state += "\n\nNo output found."
+
+                updated_files = previous_node.file_context.get_updated_files(previous_node.parent.file_context) if previous_node.parent else []
+                if updated_files:
+                    formatted_state += f"\n\nFiles that was updated by this action:\n"
+                    context_prompt = previous_node.file_context.create_prompt(show_span_ids=False, show_line_numbers=True, exclude_comments=False, show_outcommented_code=True, outcomment_code_comment="... rest of the code")
+                    formatted_state += f"<file_context>\n{context_prompt}\n</file_context>\n\n"
+
+                formatted_history.append(formatted_state)
 
         content = "Below is the history of previously executed actions and their outputs.\n"
         content += "<history>\n"
@@ -233,9 +245,21 @@ class Node(BaseModel):
         content += self._format_feedback()
         return [UserMessage(content=content)]
 
-    def generate_full_history(self, previous_nodes: List["Node"], include_extra_history: bool = True, include_file_context: bool = True, include_git_patch: bool = True) -> list[Message]:
+    def _generate_message_history(self, previous_nodes: List["Node"]) -> list[Message]:
         """Generate a sequence of messages representing the full conversation history."""
         messages: list[Message] = []
+        
+        # Track when each file was last modified to show file contexts optimally.
+        # By showing each file's context only in the last message where it was modified,
+        # we improve prompt caching since earlier messages won't change when new files are modified.
+        last_file_updates = {}
+        for i, node in enumerate(previous_nodes):
+            if not node.parent:
+                updated_files = set([file.file_path for file in node.file_context.get_context_files()])
+            else:
+                updated_files = node.file_context.get_updated_files(node.parent.file_context)
+                for file in updated_files:
+                    last_file_updates[file] = i
 
         for i, previous_node in enumerate(previous_nodes):
             if previous_node.action:
@@ -243,14 +267,30 @@ class Node(BaseModel):
                 messages.append(AssistantMessage(tool_call=tool_call))
 
                 content = ""
-                if previous_node.message:
-                    content = f"<issue>\n{previous_node.message}\n</issue>"
-
                 if previous_node.observation:
                     content += previous_node.observation.message
-                    if (i == len(previous_nodes) - 1) or include_extra_history:
-                        if previous_node.observation.extra:
-                            content += "\n" + previous_node.observation.extra
+                    if i == len(previous_nodes) - 1 and previous_node.observation.extra:
+                        content += "\n" + previous_node.observation.extra
+
+                # Show file context for files that were last updated in this message
+                if not previous_node.parent:
+                    updated_files = set([file.file_path for file in previous_node.file_context.get_context_files()])
+                else:
+                    updated_files = previous_node.file_context.get_updated_files(previous_node.parent.file_context)
+
+                files_to_show = set([f for f in updated_files if last_file_updates.get(f) == i])
+
+                if files_to_show:
+                    content += f"\n\nThe file context for the following files was updated by this action:\n"
+                    context_prompt = previous_node.file_context.create_prompt(
+                        show_span_ids=False,
+                        show_line_numbers=True,
+                        exclude_comments=False,
+                        show_outcommented_code=True,
+                        outcomment_code_comment="... rest of the code",
+                        files=files_to_show  # Only show context for specific files
+                    )
+                    content += f"<file_context>\n{context_prompt}\n</file_context>\n\n"
 
                 if not content:
                     logger.warning(
@@ -259,22 +299,9 @@ class Node(BaseModel):
 
                 messages.append(UserMessage(content=content))
 
-        # Add file context, git patch, and feedback as the final message
-
-        if include_file_context:
-            context = self._format_file_context()
-        else:
-            context = ""
-
-        if include_git_patch:
-            git_patch = self._format_git_patch()
-        else:
-            git_patch = ""
-
         feedback = self._format_feedback()
-
-        if context or git_patch or feedback:
-            messages.append(UserMessage(content=context + git_patch + feedback))
+        if feedback:
+            messages.append(UserMessage(content=feedback))
 
         return messages
 

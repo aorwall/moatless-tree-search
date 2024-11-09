@@ -35,8 +35,12 @@ def decide_badge(node_info):
         else:
             return ("x", "red")
 
-    if node_info.get("warning"):
+    if node_info.get("error"):
         return ("circle", "red")
+
+    if node_info.get("warning"):
+        return ("circle", "yellow")
+
 
     if node_info.get("context_status") in ["found_spans"]:
         if node_info.get("patch_status") == "wrong_files":
@@ -74,7 +78,10 @@ def build_graph(
         node_id = f"Node{node.node_id}"
 
         if node.action:
-            action_name = node.action.name
+            if node.action.name == "str_replace_editor":
+                action_name = node.action.command
+            else:
+                action_name = node.action.name
         else:
             action_name = ""
 
@@ -84,6 +91,7 @@ def build_graph(
             context_stats = None
 
         warning = ""
+        error = ""
         if node.observation and node.observation.properties:
             if "test_results" in node.observation.properties:
                 test_results = node.observation.properties["test_results"]
@@ -93,9 +101,11 @@ def build_graph(
 
                 if failed_test_count > 0:
                     warning = f"{failed_test_count} failed tests"
+            if "fail_reason" in node.observation.properties:
+                error = f"Fail: {node.observation.properties['fail_reason']}"
 
-            elif "fail_reason" in node.observation.properties:
-                warning = f"Fail: {node.observation.properties['fail_reason']}"
+        if node.observation and node.observation.expect_correction:
+            warning += f"\nExpected correction"
 
         resolved = is_resolved(node.node_id)
        
@@ -108,6 +118,7 @@ def build_graph(
             avg_reward=node.value / node.visits if node.visits > 0 else 0,
             reward=node.reward.value if node.reward else 0,
             warning=warning,
+            error=error,
             resolved=resolved,
             context_status=context_stats.status if context_stats else None,
             patch_status=context_stats.patch_status if context_stats else None,
@@ -328,17 +339,15 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                     elif node_info.get("alternative_span_identified"):
                         extra = "Alternative span identified"
 
-                    if node_info.get("no_diff"):
-                        extra += "<br>No diff found"
-
-                    if node_info.get("verification_errors"):
-                        extra += "<br>Verification errors found"
-
                     if node_info.get("state_params"):
                         extra += "<br>".join(node_info["state_params"])
 
                     if node_info.get("warning"):
-                        extra += f"<br>({node_info['warning']}"
+                        extra += f"<br>Warning: {node_info['warning']}"
+
+                    if node_info.get("error"):
+                        extra += f"<br>Error: {node_info['error']}"
+
 
                     # Update hover text to include badge information
                     node_text.append(
@@ -666,15 +675,21 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                     with tab_contents[tabs.index("Summary")]:
                         if selected_node.action:
                             st.subheader(
-                                f"Node{selected_node.node_id}: {selected_node.action.name}"
+                                f"Node{selected_node.node_id}"
                             )
-                            st.json(selected_node.action.model_dump())
+                            if hasattr(selected_node.action, "scratch_pad"):
+                                st.write(selected_node.action.scratch_pad)
+
+                            st.subheader(f"Action: {selected_node.action.name}")
+                            st.json(selected_node.action.model_dump(exclude={"scratch_pad"}))
 
                             if selected_node.observation:
                                 st.subheader("Output")
                                 st.code(selected_node.observation.message)
                                 if selected_node.observation.extra:
                                     st.code(selected_node.observation.extra)
+                        if selected_node.message:
+                            st.write(selected_node.message)
 
                     if "FileContext" in tabs:
                         with tab_contents[tabs.index("FileContext")]:

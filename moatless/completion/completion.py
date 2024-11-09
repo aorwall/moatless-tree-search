@@ -26,12 +26,9 @@ from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
 
 logger = logging.getLogger(__name__)
 
-
 class LLMResponseFormat(str, Enum):
     TOOLS = "tool_call"
     JSON = "json"
-    ANTHROPIC_TOOLS = "anthropic_tools"
-    STRUCTURED_OUTPUT = "structured_output"
 
 
 class CompletionModel(BaseModel):
@@ -55,15 +52,8 @@ class CompletionModel(BaseModel):
 
     @model_validator(mode="after")
     def validate_response_format(self):
-        if self.model.startswith("claude") or self.model.startswith("anthropic"):
-            self.response_format = LLMResponseFormat.ANTHROPIC_TOOLS
-        elif self.model in [
-            "gpt-4o-2024-08-06",
-            "gpt-4o-mini-2024-07-18",
-            "gpt-4o-mini",
-        ]:
-            self.response_format = LLMResponseFormat.STRUCTURED_OUTPUT
-        elif self.model == "deepseek/deepseek-chat":
+        # Always use JSON response format for deepseek chat as it isn't reliable with tools
+        if self.model == "deepseek/deepseek-chat":
             self.response_format = LLMResponseFormat.JSON
         else:
             try:
@@ -81,6 +71,28 @@ class CompletionModel(BaseModel):
 
         return self
 
+    @property
+    def supports_anthropic_prompt_caching(self):
+        return self.model.startswith("claude-3-5-")
+
+    @property
+    def supports_anthropic_computer_use(self):
+        return "claude-3-5-sonnet-20241022" in self.model
+
+    @property
+    def use_anthropic_client(self):
+        """Skip LiteLLM and use Anthropic's client for beta features"""
+        return self.supports_anthropic_computer_use or self.supports_anthropic_prompt_caching
+
+    @property
+    def use_openai_client(self):
+        """Skip LiteLLm and use OpenAI's client for beta features"""
+        return self.model in  [
+            "gpt-4o-2024-08-06",
+            "gpt-4o-mini-2024-07-18",
+            "gpt-4o-mini",
+        ]
+
     def create_completion(
         self,
         messages: List[Message],
@@ -92,15 +104,15 @@ class CompletionModel(BaseModel):
 
         completion_messages = self._map_completion_messages(messages)
 
-        if self.response_format != LLMResponseFormat.ANTHROPIC_TOOLS:
+        if not self.supports_anthropic_computer_use and not self.supports_anthropic_prompt_caching:
             completion_messages.insert(0, {"role": "system", "content": system_prompt})
 
         try:
-            if self.response_format == LLMResponseFormat.ANTHROPIC_TOOLS:
+            if self.use_anthropic_client:
                 action_args, completion_response = self._anthropic_completion(
                     completion_messages, system_prompt, actions
                 )
-            elif self.response_format == LLMResponseFormat.STRUCTURED_OUTPUT:
+            elif self.use_openai_client:
                 action_args, completion_response = self._openai_completion(
                     completion_messages, actions
                 )
@@ -145,7 +157,7 @@ class CompletionModel(BaseModel):
     def create_text_completion(self, messages: List[Message], system_prompt: str):
         completion_messages = self._map_completion_messages(messages)
 
-        if self.response_format == LLMResponseFormat.ANTHROPIC_TOOLS:
+        if self.supports_anthropic_computer_use or self.supports_anthropic_prompt_caching:
             response, completion_response = self._anthropic_completion(
                 completion_messages, system_prompt
             )
@@ -502,9 +514,9 @@ class CompletionModel(BaseModel):
                     temperature=self.temperature,
                     stop=self.stop_words,
                     messages=messages,
-                    tool_choice="required",
+                    #tool_choice="required",
                     tools=tools,
-                    parallel_tool_calls=False,
+                    parallel_tool_calls=True,
                 )
             else:
                 completion_response = client.beta.chat.completions.parse(
@@ -561,10 +573,6 @@ class CompletionModel(BaseModel):
         system_prompt: str | None = None,
         actions: List[type[OpenAISchema]] | None = None,
     ) -> Tuple[OpenAISchema | str, Any]:
-        if self.model.startswith("anthropic"):
-            anthropic_client = AnthropicBedrock()
-        else:
-            anthropic_client = Anthropic()
 
         if actions:
             tools = []
@@ -588,93 +596,98 @@ class CompletionModel(BaseModel):
             tools = NOT_GIVEN
             tool_choice = NOT_GIVEN
 
-        betas = ["computer-use-2024-10-22", "prompt-caching-2024-07-31"]
-        _inject_prompt_caching(messages)
+        system_message = {
+            "text": system_prompt,
+            "type": "text"
+        }
 
-        system = [
-                    {
-                        "text": system_prompt,
-                        "type": "text",
-                        "cache_control": {"type": "ephemeral"},
-                    }
-                ]
+        if "anthropic" in self.model:
+            anthropic_client = AnthropicBedrock()
+            betas = ["computer-use-2024-10-22"]
+        else:
+            anthropic_client = Anthropic()
+            betas = ["computer-use-2024-10-22", "prompt-caching-2024-07-31"]
+            _inject_prompt_caching(messages)
+            system_message["cache_control"] = {"type": "ephemeral"}
+
         completion_response = None
-        try:
-            completion_response = anthropic_client.beta.messages.create(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                system=system,
-                # tool_choice=tool_choice,
-                tools=tools,
-                messages=messages,
-                betas=betas
-            )
-        except anthropic.BadRequestError as e:
-            logger.error(
-                f"Failed to create completion: {e}. Input messages: {json.dumps(messages, indent=2)}"
-            )
-            raise CompletionRuntimeError(f"Failed to create completion: {e}") from e
+        retry_message = None
+        for i in range(2):
+            if i > 0:
+                logger.warning(f"Retrying completion request: {retry_message} (attempt {i})")
 
-        try:
-            text = None
-            if not actions:
-                return completion_response.content[0].text, completion_response
-            for block in completion_response.content:
-                if isinstance(block, ToolUseBlock) or isinstance(block, BetaToolUseBlock):
-                    action = None
-                    for check_action in actions:
-                        if check_action.openai_schema["name"] == block.name:
-                            action = check_action
-                            break
+            try:
+                completion_response = anthropic_client.beta.messages.create(
+                    model=self.model,
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                    system=[system_message],
+                    # tool_choice=tool_choice,
+                    tools=tools,
+                    messages=messages,
+                    betas=betas
+                )
+            except anthropic.BadRequestError as e:
+                logger.error(
+                    f"Failed to create completion: {e}. Input messages: {json.dumps(messages, indent=2)}"
+                )
+                raise CompletionRuntimeError(f"Failed to create completion: {e}") from e
 
-                    if not action:
-                        raise ValueError(f"Unknown action {block.name}")
+            try:
+                text = None
+                if not actions:
+                    return completion_response.content[0].text, completion_response
+                for block in completion_response.content:
+                    if isinstance(block, ToolUseBlock) or isinstance(block, BetaToolUseBlock):
+                        action = None
+                        for check_action in actions:
+                            if check_action.openai_schema["name"] == block.name:
+                                action = check_action
+                                break
 
-                    action_args = action.model_validate(block.input)
+                        if not action:
+                            raise ValueError(f"Unknown action {block.name}")
 
-                    if hasattr(action_args, "scratch_pad") and text and not action_args.scratch_pad:
-                        action.scratch_pad = text
+                        action_args = action.model_validate(block.input)
 
-                    # TODO: We only support one action at the moment
-                    return action_args, completion_response
-                elif isinstance(block, TextBlock) or isinstance(block, BetaTextBlock):
-                    text = block.text
+                        if hasattr(action_args, "scratch_pad") and text and not action_args.scratch_pad:
+                            action_args.scratch_pad = text
+
+                        # TODO: We only support one action at the moment
+                        return action_args, completion_response
+                    elif isinstance(block, TextBlock) or isinstance(block, BetaTextBlock):
+                        text = block.text
+                    else:
+                        logger.warning(f"Unexpected block {block}]")
+
+                retry_message = f"You're an autonomous agent that can't communicate with the user. Please provide a tool call."
+            except anthropic.APIError as e:
+                if hasattr(e, "status_code"):
+                    raise CompletionRuntimeError(f"Failed to call Anthropic API. Status code: {e.status_code}, Response: {e.body}") from e
                 else:
-                    logger.warning(f"Unexpected block {block}]")
+                    raise CompletionRuntimeError(f"Failed to call Anthropic API. {e}") from e
+            except Exception as e:
+                retry_message = f"The request was invalid. Please try again. Error: {e}"
 
-        except Exception as e:
-            logger.exception(
-                f"Failed to parse action request from completion response. Completion: {completion_response}"
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": completion_response.content
+                }
             )
-            raise e
-
-        if not text:
-            text = f"No action found in completion response"
-
-        raise CompletionRejectError(text, last_completion=completion_response)
+            messages.append(
+                {
+                    "role": "user",
+                    "content": retry_message
+                }
+            )
 
     def _map_completion_messages(self, messages: list[Message]) -> list[dict]:
         tool_call_id = None
         completion_messages = []
         for i, message in enumerate(messages):
             if message.role == "user":
-                if tool_call_id and self.response_format in [
-                    LLMResponseFormat.TOOLS,
-                    LLMResponseFormat.STRUCTURED_OUTPUT,
-                ]:
-                    completion_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": message.content,
-                        }
-                    )
-                    tool_call_id = None
-                elif tool_call_id and self.response_format in [
-                    LLMResponseFormat.TOOLS,
-                    LLMResponseFormat.STRUCTURED_OUTPUT,
-                ]:
+                if tool_call_id and self.use_anthropic_client:
                     completion_messages.append(
                         {
                             "role": "user",
@@ -689,7 +702,18 @@ class CompletionModel(BaseModel):
                     )
                     tool_call_id = None
                 elif tool_call_id and self.response_format in [
-                    LLMResponseFormat.ANTHROPIC_TOOLS,
+                    LLMResponseFormat.TOOLS
+                ]:
+                    completion_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "content": message.content,
+                        }
+                    )
+                    tool_call_id = None
+                elif tool_call_id and self.response_format in [
+                    LLMResponseFormat.TOOLS
                 ]:
                     completion_messages.append(
                         {
@@ -699,7 +723,6 @@ class CompletionModel(BaseModel):
                                     "tool_use_id": tool_call_id,
                                     "content": message.content,
                                     "type": "tool_result",
-                                    # FIME "cache_control": {"type": "ephemeral"}
                                 }
                             ],
                         }
@@ -712,23 +735,38 @@ class CompletionModel(BaseModel):
             elif message.role == "assistant":
                 if message.tool_call:
                     tool_call_id = f"call_{i}"
-                    if self.response_format == LLMResponseFormat.ANTHROPIC_TOOLS:
+                    content = []
+                    if self.use_anthropic_client:
+                        tool_input = message.tool_call.input.copy()
+
+                        # Scratch pad is provided as a message instead of part of the tool call
+                        if "scratch_pad" in message.tool_call.input:
+                            scratch_pad = tool_input["scratch_pad"]
+                            del tool_input["scratch_pad"]
+                            if scratch_pad:
+                                content.append(
+                                    {
+                                        "type": "text",
+                                        "text": scratch_pad,
+                                    }
+                                )
+
+                        content.append(
+                            {
+                                "id": tool_call_id,
+                                "input": tool_input,
+                                "type": "tool_use",
+                                "name": message.tool_call.name,
+                            }
+                        )
                         completion_messages.append(
                             {
                                 "role": "assistant",
-                                "content": [
-                                    {
-                                        "id": tool_call_id,
-                                        "input": message.tool_call.input,
-                                        "type": "tool_use",
-                                        "name": message.tool_call.name,
-                                    }
-                                ],
+                                "content": content
                             }
                         )
                     elif self.response_format in [
                         LLMResponseFormat.TOOLS,
-                        LLMResponseFormat.STRUCTURED_OUTPUT,
                     ]:
                         completion_messages.append(
                             {

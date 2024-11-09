@@ -144,7 +144,7 @@ def create_claude_coding_actions(
     find_code_snippet = FindCodeSnippet(code_index=code_index, repository=repository, completion_model=completion_model)
     semantic_search = SemanticSearch(code_index=code_index, repository=repository, completion_model=completion_model)
     request_context = RequestMoreContext(repository=repository)
-    request_code_change = ClaudeEditTool()
+    request_code_change = ClaudeEditTool(code_index=code_index, repository=repository, runtime=runtime)
 
     actions = [
         semantic_search,
@@ -154,11 +154,6 @@ def create_claude_coding_actions(
         request_context,
         request_code_change
     ]
-
-    if runtime:
-        actions.append(
-            RunTests(code_index=code_index, repository=repository, runtime=runtime)
-        )
 
     actions.append(Finish())
     actions.append(Reject())

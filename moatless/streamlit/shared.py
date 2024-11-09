@@ -17,6 +17,7 @@ def generate_summary(df: pd.DataFrame):
     total_cost = df["total_cost"].sum()
     total_prompt_tokens = df["prompt_tokens"].sum()
     total_completion_tokens = df["completion_tokens"].sum()
+    total_cached_tokens = df["cached_tokens"].sum()
     avg_cost = df["total_cost"].mean()
 
     # Filter out 'running', 'error', and 'rejected' statuses for avg_duration calculation
@@ -32,6 +33,7 @@ def generate_summary(df: pd.DataFrame):
             st.metric("Total Cost", f"${total_cost:.2f}")
             st.metric("Total Prompt Tokens", total_prompt_tokens)
             st.metric("Total Completion Tokens", total_completion_tokens)
+            st.metric("Total Cached Tokens", total_cached_tokens)
         with metric_col2:
             st.metric("Avg Cost per Trajectory", f"${avg_cost:.2f}")
             st.metric(
@@ -192,6 +194,7 @@ def trajectory_table(report_path: str):
         "failed_max_reward",
         "status",
         "all_transitions",
+        "failed_actions",
         "duration",
         "prompt_tokens",
         "completion_tokens",

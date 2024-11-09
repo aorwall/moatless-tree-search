@@ -174,20 +174,7 @@ class SearchBaseAction(Action):
 
         message += f"\n{search_hit_str}"
 
-        if found_files:
-            extra = "<updated_file_context>\n"
-            extra += file_context.create_prompt(
-                show_line_numbers=True,
-                exclude_comments=False,
-                show_outcommented_code=True,
-                outcomment_code_comment="... rest of the code",
-                files=found_files,
-            )
-            extra += "\n</updated_file_context>"
-        else:
-            extra = None
-
-        return Observation(message=message, extra=extra, properties=properties, completion=completion)
+        return Observation(message=message, properties=properties, completion=completion)
 
     def _select_span_instructions(self, search_result: SearchCodeResponse) -> str:
         return (

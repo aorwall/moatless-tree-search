@@ -11,7 +11,17 @@ logger = logging.getLogger(__name__)
 
 
 class FindCodeSnippetArgs(SearchBaseArgs):
-    """Request to search for an exact code snippet."""
+    """Use this when you know the exact code you want to find.
+
+Perfect for:
+- Finding specific constant definitions: code_snippet="MAX_RETRIES = 3"
+- Finding decorator usage: code_snippet="@retry(max_attempts=3)"
+- Finding specific imports: code_snippet="from datetime import datetime"
+- Finding configuration patterns: code_snippet="DEBUG = os.getenv('DEBUG', False)"
+
+Note: You must know the exact code snippet. Use SemanticSearch if you only know
+what the code does but not its exact implementation.
+"""
 
     code_snippet: str = Field(..., description="The exact code snippet to find.")
     file_pattern: Optional[str] = Field(

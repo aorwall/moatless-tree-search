@@ -81,8 +81,10 @@ class RequestMoreContext(Action):
         super().__init__(**data)
         self._repository = repository
 
-    # TODO?
-    _max_tokens_in_edit_prompt = 750
+    max_tokens: int = Field(
+        2000,
+        description="The maximum number of tokens in the requested code.",
+    )
 
     def execute(
         self, args: RequestMoreContextArgs, file_context: FileContext
@@ -160,9 +162,19 @@ class RequestMoreContext(Action):
                     if block_span.initiating_block.type == CodeBlockType.CLASS:
                         class_block = block_span.initiating_block
                         found_span_ids.add(block_span.span_id)
-                        if class_block.sum_tokens() < self._max_tokens_in_edit_prompt:
-                            for child_span_id in class_block.span_ids:
-                                found_span_ids.add(child_span_id)
+                        class_tokens = class_block.sum_tokens()
+                        if class_tokens > self.max_tokens:
+                            content = class_block.to_prompt(include_block_types=[CodeBlockType.FUNCTION, CodeBlockType.CLASS, CodeBlockType.CONSTRUCTOR])
+                            return Observation(
+                                message=f"The class {class_block.identifier} is too large ({class_tokens} tokens) to view in its entirety. Maximum allowed is {self.max_tokens} tokens. "
+                                        f"Please specify the functions with RequestMoreContext to view specific code.\n"
+                                        f"Here's a structure of the class {content}",
+                                properties={"fail_reason": "too_many_tokens"},
+                                expect_correction=True,
+                            )
+                        else:
+                            found_span_ids.update(class_block.get_all_span_ids())
+
                     else:
                         found_span_ids.add(block_span.span_id)
 
@@ -202,22 +214,9 @@ class RequestMoreContext(Action):
                 "found_span_ids": list(found_span_ids),
             }
 
-        if found_files:
-            extra = "<updated_file_context>\n"
-            extra += file_context.create_prompt(
-                show_line_numbers=True,
-                exclude_comments=False,
-                show_outcommented_code=True,
-                outcomment_code_comment="... rest of the code",
-                files=found_files,
-            )
-            extra += "\n</updated_file_context>"
-        else:
-            extra = None
-
         # TODO: Determine which scenarios where we should expect a correction
         return Observation(
-            message=message, extra=extra, properties=properties, expect_correction=False
+            message=message, properties=properties, expect_correction=False
         )
 
     def create_retry_message(self, file: ContextFile, message: str):

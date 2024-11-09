@@ -241,12 +241,12 @@ class CodeIndex:
             file = self._file_repo.get_file(search_hit.file_path)
             if not file:
                 logger.warning(
-                    f"semantic_search(query={query}, file_pattern={file_pattern}) Could not find file {search_hit.file_path}."
+                    f"semantic_search(query={query}, file_pattern={file_pattern}) Could not find search hit file {search_hit.file_path}."
                 )
                 continue
             elif not file.module:
                 logger.warning(
-                    f"semantic_search(query={query}, file_pattern={file_pattern}) Could not parse module for file {search_hit.file_path}."
+                    f"semantic_search(query={query}, file_pattern={file_pattern}) Could not parse module for search hit file {search_hit.file_path}."
                 )
                 continue
 

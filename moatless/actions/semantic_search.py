@@ -8,7 +8,20 @@ from moatless.index.types import SearchCodeResponse
 
 
 class SemanticSearchArgs(SearchBaseArgs):
-    """Search for code snippets based on semantic similarity."""
+    """Use this when you don't know exact names or code but want to find related functionality.
+
+Perfect for:
+- Finding functionality by description: query="code that handles password hashing"
+- Finding related test cases: query="tests for user registration", category="test"
+- Finding implementations: query="database connection pooling", category="implementation"
+- Finding patterns: query="error handling for API requests"
+
+This is the most flexible search when you:
+- Don't know exact function/class names
+- Want to find similar implementations
+- Need to discover related code
+- Want to explore how certain features are implemented
+"""
 
     query: str = Field(
         ..., description="Natural language description of what you're looking for."

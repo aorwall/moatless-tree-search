@@ -57,67 +57,42 @@ class RunTests(Action):
         self, args: RunTestsArgs, file_context: FileContext | None = None
     ) -> Observation:
         """
-        Run tests on the codebase.
+        Run all tests found in file context or provided in args.
         """
         if file_context is None:
             raise ValueError(
                 "File context must be provided to execute the run tests action."
             )
+        
+        test_files = [test_file for test_file 
+                      in args.test_files
+                      if file_context.get_file(test_file) is not None and is_test(test_file)]
+        
+        if not test_files:
+            file_paths = args.test_files
+            if not file_paths:
+                file_paths = [file.file_path for file in file_context.files]
 
-        if args.test_files:
-
-            existing_test_files = [
-                test_file
-                for test_file in args.test_files
-                if file_context.get_file(test_file) is not None
-            ]
-
-            missing_test_files = set(args.test_files).difference(
-                set(existing_test_files)
-            )
-            if missing_test_files:
-                logger.info(f"Missing test files: {missing_test_files}")
-
-            actual_test_files = [
-                file.file_path
-                for file in file_context.files
-                if file.file_path in existing_test_files
-                if is_test(file.file_path)
-            ]
-            not_existing_test_files = set(existing_test_files).difference(
-                set(actual_test_files)
-            )
-            if not_existing_test_files:
-                logger.info(f"Not actual test files: {not_existing_test_files}")
-
-            test_files = actual_test_files
-
-        else:
-            test_files = [
-                file.file_path for file in file_context.files if is_test(file.file_path)
-            ]
-            if test_files:
-                logger.info(
-                    f"No test files provided, will run tests found in context: {test_files}"
+            for file_path in file_paths:
+                search_results = self._code_index.find_test_files(
+                    file_path, query=file_path, max_results=2, max_spans=2
                 )
 
-        if not test_files:
-            logger.info(
-                "The agent didn't select any tests. Will search and select test files based on files."
-            )
+                for search_result in search_results:
+                    test_files.append(search_result.file_path)
+                
 
-            if args.test_files:
-                file_paths = args.test_files
-                if not file_paths:
-                    file_paths = [file.file_path for file in file_context.files]
+        for test_file in test_files:
+           if not file_context.has_file(test_file):
+                logger.info(f"Adding test file: {test_file} to context")
+                file_context.add_file(test_file, add_import_span=False)
 
-                for file_path in file_paths:
-                    search_results = self._code_index.find_test_files(
-                        file_path, query=file_path, max_results=2, max_spans=2
-                    )
-
-                    for search_result in search_results:
-                        test_files.append(search_result.file_path)
+        test_files = [
+            file.file_path
+            for file in file_context.files
+            if is_test(file.file_path)
+        ]
+        
 
         logger.info(f"Running tests: {test_files}")
         test_results = self._runtime.run_tests(file_context, test_files)
@@ -157,7 +132,7 @@ class RunTests(Action):
         if not test_results:
             return Observation(
                 message="No tests were run",
-                properties={"test_results": []},
+                properties={"test_results": [], "fail_reason": "no_tests"},
             )
 
         failure_count = sum(
@@ -192,21 +167,20 @@ class RunTests(Action):
                 f"* {test_result.status.value} {attributes}>\n```\n{test_result.message}\n```\n"
             )
 
-        response_msg = f"Ran {len(test_results)} tests in the following files:"
+        response_msg = f"Running {len(test_results)} tests in the following files:"
         for test_file in test_files:
             response_msg += f"\n * {test_file}"
 
+        if test_result_strings:
+            response_msg += "\n\n"
+            response_msg += "\n".join(test_result_strings)
+
         response_msg += f"\n\n{passed_count} passed. {failure_count} failed. {error_count} errors."
 
-        extra = ""
-        if test_result_strings:
-            extra += "\n\n"
-            extra += "\n".join(test_result_strings)
-
         result_dicts = [result.model_dump() for result in test_results]
+
         return Observation(
             message=response_msg,
-            extra=extra,
             expect_correction=failure_count > 0 or error_count > 0,
             properties={"test_results": result_dicts},
         )

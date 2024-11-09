@@ -26,7 +26,7 @@ class ActionArguments(OpenAISchema, ABC):
     @classproperty
     def name(cls):
         return cls.Config.title if hasattr(cls.Config, "title") else cls.__name__
-
+    
     def to_tool_call(self) -> ToolCall:
         return ToolCall(name=self.name, input=self.model_dump())
 
@@ -45,6 +45,27 @@ class ActionArguments(OpenAISchema, ABC):
             [f"  {k}: {v}" for k, v in self.model_dump(exclude={"scratch_pad"}).items()]
         )
         return prompt
+
+    @model_validator(mode='before')
+    @classmethod
+    def fix_scratch_pad(cls, data: Any) -> Any:
+        """Allow scratch_pad to be null."""
+        if isinstance(data, dict):
+            if not data.get("scratch_pad"):
+                data["scratch_pad"] = ""
+
+        return data
+
+    @model_validator(mode='before')
+    @classmethod
+    def fix_null_fields(cls, data: Any) -> Any:
+        """Allow scratch_pad to be null."""
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if value == "null":
+                    data[key] = None
+
+        return data
 
     @classmethod
     def parse_json(
@@ -107,6 +128,7 @@ class ActionArguments(OpenAISchema, ABC):
                 action_args_class = getattr(module, class_name)
                 return action_args_class.model_validate(obj)
         return super().model_validate(obj)
+
 
     @classmethod
     def parse_json(
