@@ -448,6 +448,10 @@ def generate_ascii_tree(
     root: Node, 
     current: Node | None = None, 
     include_explanation: bool = False,
+    include_diffs: bool = False,
+    include_feedback: bool = False,
+    include_action_details: bool = False,
+    include_file_context: bool = False,
     use_color: bool = True
 ) -> str:
     tree_lines = ["MCTS Tree"]
@@ -458,6 +462,10 @@ def generate_ascii_tree(
         tree_lines, 
         current, 
         include_explanation,
+        include_diffs,
+        include_feedback,
+        include_action_details,
+        include_file_context,
         use_color
     )
     return "\n".join(tree_lines)
@@ -470,6 +478,10 @@ def _append_ascii_node(
     tree_lines: list[str], 
     current: Node | None,
     include_explanation: bool = False,
+    include_diffs: bool = False,
+    include_feedback: bool = False,
+    include_action_details: bool = False,
+    include_file_context: bool = False,
     use_color: bool = True
 ) -> None:
     # Build node information
@@ -520,34 +532,58 @@ def _append_ascii_node(
                      f"(expansions: {node.expanded_count()}, reward: {reward_str}, "
                      f"visits: {node.visits}, {expandable_str})")
     
-    # Calculate the explanation prefix - should align with the node's content
-    explanation_prefix = prefix + ("    " if is_last else "│   ")
+    # Calculate the content prefix - should align with the node's content
+    content_prefix = prefix + ("    " if is_last else "│   ")
     
     # Add explanation if available
     if include_explanation and node.reward and node.reward.explanation:
-        # Split and wrap explanation text
         explanation_text = node.reward.explanation.strip()
-        words = explanation_text.split()
-        current_line = []
-        current_length = 0
-        max_line_length = 100
-        
-        for word in words:
-            if current_length + len(word) + 1 <= max_line_length:
-                current_line.append(word)
-                current_length += len(word) + 1
-            else:
-                tree_lines.append(f"{explanation_prefix}{' '.join(current_line)}")
-                current_line = [word]
-                current_length = len(word)
-        
-        if current_line:
-            tree_lines.append(f"{explanation_prefix}{' '.join(current_line)}")
-    
-    # Calculate the prefix for children
+        _append_wrapped_text(tree_lines, explanation_text, content_prefix, "│ Explanation: ")
+
+    # Add feedback if available
+    if include_feedback and node.reward and node.reward.feedback_to_alternative:
+        feedback_text = node.reward.feedback_to_alternative.strip()
+        _append_wrapped_text(tree_lines, feedback_text, content_prefix, "│ Feedback: ")
+
+    # Add diffs if available - only for Finish actions
+    if include_diffs and node.file_context and node.action and node.action.name == "Finish":
+        patch = node.file_context.generate_git_patch()
+        if patch.strip():
+            tree_lines.append(f"{content_prefix}│ Changes:")
+            for line in patch.split('\n'):
+                if line.strip():
+                    prefix_char = '+'if line.startswith('+') else ('-' if line.startswith('-') else ' ')
+                    formatted_line = line.strip()
+                    if use_color:
+                        if prefix_char == '+':
+                            formatted_line = color_green(formatted_line)
+                        elif prefix_char == '-':
+                            formatted_line = color_red(formatted_line)
+                    tree_lines.append(f"{content_prefix}│  {formatted_line}")
+
+    # Add action details if available
+    if include_action_details and node.action:
+        tree_lines.append(f"{content_prefix}│ Action Details:")
+        tree_lines.append(f"{content_prefix}│  Prompt: {node.action.to_prompt()}")
+        if node.observation:
+            tree_lines.append(f"{content_prefix}│  Output: {node.observation.message}")
+            if node.observation.extra:
+                tree_lines.append(f"{content_prefix}│  Extra: {node.observation.extra}")
+            if node.observation.expect_correction:
+                tree_lines.append(f"{content_prefix}│  Expects Correction: True")
+
+    # Add file context if available
+    if include_file_context and node.file_context and not node.file_context.is_empty():
+        tree_lines.append(f"{content_prefix}│ File Context:")
+        context = node.file_context.create_prompt(
+            show_outcommented_code=True,
+            exclude_comments=True,
+            outcomment_code_comment="... code not in context"
+        )
+        _append_wrapped_text(tree_lines, context, content_prefix, "│  ")
+
+    # Process children with updated parameters
     child_prefix = prefix + ("    " if is_last else "│   ")
-    
-    # Process children
     children = node.children
     for i, child in enumerate(children):
         _append_ascii_node(
@@ -557,8 +593,38 @@ def _append_ascii_node(
             tree_lines,
             current,
             include_explanation,
+            include_diffs,
+            include_feedback,
+            include_action_details,
+            include_file_context,
             use_color
         )
+
+
+def _append_wrapped_text(tree_lines: list[str], text: str, prefix: str, header_prefix: str = "│ "):
+    """Helper function to wrap and append text with proper prefixes."""
+    words = text.split()
+    current_line = []
+    current_length = 0
+    max_line_length = 100 - len(prefix) - len(header_prefix)
+    
+    # First line gets the header prefix
+    is_first_line = True
+    
+    for word in words:
+        if current_length + len(word) + 1 <= max_line_length:
+            current_line.append(word)
+            current_length += len(word) + 1
+        else:
+            line_prefix = header_prefix if is_first_line else "│   "
+            tree_lines.append(f"{prefix}{line_prefix}{' '.join(current_line)}")
+            current_line = [word]
+            current_length = len(word)
+            is_first_line = False
+    
+    if current_line:
+        line_prefix = header_prefix if is_first_line else "│   "
+        tree_lines.append(f"{prefix}{line_prefix}{' '.join(current_line)}")
 
 
 def color_red(text: Any) -> str:

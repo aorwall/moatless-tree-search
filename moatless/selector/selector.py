@@ -528,24 +528,25 @@ class SoftmaxSelector(Selector):
 
 from instructor import OpenAISchema
 from pydantic import Field
+from moatless.selector.prompt import SYSTEM_PROMPT, EXAMPLES
 
 class NodeSelection(OpenAISchema):
-    """
+    # """
 
-    Scores range from -100 to 100.
-    Select expandable nodes.
+    # Scores range from -100 to 100.
+    # Select expandable nodes.
 
-    OUTPUT FORMAT:
-    <node_id>: Selected node ID
-    <explanation>: Adress the agent responsible for generating the next action directly (e.g. "You should ...") with the following information:
-        ANCESTRY: Parent context, sibling outcomes, path differences.
-        CURRENT: Node state/potential, relation to successful paths.
-        DESCENDANTS: Child outcomes, pitfalls, unexplored directions.
-        GUIDANCE: Specific recommendations for the next action based on the information gathered from the tree.
-    """
+    # OUTPUT FORMAT:
+    # <node_id>: Selected node ID
+    # <explanation>: Adress the agent responsible for generating the next action directly (e.g. "You should ...") with the following information:
+    #     ANCESTRY: Parent context, sibling outcomes, path differences.
+    #     CURRENT: Node state/potential, relation to successful paths.
+    #     DESCENDANTS: Child outcomes, pitfalls, unexplored directions.
+    #     GUIDANCE: Specific recommendations for the next action based on the information gathered from the tree.
+    # """
     node_id: int = Field(description="The ID of the selected node")
     explanation: str = Field(
-        description="Analysis of node's context in tree: ancestry, current state, descendants, and guidance"
+        description="Actionable guidance to the software engineer agent responsible for generating the next action."
     )
     
 from instructor import OpenAISchema
@@ -553,6 +554,8 @@ from pydantic import Field
 from moatless.node import Node, generate_ascii_tree
 from moatless.completion.model import Message
 from moatless.completion.completion import CompletionModel
+from moatless.selector.prompt import SYSTEM_PROMPT, ALL_EXAMPLES
+import json
 
 class LLMSelector(Selector):
     type: Literal["LLMSelector"] = "LLMSelector"
@@ -574,14 +577,31 @@ class LLMSelector(Selector):
         Build a formatted string containing descriptions of all available actions.
         """
         try:
-            from moatless.actions.action import Action
+            from moatless.actions import (
+                SemanticSearch,
+                FindClass,
+                FindFunction,
+                FindCodeSnippet,
+                RequestMoreContext,
+                Finish,
+                # Import only the actions that exist in your project
+            )
             
             definitions = "\nAvailable Actions:\n"
-            for action_name in Action.get_available_actions():
-                action = Action.get_action_by_name(action_name)
+            available_actions = [
+                SemanticSearch,
+                FindClass,
+                FindFunction,
+                FindCodeSnippet,
+                RequestMoreContext,
+                Finish,
+                # Add other action classes to this list
+            ]
+            
+            for action_class in available_actions:
                 try:
-                    schema = action.args_schema.model_json_schema()
-                    definitions += f"\n* **{schema['title']}**: {schema['description']}"
+                    schema = action_class.args_schema.model_json_schema()
+                    definitions += f"\n* **{schema['title']}**: {schema.get('description', 'No description available')}"
                     
                     # Add parameter descriptions if they exist
                     if 'properties' in schema:
@@ -590,7 +610,7 @@ class LLMSelector(Selector):
                                 definitions += f"\n  - {param_name}: {param_info['description']}"
                     
                 except Exception as e:
-                    logger.error(f"Error getting schema for action {action_name}: {e}")
+                    logger.error(f"Error getting schema for action {action_class.__name__}: {e}")
                     continue
             
             return definitions
@@ -598,48 +618,93 @@ class LLMSelector(Selector):
             logger.error(f"Error building action definitions: {e}")
             return "\nAction definitions unavailable."
 
-    def build_ascii_tree(self, node: Node, previous_attempts: str = "", n_iterations: int = 0) -> NodeSelection:
+    def build_ascii_tree(self, node: Node, previous_attempts: str = "", n_iterations: int = 0, require_feedback: bool = False) -> NodeSelection:
         # Generate ASCII tree representation
         ascii_tree = generate_ascii_tree(
             node, 
             include_explanation=True,
             use_color=False,
+            include_diffs=True,
+            include_action_details=False,
+            include_file_context=False,
+        )
+
+        # also print tree with colors so we can see it
+        ascii_tree_colored = generate_ascii_tree(
+            node,
+            use_color=True,
+            include_diffs=True,
+            include_action_details=False,
+            include_file_context=False,
+        )
+        print(ascii_tree_colored)
+        
+        # Construct the system message with context based on feedback requirement
+        system_message = f"{SYSTEM_PROMPT}\n\n"
+        if require_feedback:
+            system_message += (
+                f"Here are some example responses:\n\n"
+                f"{ALL_EXAMPLES}\n\n"
+            )
+        system_message += (
+            f"Iteration Status: Currently in iteration {n_iterations} out of {self.max_iterations} available iterations.\n\n"
+            f"{self.get_action_definitions()}"
         )
         
         # Create messages for LLM
-        messages = [
-            Message(
-                role="system",
-                content="You are an AI tasked with analyzing a Monte Carlo Tree Search (MCTS) tree and selecting the most promising node for expansion. "
-                        "Consider the node's reward, number of visits, and the potential of its action. "
-                        "Be specific and provide context, since the software delevoper agent will only have the information you provide to it from the rest of the tree. "
-                        "The goal of the software developer agent is to reach multiple diverse 'finished' nodes that increase the likelihood of finding a good solution. "
-                        "Avoid causing the agent to fall into loops with repetitive actions."
-                        f"\n\nIteration Status: Currently in iteration {n_iterations} out of {self.max_iterations} available iterations."  # Add iteration count
-                        f"{self.get_action_definitions()}"  # Add action definitions to system prompt
-            ),
-            Message(
-                role="user",
-                content=f"Given the following MCTS tree, select the most promising node for expansion:\n\n{ascii_tree}\n\n"
-                        f"{previous_attempts}"  # Include previous attempts if any
-                        "Analyze the tree structure, rewards, and visit counts to make your decision. "
-                        "Consider both exploration (nodes with few visits) and exploitation (nodes with high rewards)."
+        user_content = f"Given the following MCTS tree, select the most promising node for expansion. "
+        if require_feedback:
+            user_content += (
+                f"Respond using these exact tags:\n"
+                f"<node_id>: [number of the selected node]\n"
+                f"<feedback>: [detailed explanation and guidance]\n\n"
             )
-        ]
-
-        # Get completion from LLM
-        action_request, completion = self.completion.create_completion(
-            messages=messages,
-            system_prompt="You are an AI tasked with analyzing Monte Carlo Tree Search (MCTS) trees.",
-            actions=[NodeSelection]
-        )
-
-        # Parse the response - action_request should already be a NodeSelection instance
-        if action_request:
-            return action_request
+        else:
+            user_content += "Respond with only the node number.\n\n"
         
-        # Fallback to first node if parsing fails
-        return NodeSelection(node_id=0, explanation="Failed to parse LLM response")
+        user_content += (
+            f"Current tree:\n{ascii_tree}\n\n"
+            f"{previous_attempts}"
+        )
+        if require_feedback:
+            user_content += f"Consider both exploration (nodes with few visits) and exploitation (nodes with high rewards)."
+        
+        messages = [Message(role="user", content=user_content)]
+
+        try:
+            # Use create_text_completion instead of create_completion
+            response_text, completion = self.completion.create_text_completion(
+                messages=messages,
+                system_prompt=system_message,
+            )
+            
+            try:
+                if require_feedback:
+                    # Extract node_id and feedback using simple string parsing
+                    node_id_start = response_text.find("<node_id>:") + len("<node_id>:")
+                    node_id_end = response_text.find("\n", node_id_start)
+                    node_id = int(response_text[node_id_start:node_id_end].strip())
+                    
+                    feedback_start = response_text.find("<feedback>:") + len("<feedback>:")
+                    feedback = response_text[feedback_start:].strip()
+                else:
+                    # Parse just the node number, handling "Node" prefix if present
+                    response_text = response_text.strip()
+                    if response_text.startswith('Node'):
+                        response_text = response_text[4:]  # Remove "Node" prefix
+                    node_id = int(response_text.strip())
+                    feedback = ""
+                
+                return NodeSelection(node_id=node_id, explanation=feedback)
+                
+            except Exception as e:
+                logger.error(f"Failed to parse LLM response: {e}\nResponse text: {response_text}")
+                raise e
+                
+        except Exception as e:
+            logger.error(f"Failed to get LLM completion: {e}")
+            raise e
+            # return NodeSelection(node_id=0, explanation="Failed to get LLM completion")
     
     def select(self, nodes: List[Node]) -> Node:
         if len(nodes) == 1:
@@ -653,20 +718,18 @@ class LLMSelector(Selector):
         for attempt in range(max_retries):
             # Get the selection from LLM, now passing n_iterations
             selection = self.build_ascii_tree(nodes[0], previous_attempts, n_iterations)
-            print(f"Attempt {attempt + 1}: Selected Node {selection.node_id}: {selection.explanation}")
 
             # Find and return the selected node
             for node in nodes:
                 if node.node_id == selection.node_id:
-                    # try:
-                    #     node.reward.feedback = selection.explanation
-                    #     print(f"Setting explanation for node {node.node_id}: {selection.explanation}")
-                    # except AttributeError:
-                    #     print(f"Node {node.node_id}, node: {node}, has no reward attribute")
+                    try:
+                        node.reward.feedback = selection.explanation
+                    except AttributeError:
+                        logger.warning(f"Node {node.node_id}, has no reward attribute")
                     return node
             
             # If we get here, the selected node wasn't in the list
-            print(f"Selected node {selection.node_id} not in available nodes {available_node_ids}, retrying...")
+            logger.warning(f"Selected node {selection.node_id} not in available nodes {available_node_ids}, retrying...")
             
             # Add feedback about available nodes for next attempt
             previous_attempts += (
@@ -675,6 +738,6 @@ class LLMSelector(Selector):
             )
         
         # If we've exhausted all retries, fall back to the first available node
-        print(f"Failed to select valid node after {max_retries} attempts, falling back to first available node")
+        logger.warning(f"Failed to select valid node after {max_retries} attempts, falling back to first available node")
         return nodes[0]
             

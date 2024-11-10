@@ -252,10 +252,6 @@ class SearchTree(BaseModel):
         if not filtered_nodes:
             logger.info("No expandable nodes found.")
             return None
-
-        search_tree = generate_ascii_tree(self.root, 
-                                          include_explanation=True)
-        print(f"search_tree:\n{search_tree}")
         
         return self.selector.select(filtered_nodes)
 
@@ -273,7 +269,6 @@ class SearchTree(BaseModel):
             feedback = self.feedback_generator.generate_feedback(node)
         else:
             feedback = None
-        # feedback = node.reward.feedback if node.reward else None
 
         child_node = Node(
             node_id=self._generate_unique_id(),

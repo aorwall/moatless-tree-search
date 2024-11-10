@@ -11,6 +11,11 @@ logger = logging.getLogger(__name__)
 
 class FeedbackGenerator(BaseModel):
     def generate_feedback(self, node: Node) -> str | None:
+        # if node.reward:
+        #     if node.reward.feedback:
+        #         return self._create_message_feedback_llmselector(node)
+
+        # else:
         visited_children = [child for child in node.children if child.reward]
         if not visited_children:
             return None
@@ -27,10 +32,10 @@ class FeedbackGenerator(BaseModel):
         else:
             return self._create_message_alt_action(last_child)
 
-    def _create_message(self, node: Node):
+    def _create_message(self, node: Node, feedback: str | None = None):
         prompt = "Feedback from a parallel problem-solving branch is provided within the <feedback> tag. Carefully review this feedback and use it to adjust your search parameters, ensuring that you implement a different search strategy from previous attempts. "
         prompt += "\n\n<feedback>\n"
-        prompt += node.reward.explanation
+        prompt += feedback if feedback is not None else node.reward.explanation
         prompt += "\n</feedback>"
         return prompt
 
@@ -59,8 +64,15 @@ class FeedbackGenerator(BaseModel):
 
         return "\n".join(feedback)
 
-    def _create_message_feedback(self, node: Node):
+    def _create_message_feedback(self, node: Node, feedback: str | None = None):
         prompt = "Feedback from a parallel problem-solving branch is provided within the <feedback> tag. Carefully review this feedback and use it to do a new function call ensuring that you implement a different strategy from previous attempts. "
+        prompt += "\n\n<feedback>\n"
+        prompt += feedback if feedback is not None else node.reward.feedback
+        prompt += "\n</feedback>"
+        return prompt
+    
+    def _create_message_feedback_llmselector(self, node: Node):
+        prompt = "This is feedback from an Agent monitoring your progress. Take it into account."
         prompt += "\n\n<feedback>\n"
         prompt += node.reward.feedback
         prompt += "\n</feedback>"

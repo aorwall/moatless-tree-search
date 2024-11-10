@@ -91,7 +91,7 @@ class TreeSearchSettings(BaseModel):
     )
 
     max_cost: float = Field(
-        0.5,
+        2,
         description="The maximum cost spent on token before finishing.",
     )
 
