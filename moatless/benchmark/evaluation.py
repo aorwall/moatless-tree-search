@@ -34,7 +34,7 @@ from moatless.discriminator import MeanAwardDiscriminator, AgentDiscriminator
 from moatless.feedback import FeedbackGenerator
 from moatless.file_context import FileContext
 from moatless.search_tree import SearchTree
-from moatless.selector import BestFirstSelector, SoftmaxSelector, LLMSelector
+from moatless.selector import BestFirstSelector, SoftmaxSelector
 from moatless.templates import create_coding_actions, create_claude_coding_actions
 from moatless.value_function.base import ValueFunction
 
@@ -170,6 +170,15 @@ class TreeSearchSettings(BaseModel):
         description="The settings for the debate.",
     )
 
+    min_resolved: Optional[int] = Field(
+        1,
+        description="The minimum number of resolved instances to consider before finishing.",
+    )
+    max_resolved: Optional[int] = Field(
+        None,
+        description="The maximum number of resolved instances to consider before finishing.",
+    )
+
 
 class Evaluation:
     def __init__(
@@ -251,9 +260,10 @@ class Evaluation:
     def run_evaluation(
         self,
         split: str = "lite",
-        resolved_by: Optional[int] = None,
         instance_ids: list[str] | None = None,
         ignore_repos: list[str] | None = None,
+        min_resolved: Optional[int] = None,
+        max_resolved: Optional[int] = None,
     ):
         file_path = os.path.join(
             os.path.dirname(__file__), f"swebench_{split}_all_evaluations.json"
@@ -261,7 +271,7 @@ class Evaluation:
         with open(file_path) as f:
             instances = json.load(f)
 
-        instances = sorted(instances, key=lambda x: len(x["resolved_by"]), reverse=True)
+
         logger.info(f"Loaded {len(instances)} instances from {file_path}")
 
         if instance_ids:
@@ -275,19 +285,30 @@ class Evaluation:
                 f"Running evaluation for {len(instances)} instances filtered by instance_ids"
             )
 
-        if resolved_by:
+        if min_resolved is not None:
             instances = [
                 instance
                 for instance in instances
-                if len(instance["resolved_by"]) >= resolved_by
+                if len(instance["resolved_by"]) >= min_resolved
                 or (
-                    resolved_by == 1
+                    min_resolved == 1
                     and instance.get("llm_monkeys", {}).get("resolved_rate", 0) > 0
                 )
             ]
 
             logger.info(
-                f"Running evaluation for {len(instances)} instances filtered by resolved_by >= {resolved_by}"
+                f"Running evaluation for {len(instances)} instances filtered by min_resolved >= {min_resolved}"
+            )
+
+        if max_resolved is not None:
+            instances = [
+                instance
+                for instance in instances
+                if len(instance["resolved_by"]) <= max_resolved
+            ]
+
+            logger.info(
+                f"Running evaluation for {len(instances)} instances filtered by max_resolved <= {max_resolved}"
             )
 
         if ignore_repos:
@@ -335,7 +356,7 @@ class Evaluation:
 
         completion_log_dir = os.path.join(instance_dir, "completion_logs")
         os.makedirs(completion_log_dir, exist_ok=True)
-        self.log_handler.log_dir = completion_log_dir
+        litellm.callbacks = [LogHandler(completion_log_dir)]
 
         eval_result_path = os.path.join(instance_dir, "eval_result.json")
         if os.path.exists(eval_result_path):
@@ -399,10 +420,8 @@ class Evaluation:
                         log_dir=log_dir,
                         dataset_name=self.dataset_name,
                     )
-                    system_prompt = SYSTEM_PROMPT  # Use default system prompt
                 else:
                     runtime = None
-                    system_prompt = SIMPLE_CODE_PROMPT  # Use simple code prompt
 
                 if os.path.exists(trajectory_path):
                     search_tree = SearchTree.from_file(
@@ -415,6 +434,14 @@ class Evaluation:
 
                     completion_model = self._create_completion_model(
                         self.settings.agent_model
+                    )
+
+                    agent = CodingAgent.create(
+                        completion_model=completion_model,
+                        repository=repository,
+                        code_index=code_index,
+                        runtime=runtime,
+                        use_edit_actions=True
                     )
 
                     if completion_model.model in ["claude-3-5-sonnet-20241022"]:
@@ -452,29 +479,32 @@ class Evaluation:
                     else:
                         selector = SoftmaxSelector()
 
-                    value_function = ValueFunction(
-                        completion=self._create_completion_model(
-                            self.settings.value_function_model
+                    if self.settings.max_expansions > 1:
+                        value_function = ValueFunction(
+                            completion=self._create_completion_model(
+                                self.settings.value_function_model
+                            )
                         )
-                    )
 
-                    # discriminator = MeanAwardDiscriminator()
-                    discriminator = AgentDiscriminator(
-                        completion=self._create_completion_model(),
-                        n_agents=self.settings.debate_n_agents,
-                        n_rounds=self.settings.debate_n_rounds,
-                    )
+                        # discriminator = MeanAwardDiscriminator()
+                        discriminator = AgentDiscriminator(
+                            completion=self._create_completion_model(),
+                            n_agents=self.settings.debate_n_agents,
+                            n_rounds=self.settings.debate_n_rounds,
+                        )
 
-                    if self.settings.provide_feedback:
-                        feedback = FeedbackGenerator()
+                        if self.settings.provide_feedback:
+                            feedback = FeedbackGenerator()
+                        else:
+                            feedback = None
                     else:
+                        value_function = None
+                        discriminator = None
                         feedback = None
-
-                    file_context = FileContext(repo=repository)
 
                     search_tree = SearchTree.create(
                         message=problem_statement,
-                        file_context=file_context,
+                        repository=repository,
                         agent=agent,
                         selector=selector,
                         value_function=value_function,
@@ -498,6 +528,7 @@ class Evaluation:
                 search_tree.run_search()
                 best_node = search_tree.get_best_trajectory()
                 self.log_event(instance_id, "search_tree_execution_completed")
+                self.save_prediction(instance_id, best_node.file_context.generate_git_patch())
                 eval_result["status"] = "completed"
             except Exception:
                 eval_result["error"] = traceback.format_exc()
@@ -517,11 +548,22 @@ class Evaluation:
                 eval_result["node_results"] = {}
 
             if self.use_testbed:
-                if len(eval_result.get("node_results")) == len(leaf_nodes):
+                # Filter out already evaluated nodes
+                unevaluated_nodes = [
+                    node for node in leaf_nodes 
+                    if str(node.node_id) not in eval_result.get("node_results", {})
+                ]
+                
+                if not unevaluated_nodes:
                     logger.info(
-                        f"Already evaluated results for {len(leaf_nodes)} nodes in {instance_id}"
+                        f"All {len(leaf_nodes)} nodes for instance {instance_id} have already been evaluated"
                     )
                 else:
+                    logger.info(
+                        f"Found {len(leaf_nodes) - len(unevaluated_nodes)} already evaluated nodes, "
+                        f"will evaluate remaining {len(unevaluated_nodes)} nodes for instance {instance_id}"
+                    )
+
                     if not runtime:
                         repository = create_repository(
                             instance, repo_base_dir=self.repo_base_dir
@@ -537,14 +579,14 @@ class Evaluation:
                             enable_cache=True,
                         )
 
-                    for i, leaf_node in enumerate(leaf_nodes):
+                    for i, leaf_node in enumerate(unevaluated_nodes):
                         logger.info(
-                            f"Evaluate Node{leaf_node.node_id} {i+1}/{len(leaf_nodes)} for instance {instance_id}"
+                            f"Evaluate Node{leaf_node.node_id} {i+1}/{len(unevaluated_nodes)} for instance {instance_id}"
                         )
 
-                        if leaf_node.node_id in eval_result["node_results"]:
+                        if str(leaf_node.node_id) in eval_result["node_results"]:
                             logger.info(
-                                f"Skip Node{leaf_node.node_id} {i + 1}/{len(leaf_nodes)} for instance {instance_id} that has already been evaluated "
+                                f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} that has already been evaluated "
                             )
                             continue
 
@@ -554,7 +596,7 @@ class Evaluation:
 
                             if patch_hash in patch_results:
                                 logger.info(
-                                    f"Skip Node{leaf_node.node_id} {i + 1}/{len(leaf_nodes)} for instance {instance_id} as patch has already been evaluated."
+                                    f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} as patch has already been evaluated."
                                 )
                                 eval_result["node_results"][leaf_node.node_id] = (
                                     patch_results[patch_hash]
@@ -577,7 +619,7 @@ class Evaluation:
                                 )
                         else:
                             logger.info(
-                                f"Skip Node{leaf_node.node_id} {i + 1}/{len(leaf_nodes)} for instance {instance_id} with no patch."
+                                f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} with no patch."
                             )
 
                         if best_node and leaf_node.node_id == best_node.node_id:

@@ -180,20 +180,36 @@ class ContextFile(BaseModel):
 
         return self._cached_content
 
-    def apply_changes(self, updated_content: str):
+    def apply_changes(self, updated_content: str) -> set[str]:
         """
         Applies new content to the ContextFile by generating a patch between the base content and the new content.
 
         Args:
             updated_content (str): The new content to apply to the file.
         """
+
+        if self.module:
+            existing_span_ids = self.module.get_all_span_ids()
+        else:
+            existing_span_ids = set()
+
         base_content = self.get_base_content()
         new_patch = self.generate_patch(base_content, updated_content)
         self.patch = new_patch
 
+        if self.module:
+            updated_span_ids = self.module.get_all_span_ids()
+            new_span_ids = updated_span_ids - existing_span_ids
+        else:
+            new_span_ids = set()
+
+        self.add_spans(new_span_ids)
+
         # Invalidate cached content
         self._cached_content = None
         self._cached_module = None
+
+        return new_span_ids
 
     def add_patch(self, new_patch: Optional[str]):
         """
@@ -396,6 +412,8 @@ class ContextFile(BaseModel):
         exclude_comments=False,
         show_outcommented_code=False,
         outcomment_code_comment: str = "...",
+        show_all_spans: bool = False,
+        only_signatures: bool = False
     ):
         if self.module:
             if (
@@ -415,6 +433,8 @@ class ContextFile(BaseModel):
                 outcomment_code_comment=outcomment_code_comment,
                 show_outcommented_code=show_outcommented_code,
                 exclude_comments=exclude_comments,
+                show_all_spans=show_all_spans or self.show_all_spans,
+                only_signatures=only_signatures
             )
         else:
             code = self._to_prompt_with_line_spans(show_span_id=show_span_ids)
@@ -474,6 +494,8 @@ class ContextFile(BaseModel):
         show_span_id: bool = False,
         show_line_numbers: bool = False,
         exclude_comments: bool = False,
+        show_all_spans: bool = False,
+        only_signatures: bool = False
     ):
         if current_span is None:
             current_span = CurrentPromptSpan()
@@ -526,16 +548,18 @@ class ContextFile(BaseModel):
                     show_new_span_id = show_span_id
                     current_span = CurrentPromptSpan(child.belongs_to_span.span_id)
 
-            if self.show_all_spans:
+            if self.show_all_spans or show_all_spans:
                 show_child = True
+
+            if only_signatures and child.type.group != CodeBlockTypeGroup.STRUCTURE:
+                show_child = False
 
             if show_child:
                 if outcommented_block:
                     contents += outcommented_block._to_prompt_string(
                         show_line_numbers=show_line_numbers,
                     )
-
-                outcommented_block = None
+                    outcommented_block = None
 
                 contents += child._to_prompt_string(
                     show_span_id=show_new_span_id,
@@ -551,6 +575,8 @@ class ContextFile(BaseModel):
                     show_span_id=show_span_id,
                     current_span=current_span,
                     show_line_numbers=show_line_numbers,
+                    show_all_spans=show_all_spans,
+                    only_signatures=only_signatures
                 )
             elif (
                 show_outcommented_code
@@ -674,6 +700,22 @@ class ContextFile(BaseModel):
             f"Added {added_spans} spans on lines {start_line} - {end_line} to {self.file_path} to context"
         )
         return added_spans
+    
+    def lines_is_in_context(self, start_line: int, end_line: int) -> bool:
+        if self.show_all_spans:
+            return True
+
+        blocks = self.module.find_blocks_by_line_numbers(
+            start_line, end_line, include_parents=True
+        )
+
+        for block in blocks:
+            if block.belongs_to_span:
+                if block.belongs_to_span.span_id not in self.span_ids:
+                    return False
+
+        return True
+
 
     def remove_span(self, span_id: str):
         self.spans = [span for span in self.spans if span.span_id != span_id]
@@ -831,7 +873,7 @@ class FileContext(BaseModel):
                 file_with_spans.file_path, set(file_with_spans.span_ids)
             )
 
-    def add_file(self, file_path: str, show_all_spans: bool = False) -> ContextFile:
+    def add_file(self, file_path: str, show_all_spans: bool = False, add_import_span: bool = True) -> ContextFile:
         if file_path not in self._files:
             self._files[file_path] = ContextFile(
                 file_path=file_path,
@@ -839,7 +881,8 @@ class FileContext(BaseModel):
                 show_all_spans=show_all_spans,
                 repo=self._repo,
             )
-            self._files[file_path]._add_import_span()
+            if add_import_span:
+                self._files[file_path]._add_import_span()
 
         return self._files[file_path]
 
@@ -1165,6 +1208,10 @@ class FileContext(BaseModel):
     def get_file(self, file_path: str) -> Optional[ContextFile]:
         return self.get_context_file(file_path)
 
+    def file_exists(self, file_path: str):
+        context_file = self._files.get(file_path)
+        return context_file or self._repo.file_exists(file_path)
+
     def get_context_file(self, file_path: str) -> Optional[ContextFile]:
         context_file = self._files.get(file_path)
 
@@ -1250,3 +1297,37 @@ class FileContext(BaseModel):
                 full_patch.append(context_file.patch)
 
         return "\n".join(full_patch)
+
+    def get_updated_files(self, old_context: "FileContext", include_patches: bool = False) -> set[str]:
+        """
+        Compares this FileContext with an older one and returns a set of files that have been updated.
+        Updates include content changes, span additions/removals, and file additions.
+        
+        Args:
+            old_context: The previous FileContext to compare against
+            
+        Returns:
+            set[str]: Set of file paths that have different content or spans between the two contexts
+        """
+        updated_files = set()
+        
+        # Check files in current context
+        for file_path, current_file in self._files.items():
+            old_file = old_context._files.get(file_path)
+            
+            if old_file is None:
+                # New file added
+                updated_files.add(file_path)
+            else:
+                # Check for content changes
+                if include_patches and current_file.content != old_file.content:
+                    updated_files.add(file_path)
+                    continue
+                    
+                # Check for span changes
+                current_spans = current_file.span_ids
+                old_spans = old_file.span_ids
+                if current_spans != old_spans:
+                    updated_files.add(file_path)
+                
+        return updated_files

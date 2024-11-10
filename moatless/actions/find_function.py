@@ -9,13 +9,22 @@ from moatless.index.types import SearchCodeResponse, SearchCodeHit, SpanHit
 
 
 class FindFunctionArgs(SearchBaseArgs):
-    """Search for a specific function or class in the codebase."""
+    """Use this when you know the exact name of a function or method you want to find.
+
+Perfect for:
+- Finding test cases: function_name="test_user_login"
+- Locating specific implementations: function_name="process_payment"
+- Finding all methods with a name: function_name="validate"
+- Finding a specific class method: function_name="save", class_name="UserRepository"
+"""
 
     function_name: str = Field(
-        ..., description="Specific function names to include in the search."
+        ..., 
+        description="The exact name of the function or method you want to find. Must match the function definition in code."
     )
     class_name: Optional[str] = Field(
-        default=None, description="Specific class name to include in the search."
+        default=None, 
+        description="Optional class name if searching for a specific class method. Leave empty for standalone functions."
     )
 
     @model_validator(mode="after")

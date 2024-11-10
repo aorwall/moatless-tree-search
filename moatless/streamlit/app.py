@@ -24,6 +24,13 @@ def main():
         file_path = st.query_params["path"]
     elif len(sys.argv) > 1:
         file_path = sys.argv[1]
+
+        # is directory
+        if os.path.isdir(file_path):
+            logger.info("Generating report for directory")
+            generate_report(file_path)
+            file_path = os.path.join(file_path, "report.json")
+
         st.query_params["path"] = file_path
     else:
         file_path = None
@@ -46,6 +53,13 @@ def main():
             if file_name == "report.json":
                 with st.spinner("Loading report..."):
                     trajectory_table(file_path)
+                    report_dir = os.path.dirname(file_path)
+                    if st.button("Regenerate Report"):
+                        with st.spinner("Regenerating report..."):
+                            generate_report(report_dir)
+                            st.rerun()
+                    
+                    
             else:
                 with st.spinner("Loading search tree from trajectory file"):
                     st.session_state.search_tree = SearchTree.from_file(file_path)

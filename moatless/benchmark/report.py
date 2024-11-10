@@ -105,7 +105,8 @@ class TrajectoryStats(BaseModel):
 
     edits: int = 0
     test_edits: int = 0
-    failed_edits: int = 0
+    failed_actions: int = 0
+    expect_corrections: int = 0
 
     missing_test_files: int = 0
     
@@ -135,6 +136,7 @@ class BenchmarkResult(BaseModel):
     total_cost: float = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    cached_tokens: int = 0
 
     resolved_by: int = 0
     llmonkeys_rate: Optional[float] = None
@@ -158,7 +160,8 @@ class BenchmarkResult(BaseModel):
 
     edits: int = 0
     test_edits: int = 0
-    failed_edits: int = 0
+    failed_actions: int = 0
+    expect_corrections: int = 0
 
     context_stats: FileContextStats | None = None
     actions: dict[str, int] = {}
@@ -212,45 +215,46 @@ def create_trajectory_stats(
 
             result.actions[node.action.name] += 1
 
+            if node.observation and node.observation.expect_correction:
+                result.expect_corrections += 1
+
             if (
                 node.observation
                 and node.observation.properties
-                and "test_results" in node.observation.properties
             ):
-                test_results = node.observation.properties["test_results"]
-                failed_test_count = sum(
-                    1 for test in test_results if test["status"] in ["FAILED", "ERROR"]
-                )
+                if "test_results" in node.observation.properties:
+                    test_results = node.observation.properties["test_results"]
+                    failed_test_count = sum(
+                        1 for test in test_results if test["status"] in ["FAILED", "ERROR"]
+                    )
 
-                result.initial_failed_tests = failed_test_count
+                    result.initial_failed_tests = failed_test_count
 
-                if len(test_results) > result.max_tests_run:
-                    result.max_tests_run = len(test_results)
+                    if len(test_results) > result.max_tests_run:
+                        result.max_tests_run = len(test_results)
 
-                if failed_test_count > result.max_failed_tests:
-                    result.max_failed_tests = failed_test_count
+                    if failed_test_count > result.max_failed_tests:
+                        result.max_failed_tests = failed_test_count
 
-                if result.final_failed_tests is None:
-                    result.final_failed_tests = failed_test_count
+                    if result.final_failed_tests is None:
+                        result.final_failed_tests = failed_test_count
 
-                for test_result in test_results:
-                    if test_result["file_path"] not in test_files:
-                        test_files.append(test_result["file_path"])
+                    for test_result in test_results:
+                        if test_result["file_path"] not in test_files:
+                            test_files.append(test_result["file_path"])
+
+                if "fail_reason" in node.observation.properties:
+                    result.failed_actions += 1
 
             if node.action.name == "RequestCodeChange":
                 if node.observation:
-                    if (
-                        node.observation.properties
-                        and "fail_reason" in node.observation.properties
-                    ):
-                        result.failed_edits += 1
-                    elif is_test(node.action.file_path):
+                    if is_test(node.action.file_path):
                         result.test_edits += 1
                     else:
                         result.edits += 1
 
             if "build_action" in node.completions:
-                result.max_build_tokens = max(result.max_build_tokens, node.completions["build_action"].usage.prompt_tokens + node.completions["build_action"].usage.completion_tokens)
+                result.max_build_tokens = max(result.max_build_tokens, node.completions["build_action"].usage.prompt_tokens + node.completions["build_action"].usage.completion_tokens + node.completions["build_action"].usage.cached_tokens)
 
         missing_test_files = get_missing_files(instance["test_file_spans"], test_files)
 
@@ -300,7 +304,7 @@ def create_trajectory_stats(
             result.message = trajectory_state.observation.message
         else:
             result.status = "terminal"
-    else:
+    elif len(trajectory_state.get_trajectory()) > 1:
         result.status = "abandoned"
 
     result.transitions = len(trajectory_state.get_trajectory())
@@ -342,7 +346,7 @@ def to_result(
             best_stats = create_trajectory_stats(
                 best_node,
                 instance,
-                eval_report.get("node_results", {}).get(str(best_node.node_id)),
+                eval_report.get("node_results", {}).get(str(best_node.node_id))
             )
 
         if resolved is not None and resolved:
@@ -365,6 +369,7 @@ def to_result(
             total_cost=total_usage.completion_cost,
             prompt_tokens=total_usage.prompt_tokens,
             completion_tokens=total_usage.completion_tokens,
+            cached_tokens=total_usage.cached_tokens,
             resolved_by=len(instance.get("resolved_by", [])),
             llmonkeys_rate=instance.get("llm_monkeys", {}).get("resolved_rate", 0),
             transitions=len(best_node.get_trajectory()) if best_node else 0,
@@ -427,8 +432,8 @@ def to_result(
             if traj.test_edits > 0:
                 result.test_edits += 1
 
-            if traj.failed_edits > 0:
-                result.failed_edits += 1
+            result.failed_actions += traj.failed_actions
+            result.expect_corrections += traj.expect_corrections
 
         if "error" in eval_report:
             result.error = eval_report["error"].split("\n")[0]
@@ -558,32 +563,6 @@ def to_dataframe(
 
     def flatten_dict(d, parent_key="", sep="_"):
         items = []
-        general_keys = [
-            "instance_id",
-            "duration",
-            "total_cost",
-            "prompt_tokens",
-            "completion_tokens",
-            "resolved_by",
-            "llmonkeys_rate",
-            "status",
-            "transitions",
-            "all_transitions",
-            "solutions",
-            "resolved_solutions",
-            "failed_solutions",
-            "rejected_solutions",
-            "resolved_max_reward",
-            "failed_max_reward",
-            "alternative_solutions",
-            "resolved",
-            "duplicated_search_actions",
-            "expected_spans",
-            "expected_files",
-            "error",
-            "trajectory_path",
-            "context_stats",
-        ]
 
         for k, v in d.items():
             new_key = f"{parent_key}{sep}{k}" if parent_key else k
@@ -623,6 +602,7 @@ def to_dataframe(
             "llmonkeys_rate",
             "duration",
             "total_cost",
+            "cached_tokens",
             "prompt_tokens",
             "completion_tokens",
             "status",
@@ -634,6 +614,7 @@ def to_dataframe(
             "rejected_solutions",
             "resolved_max_reward",
             "failed_max_reward",
+            "failed_actions",
             "duplicated_search_actions",
             "trajectory_path",
         ]
@@ -669,6 +650,7 @@ def to_dataframe(
             "coding_iterations",
             "coding_edit_retries",
             "coding_plan_retries",
+            "failed_actions"
         ]
         df = df[summary_cols]
 
@@ -678,6 +660,7 @@ def to_dataframe(
         "duration",
         "total_cost",
         "prompt_tokens",
+        "cached_tokens",
         "completion_tokens",
         "resolved_by",
         "status",
@@ -686,9 +669,10 @@ def to_dataframe(
         "all_transitions",
         "expected_spans",
         "expected_files",
+        "failed_actions",
         "alternative_solutions",
         "expected_spans_details",
-        "error",
+        "error"
     ]
 
     state_columns = [
@@ -761,3 +745,9 @@ def generate_report(dir: str):
     report_path = os.path.join(dir, "report.json")
     with open(report_path, "w") as f:
         json.dump([result.model_dump() for result in results], f, indent=2)
+
+    df = to_dataframe(results)
+    df.to_csv(os.path.join(dir, "report.csv"), index=False)
+
+    df = to_trajectory_dataframe(results)
+    df.to_csv(os.path.join(dir, "trajectories.csv"), index=False)

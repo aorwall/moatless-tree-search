@@ -4,38 +4,38 @@ from typing import Optional, Any, Union
 
 import litellm
 from litellm import cost_per_token, NotFoundError
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator, Field
 
 logger = logging.getLogger(__name__)
 
 
 class Message(BaseModel):
-    role: str
-    content: Optional[str] = None
+    role: str = Field(..., description="The role of the sender")
+    content: Optional[str] = Field(None, description="The message content")
 
 
 class ToolCall(BaseModel):
-    name: str
-    type: Optional[str] = None
-    input: Optional[dict[str, Any]] = None
+    name: str = Field(..., description="The name of the tool being called")
+    type: Optional[str] = Field(None, description="The type of tool call")
+    input: Optional[dict[str, Any]] = Field(None, description="The input parameters for the tool")
 
 
 class AssistantMessage(Message):
-    role: str = "assistant"
-    content: Optional[str] = None
-    tool_call: Optional[ToolCall] = None
+    role: str = Field("assistant", description="The role of the assistant")
+    content: Optional[str] = Field(None, description="The assistant's message content")
+    tool_call: Optional[ToolCall] = Field(None, description="Tool call made by the assistant")
 
 
 class UserMessage(Message):
-    role: str = "user"
-    content: str
+    role: str = Field("user", description="The role of the user")
+    content: str = Field(..., description="The user's message content")
 
 
 class Usage(BaseModel):
     completion_cost: float = 0
     completion_tokens: int = 0
     prompt_tokens: int = 0
-    cached_tokens: int | None = None
+    cached_tokens: int = 0
 
     @classmethod
     def from_completion_response(
@@ -69,7 +69,7 @@ class Usage(BaseModel):
         elif usage.get("cache_read_input_tokens"):
             cached_tokens = usage["cache_read_input_tokens"]
         else:
-            cached_tokens = None
+            cached_tokens = 0
 
         try:
             cost = litellm.completion_cost(
@@ -90,7 +90,7 @@ class Usage(BaseModel):
                 )
                 cost = 0
             except Exception as e:
-                logger.error(
+                logger.debug(
                     f"Failed to calculate cost for completion response: {completion_response}. Error: {e}"
                 )
                 cost = 0
@@ -107,15 +107,26 @@ class Usage(BaseModel):
             completion_cost=self.completion_cost + other.completion_cost,
             completion_tokens=self.completion_tokens + other.completion_tokens,
             prompt_tokens=self.prompt_tokens + other.prompt_tokens,
+            cached_tokens=self.cached_tokens + other.cached_tokens,
         )
 
     def __str__(self) -> str:
         return (
             f"Usage(cost: ${self.completion_cost:.4f}, "
             f"completion tokens: {self.completion_tokens}, "
-            f"prompt tokens: {self.prompt_tokens})"
+            f"prompt tokens: {self.prompt_tokens}, "
+            f"cached tokens: {self.cached_tokens})"
         )
 
+    @model_validator(mode='before')
+    @classmethod
+    def fix_null_tokens(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if not value:
+                    data[key] = 0
+
+        return data
 
 class Completion(BaseModel):
     model: str
