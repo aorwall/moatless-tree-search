@@ -13,7 +13,7 @@ django__django-14155 \
 django__django-11179 \
 """
 
-MODEL="gpt-4o-2024-08-06"
+MODEL="openai/Qwen/Qwen2.5-72B-Instruct"
 CWD=$(pwd)
 export PYTHONPATH="${CWD}:${PYTHONPATH}"
 

@@ -34,7 +34,7 @@ from moatless.discriminator import MeanAwardDiscriminator, AgentDiscriminator
 from moatless.feedback import FeedbackGenerator
 from moatless.file_context import FileContext
 from moatless.search_tree import SearchTree
-from moatless.selector import BestFirstSelector, SoftmaxSelector
+from moatless.selector import BestFirstSelector, SoftmaxSelector, LLMSelector
 from moatless.templates import create_coding_actions, create_claude_coding_actions
 from moatless.value_function.base import ValueFunction
 
@@ -441,7 +441,7 @@ class Evaluation:
                         repository=repository,
                         code_index=code_index,
                         runtime=runtime,
-                        use_edit_actions=True
+                        use_edit_actions=False
                     )
 
                     if completion_model.model in ["claude-3-5-sonnet-20241022"]:
@@ -460,6 +460,7 @@ class Evaluation:
                             identify_completion_model=completion_model,
                             edit_completion_model=completion_model
                         )
+                        system_prompt = SYSTEM_PROMPT
 
                     agent = CodingAgent(
                         completion=completion_model,
