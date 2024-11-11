@@ -12,7 +12,14 @@ logger = logging.getLogger(__name__)
 
 
 class FindClassArgs(SearchBaseArgs):
-    """Find a specific class in the codebase."""
+    """Use this when you know the exact name of a class you want to find.
+
+    Perfect for:
+    - Finding class implementations: class_name="UserRepository"
+    - Locating test classes: class_name="TestUserAuthentication"
+    - Finding base classes: class_name="BaseController"
+    - Finding classes in specific modules: class_name="Config", file_pattern="src/config/*.py"
+"""
 
     class_name: str = Field(
         ..., description="Specific class name to include in the search."

@@ -115,12 +115,6 @@ class ApplyCodeChangeAndTest(RequestCodeChange):
         observation.properties.update(test_observation.properties)
         observation.message += "\n\n" + test_observation.message
 
-        if test_observation.extra:
-            if observation.extra:
-                observation.extra += "\n\n" + test_observation.extra
-            else:
-                observation.extra = test_observation.extra
-
         return observation
 
     def get_evaluation_criteria(cls, trajectory_length) -> List[str]:

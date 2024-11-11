@@ -700,6 +700,17 @@ class CodeBlock:
         include_block_types: list[CodeBlockType] | None = None,
     ):
         contents = ""
+        show_new_span_id = (
+                show_span_id
+                and self.belongs_to_span
+                and (
+                        not current_span_id
+                        or current_span_id != self.belongs_to_span.span_id
+                )
+        )
+        contents += self._to_prompt_string(
+            show_span_id=show_new_span_id, show_line_numbers=show_line_numbers
+        )
 
         has_outcommented_code = False
         for _i, child in enumerate(self.children):
@@ -727,20 +738,10 @@ class CodeBlock:
 
                 has_outcommented_code = False
 
-                show_new_span_id = (
-                    show_span_id
-                    and child.belongs_to_span
-                    and (
-                        not current_span_id
-                        or current_span_id != child.belongs_to_span.span_id
-                    )
-                )
+
                 if child.belongs_to_span:
                     current_span_id = child.belongs_to_span.span_id
 
-                contents += child._to_prompt_string(
-                    show_span_id=show_new_span_id, show_line_numbers=show_line_numbers
-                )
                 contents += child.to_prompt(
                     span_ids=span_ids,
                     start_line=start_line,
@@ -984,12 +985,11 @@ class CodeBlock:
         return errors
 
     def create_commented_out_block(self, comment_out_str: str = "..."):
-        pre_lines = self.start_line - self.previous.end_line if self.previous else 1
         return CodeBlock(
             type=CodeBlockType.COMMENTED_OUT_CODE,
             indentation=self.indentation,
             parent=self,
-            pre_lines=pre_lines,
+            pre_lines=1,
             content=self.create_comment(comment_out_str),
         )
 

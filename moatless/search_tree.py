@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Callable
 
 from pydantic import BaseModel, Field
 
@@ -74,6 +74,7 @@ class SearchTree(BaseModel):
         message: Optional[str] = None,
         root: Optional[Node] = None,
         file_context: Optional[FileContext] = None,
+        repository: Repository | None = None,
         selector: Optional[Selector] = None,
         agent: Optional[ActionAgent] = None,
         value_function: Optional[ValueFunction] = None,
@@ -92,6 +93,9 @@ class SearchTree(BaseModel):
     ) -> "SearchTree":
         if not root and not message:
             raise ValueError("Either a root node or a message must be provided.")
+
+        if not file_context:
+            file_context = FileContext(repo=repository)
 
         if not root:
             root = Node(
@@ -201,22 +205,18 @@ class SearchTree(BaseModel):
 
         self.assert_runnable()
 
-        logger.info(generate_ascii_tree(self.root))
+        self.log(logger.info, generate_ascii_tree(self.root))
 
         if len(self.root.get_all_nodes()) > 1:
-            logger.info(
-                f"Restarting search tree with {len(self.root.get_all_nodes())} nodes"
-            )
+            self.log(logger.info, f"Restarting search tree with {len(self.root.get_all_nodes())} nodes")
 
         while not self.is_finished():
             total_cost = self.total_usage().completion_cost
 
-            logger.info(f"Run iteration {len(self.root.get_all_nodes())} (cost: ${total_cost}")
+            self.log(logger.info, f"Run iteration {len(self.root.get_all_nodes())}", cost=total_cost)
 
             if self.max_cost and self.total_usage().completion_cost and total_cost >= self.max_cost:
-                logger.warning(
-                    f"Search cost ${total_cost} exceeded max cost of ${self.max_cost}. Finishing search."
-                )
+                self.log(logger.warning, f"Search cost ${total_cost} exceeded max cost of ${self.max_cost}. Finishing search.")
                 break
 
             node = self._select(self.root)
@@ -226,19 +226,15 @@ class SearchTree(BaseModel):
                 self._simulate(new_node)
                 self._backpropagate(new_node)
                 self.maybe_persist()
-                logger.info(generate_ascii_tree(self.root, new_node))
+                self.log(logger.info, generate_ascii_tree(self.root, new_node))
             else:
-                logger.info("Search complete: no more nodes to expand.")
+                self.log(logger.info, "Search complete: no more nodes to expand.")
                 break
 
         if not len(self.get_finished_nodes()):
-            logger.warning(
-                f"Search completed with no finished nodes. {len(self.root.get_all_nodes())} nodes created."
-            )
+            self.log(logger.warning, f"Search completed with no finished nodes. {len(self.root.get_all_nodes())} nodes created.")
         else:
-            logger.info(
-                f"Search completed with {len(self.get_finished_nodes())} finished nodes. {len(self.root.get_all_nodes())} nodes created."
-            )
+            self.log(logger.info, f"Search completed with {len(self.get_finished_nodes())} finished nodes. {len(self.root.get_all_nodes())} nodes created.")
 
         return self.get_best_trajectory()
 
@@ -250,19 +246,24 @@ class SearchTree(BaseModel):
         filtered_nodes = expandable_nodes
 
         if not filtered_nodes:
-            logger.info("No expandable nodes found.")
+            self.log(logger.info, "No expandable nodes found.")
             return None
         
         return self.selector.select(filtered_nodes)
 
     def _expand(self, node: Node) -> Node:
         """Expand the node by returning an unexecuted child or adding a new child node."""
+
+        # Check that selected node was executed (except for the root node)
+        if node.parent and node.observation is None:
+            self.log(logger.info, f"Returning unexecuted Node{node.node_id}")
+            return node
+
         # Check for unexecuted children
         for child in node.children:
             if not child.is_duplicate and child.observation is None:
-                logger.info(
-                    f"Returning unexecuted child Node{child.node_id} of Node{node.node_id}"
-                )
+                self.log(logger.info, f"Returning unexecuted child Node{child.node_id} of Node{node.node_id}")
+                child.file_context=node.file_context.clone() if node.file_context else None
                 return child
 
         if self.feedback_generator:
@@ -278,7 +279,7 @@ class SearchTree(BaseModel):
             feedback=feedback,
         )
         node.add_child(child_node)
-        logger.info(f"Expanded Node{node.node_id} to new Node{child_node.node_id}")
+        self.log(logger.info, f"Expanded Node{node.node_id} to new Node{child_node.node_id}")
         return child_node
 
     def _simulate(self, node: Node):
@@ -291,23 +292,19 @@ class SearchTree(BaseModel):
             try:
                 node.reward, completion_response = self.value_function.get_reward(node=node)
                 node.completions["value_function"] = completion_response
-                logger.info(
-                    f"Node{node.node_id}: The value function returned a reward of {node.reward.value}."
-                )
+                self.log(logger.info, f"Node{node.node_id}: The value function returned a reward of {node.reward.value}.")
             except RejectError as e:
-                logger.warning(f"Node{node.node_id}: Value function rejected: {e.message}")
+                self.log(logger.warning, f"Node{node.node_id}: Value function rejected: {e.message}")
                 node.reward = None
             except RuntimeError as e:
-                logger.error(f"Node{node.node_id}: Value function runtime error: {e.message}")
+                self.log(logger.error, f"Node{node.node_id}: Value function runtime error: {e.message}")
                 raise  # Re-raise to abort the entire search
 
     def _backpropagate(self, node: Node):
         """Backpropagate the reward up the tree."""
 
         if not node.reward:
-            logger.info(
-                f"Node{node.node_id} has no evaluation. Skipping backpropagation."
-            )
+            self.log(logger.info, f"Node{node.node_id} has no evaluation. Skipping backpropagation.")
             return
 
         reward = node.reward.value
@@ -324,9 +321,7 @@ class SearchTree(BaseModel):
         nodes = self.get_finished_nodes()
         if not nodes:
             nodes = self.get_leaf_nodes()
-            logger.info(
-                f"get_best_trajectory() No finished nodes found. Will select from {len(nodes)} leaf nodes."
-            )
+            self.log(logger.info, f"get_best_trajectory() No finished nodes found. Will select from {len(nodes)} leaf nodes.")
 
         if len(nodes) == 1:
             return nodes[0]
@@ -458,29 +453,17 @@ class SearchTree(BaseModel):
 
         return data
 
-
-def find_best_by_mean_award(finished_nodes: List[Node]) -> Node | None:
-    best_finish_node: Node | None = None
-    best_mean_reward = float("-inf")
-    trajectories_mean_rewards = []
-
-    for finished_node in finished_nodes:
-        mean_reward = finished_node.calculate_mean_reward()
-
-        trajectories_mean_rewards.append(mean_reward)
-        if mean_reward > best_mean_reward:
-            best_mean_reward = mean_reward
-            best_finish_node = finished_node
-
-    logger.info(f"Mean Rewards for finished trajectories: {trajectories_mean_rewards}")
-
-    if best_finish_node:
-        logger.info(
-            f"Best finished path finished on Node{best_finish_node.node_id} with mean reward: {best_mean_reward}"
-        )
-        return best_finish_node
-    else:
-        logger.info(
-            "No valid finished path found. This should not happen if there are finished nodes."
-        )
-        return None
+    def log(self, logger_fn: Callable, message: str, **kwargs):
+        """
+        Log a message with metadata prefix (if any) and specified log level.
+        
+        Args:
+            logger_fn: Logger function (logger.debug, logger.info, etc)
+            message (str): The message to log
+            **kwargs: Additional key-value pairs to include in metadata
+        """
+        metadata = {**self.metadata, **kwargs}
+        metadata_str = ' '.join(f"{k}: {str(v)[:20]}" for k, v in metadata.items())
+        log_message = f"[{metadata_str}] {message}" if metadata else message
+        
+        logger_fn(log_message)

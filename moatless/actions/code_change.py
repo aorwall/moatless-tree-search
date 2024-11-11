@@ -562,19 +562,6 @@ Please provide instructions for the code change again."""
 
         file.apply_changes(updated_content)
 
-        if file.module:
-            updated_span_ids = file.module.get_all_span_ids()
-            new_span_ids = updated_span_ids - existing_span_ids
-        else:
-            new_span_ids = set()
-
-        if new_span_ids:
-            logger.debug(
-                f"Updated file {file_path} with diff:\n{diff}. Add new span ids to context: {new_span_ids}."
-            )
-            file.add_spans(new_span_ids, pinned=True)
-        else:
-            logger.debug(f"Updated file {file_path} with diff:\n{diff}.")
         return Observation(
             message=f"Applied the change to {file_path}\n\n```diff\n{diff}\n```",
             properties={"diff": diff},
