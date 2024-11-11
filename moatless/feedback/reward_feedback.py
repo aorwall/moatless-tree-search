@@ -2,9 +2,10 @@ from moatless.actions.code_change import RequestCodeChange
 from moatless.actions.run_tests import RunTests
 from moatless.node import Node
 from moatless.feedback.feedback import FeedbackGenerator
+from typing import List, Any
 
 class RewardFeedbackGenerator(FeedbackGenerator):
-    def generate_feedback(self, node: Node) -> str | None:
+    def generate_feedback(self, node: Node, actions: List[Any] = None) -> str | None:
         visited_children = [child for child in node.children if child.reward]
         if not visited_children:
             return None
