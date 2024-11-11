@@ -11,6 +11,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional, Any, List
 
+import random
 import litellm
 from pydantic import BaseModel, Field
 from tqdm.auto import tqdm
@@ -32,6 +33,8 @@ from moatless.completion.completion import CompletionModel, LLMResponseFormat
 from moatless.completion.log_handler import LogHandler
 from moatless.discriminator import MeanAwardDiscriminator, AgentDiscriminator
 from moatless.feedback import FeedbackGenerator
+from moatless.feedback.feedback_agent import FeedbackAgent
+from moatless.feedback.reward_feedback import RewardFeedbackGenerator
 from moatless.file_context import FileContext
 from moatless.search_tree import SearchTree
 from moatless.selector import BestFirstSelector, SoftmaxSelector, LLMSelector
@@ -59,7 +62,7 @@ class ModelSettings(BaseModel):
         description="The API key for the model API.",
     )
     max_tokens: Optional[int] = Field(
-        1000,
+        2000,
         description="The maximum number of tokens to generate.",
     )
     response_format: Optional[LLMResponseFormat] = Field(
@@ -126,7 +129,7 @@ class TreeSearchSettings(BaseModel):
     )
 
     reward_threshold: Optional[int] = Field(
-        100,
+        None,
         description="The min reward threshold to consider before finishing.",
     )
 
@@ -170,14 +173,40 @@ class TreeSearchSettings(BaseModel):
         description="The settings for the debate.",
     )
 
-    min_resolved: Optional[int] = Field(
-        1,
-        description="The minimum number of resolved instances to consider before finishing.",
-    )
-    max_resolved: Optional[int] = Field(
-        None,
-        description="The maximum number of resolved instances to consider before finishing.",
-    )
+    def create_evaluation_name(
+        self,
+        date: str | None = None,
+    ) -> str:
+        if date:
+            date_str = date
+        else:
+            date_str = datetime.now(tz=timezone.utc).strftime("%Y%m%d")
+        
+        # Make model name URL-safe (only alphanumeric and underscores)
+        model_name = self.model.model.split("/")[-1]
+        # Replace any non-alphanumeric chars with underscore
+        model_name = "".join(c if c.isalnum() else "_" for c in model_name)
+        # Remove repeated underscores and any leading/trailing underscores
+        model_name = "_".join(filter(None, model_name.split("_"))).strip("_")
+        
+        # Start with date and model
+        name = f"{date_str}_{model_name}"
+        
+        # Add all float and bool fields from the model's schema
+        schema = self.model_json_schema()
+        for field_name, field in schema["properties"].items():
+            if field.get("type") in ["number", "boolean"]:
+                # Convert field name to lowercase and replace spaces with underscores
+                safe_field = field_name.lower().replace(" ", "_")
+                value = getattr(self, field_name)
+                # For boolean fields, just include the name if True
+                if field["type"] == "boolean" and value:
+                    name += f"_{safe_field}"
+                # For float fields, include the value
+                elif field["type"] == "number":
+                    name += f"_{safe_field}_{value}"
+            
+        return name.lower()  # Convert to lowercase for consistency
 
 
 class Evaluation:
@@ -271,6 +300,7 @@ class Evaluation:
         with open(file_path) as f:
             instances = json.load(f)
 
+        random.shuffle(instances)
 
         logger.info(f"Loaded {len(instances)} instances from {file_path}")
 
@@ -375,7 +405,7 @@ class Evaluation:
             }
 
         logger.info(f"Evaluating {instance_id}")
-        problem_statement = instance["problem_statement"]
+        problem_statement = f"<task>\n{instance['problem_statement']}\n</task>"
 
         runtime = None
         repository = None
@@ -495,7 +525,7 @@ class Evaluation:
                         )
 
                         if self.settings.provide_feedback:
-                            feedback = FeedbackGenerator()
+                            feedback = RewardFeedbackGenerator(completion_model=self._create_completion_model())
                         else:
                             feedback = None
                     else:
@@ -529,7 +559,8 @@ class Evaluation:
                 search_tree.run_search()
                 best_node = search_tree.get_best_trajectory()
                 self.log_event(instance_id, "search_tree_execution_completed")
-                self.save_prediction(instance_id, best_node.file_context.generate_git_patch())
+                if best_node:
+                    self.save_prediction(instance_id, best_node.file_context.generate_git_patch())
                 eval_result["status"] = "completed"
             except Exception:
                 eval_result["error"] = traceback.format_exc()
@@ -796,10 +827,23 @@ def create_evaluation_name(
         date_str = date
     else:
         date_str = datetime.now(tz=timezone.utc).strftime("%Y%m%d")
+    
+    # Make model name URL-safe (only alphanumeric and underscores)
     model_name = model.split("/")[-1]
+    # Replace any non-alphanumeric chars with underscore
+    model_name = "".join(c if c.isalnum() else "_" for c in model_name)
+    # Remove repeated underscores and any leading/trailing underscores
+    model_name = "_".join(filter(None, model_name.split("_"))).strip("_")
+    
     model_name = f"{date_str}_{model_name}"
+    
     if max_expansions:
         model_name += f"_max_exp{max_expansions}"
+    
     for key, value in kwargs.items():
-        model_name += f"_{key}_{value}"
-    return model_name
+        # Convert key-value pairs to URL-safe format
+        safe_value = "".join(c if c.isalnum() else "_" for c in str(value))
+        safe_value = "_".join(filter(None, safe_value.split("_"))).strip("_")
+        model_name += f"_{key}_{safe_value}"
+    
+    return model_name.lower()  # Convert to lowercase for consistency

@@ -353,10 +353,16 @@ def to_result(
             status = "resolved"
         elif resolved is not None and not resolved:
             status = "failed"
-        elif search_tree.is_finished():
-            status = "finished"
         else:
-            status = "running"  # TODO: Abandoned?
+            finished_nodes = search_tree.get_finished_nodes()
+            if finished_nodes:
+                status = "finished"
+            elif search_tree.get_leaf_nodes() and search_tree.get_leaf_nodes()[0].action and search_tree.get_leaf_nodes()[0].action.name == "Reject":
+                status = "rejected"
+            elif search_tree.is_finished():
+                status = "abandoned"
+            else:
+                status = "running"
 
         total_usage = search_tree.total_usage()
 

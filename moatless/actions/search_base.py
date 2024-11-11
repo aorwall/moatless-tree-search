@@ -135,7 +135,6 @@ class SearchBaseAction(Action):
 
         properties["search_tokens"] = search_tokens
 
-        message = search_result.message or ""
 
         if search_tokens > self.max_search_tokens or span_count > self.max_hits:
             logger.info(
@@ -144,7 +143,10 @@ class SearchBaseAction(Action):
             identify_spans = True
 
         completion = None
-        search_hit_str = ""
+
+        search_result_context = FileContext(repo=self._repository)
+
+        new_spans_str = ""
         found_files = set()
         if identify_spans:
             identify_message = self._generate_identify_prompt(args, search_result)
@@ -155,24 +157,50 @@ class SearchBaseAction(Action):
             )
 
             if identified_code.identified_spans:
-                message += f"\nIdentified the following relevant code spans:\n"
+
                 for identified_spans in identified_code.identified_spans:
-                    search_hit_str += f"\n- File: {identified_spans.file_path}\n  Span IDs:"
+                    new_span_ids = set()
+
+                    search_result_context.add_spans_to_context(identified_spans.file_path, set(identified_spans.span_ids))
+
                     for span_id in identified_spans.span_ids:
                         if not file_context.has_span(identified_spans.file_path, span_id):
                             found_files.add(identified_spans.file_path)
                             file_context.add_span_to_context(identified_spans.file_path, span_id)
-                        search_hit_str += f"\n  - {span_id}"
+                            new_span_ids.add(span_id)
+
+                    if new_span_ids:
+                        new_spans_str += f"\n- File: {identified_spans.file_path}\n  Span IDs: \n  - {', '.join(new_span_ids)}"
+
         else:
             for hit in search_result.hits:
-                search_hit_str += f"\n- File: {hit.file_path}\n  Span IDs:"
+                new_span_ids = set()
+
                 for span in hit.spans:
+                    search_result_context.add_span_to_context(hit.file_path, span.span_id)
                     if not file_context.has_span(hit.file_path, span.span_id):
                         found_files.add(hit.file_path)
                         file_context.add_span_to_context(hit.file_path, span.span_id)
-                    search_hit_str += f"\n  - {span.span_id}"
+                        new_span_ids.add(span.span_id)
 
-        message += f"\n{search_hit_str}"
+                if new_span_ids:
+                    new_spans_str += f"\n- File: {hit.file_path}\n  Span IDs: \n  - {', '.join(new_span_ids)}"
+
+        if new_spans_str:
+            message = f"\n\nAdded the following new code spans to context:\n{new_spans_str}"
+        else:
+            message = "\n\nNo new relevant code spans were identified."
+
+        #if not search_result_context.is_empty():
+        #    search_result_str = search_result_context.create_prompt(
+        #        show_span_ids=False,
+        #        show_line_numbers=False,
+        #        exclude_comments=False,
+        #        show_outcommented_code=True,
+        #        outcomment_code_comment="... rest of the code",
+        #    )
+
+        #    message += f"\n\n<search_results>\n{search_result_str}\n</search_result>\n"
 
         return Observation(message=message, properties=properties, completion=completion)
 

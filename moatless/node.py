@@ -118,6 +118,12 @@ class Node(BaseModel):
 
         return None
 
+    def get_sibling_nodes(self) -> List["Node"]:
+        if not self.parent:
+            return []
+
+        return [child for child in self.parent.children if child.node_id != self.node_id]
+
     def get_trajectory(self) -> List["Node"]:
         nodes = []
         current_node = self
@@ -186,18 +192,14 @@ class Node(BaseModel):
                                  include_file_context: bool = True,
                                  include_extra_history: bool = True,
                                  include_git_patch: bool = True) -> list[Message]:
-        # TODO: Move this to the generate summary history and set task on creation to be able to show file context properly if its provided on creation
-        messages = [
-            UserMessage(
-                content=f"<task>\n{self.get_root().message}\n</task>\n\n")
-        ]
-
         previous_nodes = self.get_trajectory()[:-1]
+        if not previous_nodes:
+            return []
 
         if message_history_type == MessageHistoryType.SUMMARY:
-            messages.extend(self._generate_summary_history(previous_nodes, include_extra_history, include_file_context, include_git_patch))
+            messages = self._generate_summary_history(previous_nodes, include_extra_history, include_file_context, include_git_patch)
         else:  # MessageHistoryType.MESSAGES
-            messages.extend(self._generate_message_history(previous_nodes))
+            messages = self._generate_message_history(previous_nodes)
 
         return messages
 
@@ -262,6 +264,10 @@ class Node(BaseModel):
                     last_file_updates[file] = i
 
         for i, previous_node in enumerate(previous_nodes):
+
+            if previous_node.message:
+                messages.append(UserMessage(content=previous_node.message))
+
             if previous_node.action:
                 tool_call = previous_node.action.to_tool_call()
                 messages.append(AssistantMessage(tool_call=tool_call))
@@ -469,6 +475,44 @@ class Node(BaseModel):
             node.add_child(child)
 
         return node
+
+    def reset(self):
+        """Reset the node state to be able to execute it again."""
+
+        self.action = None
+        self.visits = 0
+        self.value = 0.0
+        self.observation = None
+        self.feedback = None
+        self.completions = {}
+        self.is_duplicate = False
+        if self.parent and self.parent.file_context:
+            self.file_context = self.parent.file_context.clone()
+
+
+    def clone_and_reset(self) -> "Node":
+        """
+        Creates a copy of the node and resets its observation and file context.
+        
+        Returns:
+            Node: A new node instance with reset state
+        """
+        # Create a new node with same base attributes
+        new_node = Node(
+            node_id=self.node_id,
+            parent=self.parent,
+            visits=self.visits,
+            value=self.value,
+            max_expansions=self.max_expansions,
+            message=self.message,
+            feedback=self.feedback,
+            is_duplicate=self.is_duplicate,
+            action=self.action,
+            possible_actions=self.possible_actions.copy() if self.possible_actions else []
+        )
+
+        new_node.reset()
+        return new_node
 
 
 def generate_ascii_tree(

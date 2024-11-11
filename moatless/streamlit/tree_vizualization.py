@@ -12,9 +12,12 @@ import streamlit as st
 from matplotlib.backends.backend_pdf import PdfPages
 from plotly.subplots import make_subplots
 
+from moatless.agent.code_agent import create_edit_code_actions
 from moatless.benchmark.report import analyse_file_context
+from moatless.benchmark.swebench import create_repository, create_index
 from moatless.benchmark.utils import get_moatless_instance
 from moatless.node import Node
+from moatless.runtime.testbed import TestbedEnvironment
 from moatless.search_tree import SearchTree
 from moatless.utils.tokenizer import count_tokens
 
@@ -132,6 +135,7 @@ def build_graph(
             G.add_edge(node_id, child_id)
 
     add_node_to_graph(root_node)
+    G.graph['graph'] = {'ranksep': '2.0', 'nodesep': '1.0'}  # Increase spacing between ranks and nodes
     return G
 
 
@@ -171,6 +175,57 @@ def show_completion(completion):
     if completion.response:
         st.subheader("Completion response")
         st.json(completion.response)
+
+
+def rerun_node(node_id: int, trajectory_path: str, instance: dict):
+    """Handle the rerun tab logic for a selected node."""
+    if st.button("Rerun Node"):
+        with st.spinner("Rerunning node..."):
+            try:
+                repository = create_repository(
+                    instance
+                )
+
+                code_index = create_index(instance, repository=repository)
+
+                runtime = TestbedEnvironment(
+                    repository=repository,
+                    instance=instance,
+                )
+
+                search_tree = SearchTree.from_file(
+                    trajectory_path,
+                    repository=repository,
+                    runtime=runtime,
+                    code_index=code_index,
+                )
+                node = search_tree.get_node_by_id(node_id)
+                new_node = node.clone_and_reset()
+
+                agent = search_tree.agent
+                actions = create_edit_code_actions(
+                    repository=repository,
+                    code_index=code_index,
+                    # runtime=runtime,
+                    completion_model=agent._completion
+                )
+                agent.set_actions(actions)
+
+                agent.run(node)
+
+                st.success("Node rerun successfully!")
+
+                st.subheader("Action")
+                st.json(new_node.action.model_dump())
+
+                st.subheader("Observation")
+                st.code(node.observation.message, language="md")
+                st.json(node.observation.properties)
+                
+            except Exception as e:
+                st.error(f"Error during rerun: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
 
 
 def update_visualization(container, search_tree: SearchTree, selected_tree_path: str):
@@ -476,8 +531,42 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                     autosize=False,
                     showlegend=False,
                     hovermode="closest",
-                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                    xaxis=dict(
+                        showgrid=False, 
+                        zeroline=False, 
+                        showticklabels=False,
+                        rangeslider=dict(visible=False),  # Add rangeslider for horizontal navigation
+                    ),
+                    yaxis=dict(
+                        showgrid=False, 
+                        zeroline=False, 
+                        showticklabels=False,
+                        scaleanchor="x",  # Lock aspect ratio
+                        scaleratio=1,
+                    ),
+                    updatemenus=[
+                        dict(
+                            type="buttons",
+                            showactive=False,
+                            buttons=[
+                                dict(
+                                    args=[{"visible": [True] * len(fig.data)}],
+                                    label="Reset View",
+                                    method="relayout",
+                                    args2=[{"xaxis.range": [None, None],
+                                          "yaxis.range": [None, None]}]
+                                ),
+                                dict(
+                                    args=[{"yaxis.scaleanchor": None}],
+                                    label="Toggle Aspect Ratio",
+                                    method="relayout",
+                                    args2=[{"yaxis.scaleanchor": "x"}]
+                                )
+                            ],
+                            x=0.05,
+                            y=1.1,
+                        )
+                    ]
                 )
                 
                 # Update node trace text positioning
@@ -670,6 +759,9 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                     if instance:
                         tabs.append("Instance")
 
+                    if selected_node.action:
+                        tabs.append("Rerun")
+
                     tab_contents = st.tabs(tabs)
 
                     with tab_contents[tabs.index("Summary")]:
@@ -728,6 +820,10 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                     if "Instance" in tabs:
                         with tab_contents[tabs.index("Instance")]:
                             st.json(instance)
+
+                    if "Rerun" in tabs:
+                        with tab_contents[tabs.index("Rerun")]:
+                            rerun_node(selected_node.node_id, search_tree.persist_path, instance)
 
             else:
                 st.info(

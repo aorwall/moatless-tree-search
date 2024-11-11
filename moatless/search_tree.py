@@ -8,6 +8,7 @@ from moatless.agent.agent import ActionAgent
 from moatless.completion.model import Usage
 from moatless.discriminator import MeanAwardDiscriminator, Discriminator
 from moatless.feedback import FeedbackGenerator
+from moatless.feedback.reward_feedback import RewardFeedbackGenerator
 from moatless.file_context import FileContext
 from moatless.index.code_index import CodeIndex
 from moatless.node import Node, generate_ascii_tree
@@ -152,7 +153,7 @@ class SearchTree(BaseModel):
             if "feedback_generator" in obj and isinstance(
                 obj["feedback_generator"], dict
             ):
-                obj["feedback_generator"] = FeedbackGenerator.model_validate(
+                obj["feedback_generator"] = RewardFeedbackGenerator.model_validate(
                     obj["feedback_generator"]
                 )
 
@@ -187,6 +188,10 @@ class SearchTree(BaseModel):
                 code_index=code_index,
                 runtime=runtime,
             )
+            
+        if "feedback_generator" in data and isinstance(data["feedback_generator"], dict):
+            data["feedback_generator"] = FeedbackGenerator.model_validate(data["feedback_generator"])
+            
         return cls.model_validate(data, repository)
 
     @classmethod
@@ -212,12 +217,7 @@ class SearchTree(BaseModel):
 
         while not self.is_finished():
             total_cost = self.total_usage().completion_cost
-
             self.log(logger.info, f"Run iteration {len(self.root.get_all_nodes())}", cost=total_cost)
-
-            if self.max_cost and self.total_usage().completion_cost and total_cost >= self.max_cost:
-                self.log(logger.warning, f"Search cost ${total_cost} exceeded max cost of ${self.max_cost}. Finishing search.")
-                break
 
             node = self._select(self.root)
 
@@ -266,19 +266,17 @@ class SearchTree(BaseModel):
                 child.file_context=node.file_context.clone() if node.file_context else None
                 return child
 
-        if self.feedback_generator:
-            feedback = self.feedback_generator.generate_feedback(node)
-        else:
-            feedback = None
-
         child_node = Node(
             node_id=self._generate_unique_id(),
             parent=node,
             file_context=node.file_context.clone() if node.file_context else None,
             max_expansions=self.max_expansions,
-            feedback=feedback,
         )
         node.add_child(child_node)
+
+        if self.feedback_generator:
+            child_node.message = self.feedback_generator.generate_feedback(child_node, self.agent.actions)
+
         self.log(logger.info, f"Expanded Node{node.node_id} to new Node{child_node.node_id}")
         return child_node
 
@@ -329,19 +327,27 @@ class SearchTree(BaseModel):
         return self.discriminator.select(nodes)
 
     def is_finished(self):
+        total_cost = self.total_usage().completion_cost
+        if self.max_cost and self.total_usage().completion_cost and total_cost >= self.max_cost:
+            return True
+
         if len(self.root.get_all_nodes()) >= self.max_iterations:
             return True
 
         finished_nodes = self.get_finished_nodes()
 
-        if self.max_finished_nodes and len(finished_nodes) >= self.max_finished_nodes:
+        unique_finished_parents = set()
+        for node in finished_nodes:
+            unique_finished_parents.add(node.parent.node_id)
+
+        if self.max_finished_nodes and len(unique_finished_parents) >= self.max_finished_nodes:
             return True
 
         if self.reward_threshold and any(
             node.reward and node.reward.value >= self.reward_threshold
             for node in finished_nodes
         ):
-            return not self.min_finished_nodes or len(finished_nodes) >= self.min_finished_nodes
+            return not self.min_finished_nodes or len(unique_finished_parents) >= self.min_finished_nodes
 
         if not self.root.get_expandable_descendants():
             return True

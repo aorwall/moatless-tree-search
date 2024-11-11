@@ -1,36 +1,43 @@
-import logging
-
-from pydantic import BaseModel
-
 from moatless.actions.code_change import RequestCodeChange
 from moatless.actions.run_tests import RunTests
 from moatless.node import Node
+from moatless.feedback.feedback import FeedbackGenerator
+from typing import List, Any
 
+import logging
 logger = logging.getLogger(__name__)
 
 
-class FeedbackGenerator(BaseModel):
-    def generate_feedback(self, node: Node) -> str | None:
+# class FeedbackGenerator(BaseModel):
+#     def generate_feedback(self, node: Node) -> str | None:
+#         if node.reward:
+#             if node.reward.feedback:
+#                 return self._create_message_feedback_llmselector(node)
+
+#         # else:
+
+class RewardFeedbackGenerator(FeedbackGenerator):
+    def generate_feedback(self, node: Node, actions: List[Any] = None) -> str | None:
         if node.reward:
             if node.reward.feedback:
                 return self._create_message_feedback_llmselector(node)
-
-        # else:
-        visited_children = [child for child in node.children if child.reward]
-        if not visited_children:
-            return None
-
-        # Pick last child to always use new feedback
-        last_child = visited_children[-1]
-        if last_child.action.name in [RunTests.name]:
-            return self._create_message(last_child)
-        elif (
-            last_child.action.name not in [RequestCodeChange.name]
-            and last_child.reward.feedback
-        ):
-            return self._create_message_feedback(last_child)
+        
         else:
-            return self._create_message_alt_action(last_child)
+            visited_children = [child for child in node.children if child.reward]
+            if not visited_children:
+                return None
+
+            # Pick last child to always use new feedback
+            last_child = visited_children[-1]
+            if last_child.action.name in [RunTests.name]:
+                return self._create_message(last_child)
+            elif (
+                last_child.action.name not in [RequestCodeChange.name]
+                and last_child.reward.feedback
+            ):
+                return self._create_message_feedback(last_child)
+            else:
+                return self._create_message_alt_action(last_child)
 
     def _create_message(self, node: Node, feedback: str | None = None):
         prompt = "Feedback from a parallel problem-solving branch is provided within the <feedback> tag. Carefully review this feedback and use it to adjust your search parameters, ensuring that you implement a different search strategy from previous attempts. "
@@ -76,4 +83,4 @@ class FeedbackGenerator(BaseModel):
         prompt += "\n\n<feedback>\n"
         prompt += node.reward.feedback
         prompt += "\n</feedback>"
-        return prompt
+        return prompt 

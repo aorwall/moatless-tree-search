@@ -83,7 +83,7 @@ class CompletionModel(BaseModel):
     @property
     def use_anthropic_client(self):
         """Skip LiteLLM and use Anthropic's client for beta features"""
-        return self.supports_anthropic_computer_use or self.supports_anthropic_prompt_caching
+        return "claude-3-5" in self.model
 
     @property
     def use_openai_client(self):
@@ -130,7 +130,7 @@ class CompletionModel(BaseModel):
             logger.warning(
                 f"Instructor failed after {e.n_attempts} attempts. Last completion: {e.last_completion}. Messages: {e.messages}")
             raise CompletionRejectError(
-                f"Failed to parse response. Did {e.n_attempts} attempts. ",
+                f"Failed to parse response. Did {e.n_attempts} attempts. Error: {e}",
                 last_completion=e.last_completion,
                 messages=e.messages
             )
@@ -152,6 +152,12 @@ class CompletionModel(BaseModel):
             completion_response=completion_response,
             model=self.model,
         )
+
+        if "stop_reason" in completion.response and completion.response["stop_reason"] == "max_tokens":
+            raise CompletionRejectError(
+                f"Max tokens reached in completion response",
+                last_completion=completion_response
+            )
 
         return action_args, completion
 
@@ -437,6 +443,17 @@ class CompletionModel(BaseModel):
                     if cleaned_message != message:
                         logger.info(f"parse_json() Cleaned control chars: {repr(message)} -> {repr(cleaned_message)}")
                     message = cleaned_message
+
+                    try:
+                        # Look specifically for json if "json" in message:
+                        start = message.index("json") + 7 # Find the next closing
+                        end = message.find("```", start)
+                        if end != -1:
+                            json_message = message[start:end].strip()
+                            logger.info(f"parse_json() Extracted JSON from codeblock: {repr(json_message)}")
+                            message = json_message
+                    except Exception as e:
+                        logger.warning(f"Failed to extract JSON from message: {e}")
 
                     # Extract JSON from codeblock if present
                     json_message = extract_json_from_codeblock(message)

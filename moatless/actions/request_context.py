@@ -106,6 +106,7 @@ class RequestMoreContext(Action):
                     f"{file_with_spans.file_path} is not found in the file repository."
                 )
                 message += f"The requested file {file_with_spans.file_path} is not found in the file repository. Use the search functions to search for the code if you are unsure of the file path."
+                properties["fail_reason"] = "file_not_found"
                 continue
 
             if self._repository.is_directory(file.file_path):
@@ -113,6 +114,7 @@ class RequestMoreContext(Action):
                     f"{file_with_spans.file_path} is a directory and not a file."
                 )
                 message += f"The requested file {file_with_spans.file_path} is a directory and not a file. Use the search functions to search for the code if you are unsure of the file path."
+                properties["fail_reason"] = "is_directory"
                 continue
 
             if file_with_spans.start_line and file_with_spans.end_line:
@@ -138,6 +140,7 @@ class RequestMoreContext(Action):
                 message += self.create_retry_message(
                     file, f"No span ids found. Is it empty?"
                 )
+                properties["fail_reason"] = "invalid_file"
                 return Observation(
                     message=message, properties=properties, expect_correction=False
                 )
@@ -185,11 +188,16 @@ class RequestMoreContext(Action):
                     f"Spans not found. Did you mean one of these spans: {', '.join(suggested_span_ids)}\n",
                 )
 
-            if found_span_ids:
-                message += f"\nAdded the following spans from {file.file_path} to context:\n{', '.join(found_span_ids)}"
+            new_context = FileContext(repo=self._repository)
 
+            new_span_ids = []
             if file_with_spans.start_line and file_with_spans.end_line:
                 file_context.add_line_span_to_context(
+                    file_with_spans.file_path,
+                    file_with_spans.start_line,
+                    file_with_spans.end_line,
+                )
+                new_context.add_line_span_to_context(
                     file_with_spans.file_path,
                     file_with_spans.start_line,
                     file_with_spans.end_line,
@@ -200,6 +208,23 @@ class RequestMoreContext(Action):
                 if not file_context.has_span(file_with_spans.file_path, span_id):
                     file_context.add_span_to_context(file_with_spans.file_path, span_id)
                     found_files.add(file_with_spans.file_path)
+                    new_span_ids.append(span_id)
+
+            new_context.add_spans_to_context(file_with_spans.file_path, found_span_ids)
+
+            #message += "The requested code spans: "
+            #message += new_context.create_prompt(
+            #    show_span_ids=False,
+            #    show_line_numbers=False,
+            #    exclude_comments=False,
+            #    show_outcommented_code=True,
+            #    outcomment_code_comment="... rest of the code",
+            #)
+
+            if new_span_ids:
+                message += f"\nAdded the following spans from {file.file_path} to context:\n{', '.join(new_span_ids)}"
+            else:
+                message += f"\nNo new spans added to context for file {file.file_path}"
 
             if missing_span_ids:
                 logger.info(

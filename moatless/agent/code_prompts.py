@@ -222,12 +222,12 @@ You will interact with an AI agent with limited programming capabilities, so it'
 3: **Locate Relevant Tests**
   * **Locate Existing Tests Related to the Code Changes:** Use existing search functions with the category parameter set to 'test' to find relevant test code.
 
-4. **Plan Code Changes**
+4. **Apply Code Changes**
  * **One Step at a Time:** You can only plan and implement one code change at a time.
  * **Choose the Appropriate Action:**
-    * Use CreateFile to create new files
     * Use StringReplace to replace existing code
-    * Use InsertLines to add new code at specific line numbers
+    * Use CreateFile to create new files
+    * Use InsertLines to add new code at specific line numbers in existing files
  * **Tests Run Automatically:** Tests will run automatically after each code change.
 
 5. **Modify or Add Tests**
@@ -239,29 +239,6 @@ You will interact with an AI agent with limited programming capabilities, so it'
 
 7: **Finish the Task**
   * **Completion:** When confident that all changes are correct and the task is resolved, use Finish.
-
-# Available Code Actions
-
-1. **create_file**
-   * Creates a new file with specified content
-   * Parameters:
-     * path: The file path to create
-     * file_text: The text content for file creation
-
-2. **string_replace**
-   * Replaces text in existing files
-   * Parameters:
-     * path: The file path to edit
-     * old_str: String to replace
-     * new_str: Replacement string
-   * Note: Will fail if multiple occurrences are found - be specific with the text to replace
-
-3. **insert_line**
-   * Inserts text at a specific line number
-   * Parameters:
-     * path: The file path to edit
-     * insert_line: Line number for insertion
-     * new_str: Text to insert
 
 # Important Guidelines
 
@@ -284,13 +261,6 @@ You will interact with an AI agent with limited programming capabilities, so it'
   * Limit code changes to files in the current context.
   * If you need more code, request it explicitly.
   * Provide line numbers if known; if unknown, explain where changes should be made.
-  * When using string_replace:
-    * The old_str parameter must match EXACTLY one or more consecutive lines from the original file
-    * Whitespace and indentation must match exactly
-    * The old_str must be unique within the file - include enough surrounding context to ensure uniqueness
-    * The new_str parameter contains the replacement text that will replace old_str
-    * No changes will be made if old_str appears multiple times or cannot be found
-    * Do not include line numbers in old_str or new_str - provide only the actual code content
 
  * **Testing**
   * Tests run automatically after each code change.
@@ -310,4 +280,3 @@ You will interact with an AI agent with limited programming capabilities, so it'
  * **Never Guess:** Do not guess line numbers or code content. Use RequestMoreContext to obtain accurate information.
  * **Collaboration:** The AI agent relies on your detailed instructions; clarity is key.
 """
-

@@ -9,6 +9,7 @@ from moatless.file_context import FileContext
 from moatless.index.code_index import CodeIndex, is_test
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment, TestResult, TestStatus
+from moatless.utils.tokenizer import count_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,11 @@ class RunTestsArgs(ActionArguments):
 
 class RunTests(Action):
     args_schema = RunTestsArgs
+
+    max_output_tokens: int = Field(
+        2000,
+        description="The maximum number of tokens in the test result output message",
+    )
 
     _code_index: CodeIndex = PrivateAttr()
     _repository: Repository = PrivateAttr()
@@ -145,8 +151,9 @@ class RunTests(Action):
         passed_count = len(test_results) - failure_count - error_count
 
         test_result_strings = []
+        token_count = 0
 
-        for test_result in test_results:
+        for i, test_result in enumerate(test_results):
             if not test_result.message or test_result.status not in [
                 TestStatus.FAILED,
                 TestStatus.ERROR,
@@ -163,13 +170,21 @@ class RunTests(Action):
                 if test_result.line:
                     attributes += f", line: {test_result.line}"
 
-            test_result_strings.append(
-                f"* {test_result.status.value} {attributes}>\n```\n{test_result.message}\n```\n"
-            )
+            test_output = f"* {test_result.status.value} {attributes}>\n```\n{test_result.message}\n```\n"
+            test_output_tokens = count_tokens(test_output)
+            if token_count + test_output_tokens > self.max_output_tokens:
+                logger.warning(
+                    f"Test output message exceeds max token limit ({self.max_output_tokens})."
+                )
+                break
+
+            token_count += test_output_tokens
+
+            test_result_strings.append(test_output)
 
         response_msg = f"Running {len(test_results)} tests in the following files:"
         for test_file in test_files:
-            response_msg += f"\n * {test_file}"
+            response_msg += f"\n## {test_file}"
 
         if test_result_strings:
             response_msg += "\n\n"
@@ -181,7 +196,6 @@ class RunTests(Action):
 
         return Observation(
             message=response_msg,
-            expect_correction=failure_count > 0 or error_count > 0,
             properties={"test_results": result_dicts},
         )
 

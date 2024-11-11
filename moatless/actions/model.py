@@ -18,7 +18,7 @@ _action_args: Dict[str, Type["ActionArguments"]] = {}
 
 
 class ActionArguments(OpenAISchema, ABC):
-    scratch_pad: str = Field("", description="Your reasoning for the action.")
+    scratch_pad: str = Field(description="Your reasoning for the action.")
 
     class Config:
         title = "Action"
@@ -116,7 +116,6 @@ class ActionArguments(OpenAISchema, ABC):
         **kwarg,
     ) -> Self:
         message = json_data
-        logger.info(f"parse_json() Original message: {repr(message)}")
 
         # Clean control characters from the message
         cleaned_message = ''.join(char for char in message if ord(char) >= 32 or char in '\n\r\t')
@@ -187,7 +186,7 @@ class Observation(BaseModel):
         False, description="Indicates if this action results in a terminal state"
     )
     expect_correction: bool = Field(
-        False, description="Indicates that a correction is expected after this action"
+        False, description="Indicates that a the action arguments was inccorect and we expect a correction"
     )
     properties: Optional[Dict[str, Any]] = Field(
         None, description="Additional properties"
