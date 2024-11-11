@@ -1,15 +1,9 @@
-import logging
-
-from pydantic import BaseModel
-
 from moatless.actions.code_change import RequestCodeChange
 from moatless.actions.run_tests import RunTests
 from moatless.node import Node
+from moatless.feedback.feedback import FeedbackGenerator
 
-logger = logging.getLogger(__name__)
-
-
-class FeedbackGenerator(BaseModel):
+class RewardFeedbackGenerator(FeedbackGenerator):
     def generate_feedback(self, node: Node) -> str | None:
         visited_children = [child for child in node.children if child.reward]
         if not visited_children:
@@ -64,4 +58,4 @@ class FeedbackGenerator(BaseModel):
         prompt += "\n\n<feedback>\n"
         prompt += node.reward.feedback
         prompt += "\n</feedback>"
-        return prompt
+        return prompt 

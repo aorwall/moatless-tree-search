@@ -67,7 +67,7 @@ def generate_summary(df: pd.DataFrame):
                         ],
                         range=[
                             "#4CAF50",
-                            "#009688",
+                            "#808080",
                             "#FFC107",
                             "#2196F3",
                             "#F44336",
@@ -197,7 +197,7 @@ def trajectory_table(report_path: str):
         "status",
         "all_transitions",
         "failed_actions",
-        "duration",
+        "total_cost",
         "prompt_tokens",
         "completion_tokens",
     ]
@@ -212,8 +212,8 @@ def trajectory_table(report_path: str):
             )  # Brown for rejected
         elif row["success_status"] == "Resolved":
             return ["background-color: rgba(76, 175, 80, 0.3)"] * len(row)
-        elif row["success_status"] == "Running with Resolved Solutions":
-            return ["background-color: rgba(0, 150, 136, 0.3)"] * len(row)
+        elif row["success_status"] == "Finished":
+            return ["background-color: rgba(128, 128, 128, 0.3)"] * len(row)
         elif row["success_status"] == "Partially Resolved":
             return ["background-color: rgba(255, 235, 59, 0.3)"] * len(row)
         elif row["success_status"] == "Running":

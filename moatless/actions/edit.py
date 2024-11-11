@@ -194,7 +194,6 @@ class ClaudeEditTool(Action):
             return Observation(
                 message=f"Could not get context for file: {path}",
                 properties={"fail_reason": "context_error"},
-                expect_correction=True,
             )
 
         file_content = context_file.content
@@ -261,7 +260,6 @@ class ClaudeEditTool(Action):
             return Observation(
                 message=f"File already exists at: {path}",
                 properties={"fail_reason": "file_exists"},
-                expect_correction=True,
             )
         
         context_file = file_context.add_file(str(path))
@@ -282,7 +280,6 @@ class ClaudeEditTool(Action):
             return Observation(
                 message=f"Could not get context for file: {path}",
                 properties={"fail_reason": "context_error"},
-                expect_correction=True,
             )
             
         file_content = context_file.content.expandtabs()
@@ -293,7 +290,6 @@ class ClaudeEditTool(Action):
             return Observation(
                 message="The replacement string is the same as the original string. No changes were made.",
                 properties={"fail_reason": "no_changes"},
-                expect_correction=True,
             )
 
         occurrences = file_content.count(old_str)
@@ -360,7 +356,6 @@ class ClaudeEditTool(Action):
             return Observation(
                 message=f"No changes made to the file {path}. Was the replacement string the same as the original string?",
                 properties=properties,
-                expect_correction=True,
             )
 
         context_file.apply_changes(new_file_content)
@@ -392,7 +387,6 @@ class ClaudeEditTool(Action):
             return Observation(
                 message=f"Could not get context for file: {path}",
                 properties={"fail_reason": "context_error"},
-                expect_correction=True,
             )
 
         # Validate file exists and is not a directory
@@ -400,7 +394,6 @@ class ClaudeEditTool(Action):
             return Observation(
                 message=f"File {path} not found.",
                 properties={"fail_reason": "file_not_found"},
-                expect_correction=True,
             )
         file_text = context_file.content.expandtabs()
         new_str = new_str.expandtabs()

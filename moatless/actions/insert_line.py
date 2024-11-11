@@ -70,7 +70,6 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
             return Observation(
                 message=f"File {path} not found.",
                 properties={"fail_reason": "file_not_found"},
-                expect_correction=True,
             )
 
         context_file = file_context.get_context_file(str(path))
@@ -78,7 +77,6 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
             return Observation(
                 message=f"Could not get context for file: {path}",
                 properties={"fail_reason": "context_error"},
-                expect_correction=True,
             )
 
         file_text = context_file.content.expandtabs()
