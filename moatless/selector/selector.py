@@ -91,7 +91,7 @@ class Selector(BaseModel):
         description="Penalty applied to nodes on a trajectory that has already finished with a high reward, discouraging revisiting completed paths.",
     )
     expect_correction_bonus: float = Field(
-        default=0.0,
+        default=100.0,
         description="Bonus applied to nodes expecting correction, prioritizing exploration of potential fix paths.",
     )
     check_for_bad_child_actions: List[str] = Field(
@@ -99,7 +99,7 @@ class Selector(BaseModel):
         description="List of action types to check for when calculating the high value bad children bonus.",
     )
     diversity_weight: float = Field(
-        default=0.0,
+        default=100.0,
         description="Weight factor for the diversity bonus. Higher values increase the bonus for nodes with low similarity to other explored nodes."
     )
 

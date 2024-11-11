@@ -2,6 +2,8 @@ import logging
 from typing import List, Type
 import json
 
+from pydantic import model_validator
+
 from moatless.actions import FindClass, FindFunction, FindCodeSnippet, SemanticSearch, RequestMoreContext
 from moatless.actions.action import Action
 from moatless.actions.apply_change_and_test import ApplyCodeChangeAndTest
@@ -64,16 +66,6 @@ class CodingAgent(ActionAgent):
                 if action.__class__ not in [ApplyCodeChangeAndTest, RequestCodeChange, StringReplace, CreateFile, InsertLine, RunTests]
             ]
 
-        # Remove RunTests if it was just executed in the parent node
-        if (
-            node.parent
-            and node.parent.action
-            and node.parent.action.__class__ == RunTests
-        ):
-            possible_actions = [
-                action for action in possible_actions if action.__class__ != RunTests
-            ]
-
         # Remove Finish and Reject if there's no file context or no code changes
         if not node.file_context.has_patch():
             possible_actions = [
@@ -82,6 +74,14 @@ class CodingAgent(ActionAgent):
                 if action.__class__ not in [Finish, Reject]
             ]
 
+
+        logger.info(
+            f"Possible actions for Node{node.node_id}: {[action.__class__.__name__ for action in possible_actions]}"
+        )
+
+        return possible_actions
+
+    def filter_duplicates(self, node: Node, possible_actions: List[Action]):
         # Remove actions that have been marked as duplicates
         if node.parent:
             siblings = [
@@ -95,10 +95,6 @@ class CodingAgent(ActionAgent):
                 for action in possible_actions
                 if action.name not in duplicate_actions
             ]
-
-        logger.info(
-            f"Possible actions for Node{node.node_id}: {[action.__class__.__name__ for action in possible_actions]}"
-        )
 
         return possible_actions
 

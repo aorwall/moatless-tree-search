@@ -77,7 +77,7 @@ class TestbedEnvironment(RuntimeEnvironment):
 
         try:
             with self.testbed_sdk.create_client(
-                instance_id=self.instance["instance_id"], dataset_name=self.dataset_name
+                instance_id=self.instance["instance_id"], dataset_name=self.dataset_name, log_dir=self.log_dir
             ) as testbed:
                 response = testbed.run_tests(test_files=test_files, patch=patch)
 

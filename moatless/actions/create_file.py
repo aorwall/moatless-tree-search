@@ -64,7 +64,6 @@ class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
             return Observation(
                 message=f"File already exists at: {path}. Cannot overwrite files using create command.",
                 properties={"fail_reason": "file_exists"},
-                expect_correction=True,
             )
 
         context_file = file_context.add_file(str(path))

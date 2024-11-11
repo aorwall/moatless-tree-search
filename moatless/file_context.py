@@ -766,6 +766,7 @@ class ContextFile(BaseModel):
 class FileContext(BaseModel):
     _repo: Repository | None = PrivateAttr(None)
     _files: Dict[str, ContextFile] = PrivateAttr(default_factory=dict)
+    _test_files: set[str] = PrivateAttr(default_factory=set)
     _max_tokens: int = PrivateAttr(default=8000)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

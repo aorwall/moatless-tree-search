@@ -48,14 +48,12 @@ class CodeModificationMixin:
             return None, Observation(
                 message=f"File {path} not found.",
                 properties={"fail_reason": "file_not_found"},
-                expect_correction=True,
             )
 
         if allow_missing and file_context.file_exists(str(path)):
             return None, Observation(
                 message=f"File already exists at: {path}. Cannot overwrite existing file.",
                 properties={"fail_reason": "file_exists"},
-                expect_correction=True,
             )
 
         if not allow_missing:
@@ -64,7 +62,6 @@ class CodeModificationMixin:
                 return None, Observation(
                     message=f"Could not get context for file: {path}",
                     properties={"fail_reason": "context_error"},
-                    expect_correction=True,
                 )
 
         return path, None

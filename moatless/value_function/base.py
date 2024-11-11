@@ -53,9 +53,7 @@ class ValueFunction(BaseModel):
     def _create_message(self, node: Node) -> Message:
         previous_nodes = node.get_trajectory()[:-1]
 
-        message = f"<task>\n"
-        message += node.get_root().message
-        message += "\n</task>\n\n"
+        message = node.get_root().message
 
         formatted_history: List[str] = []
         counter = 0
@@ -156,7 +154,7 @@ class ValueFunction(BaseModel):
                 action = Action.get_action_by_name(action_name)
                 try:
                     schema = action.args_schema.model_json_schema()
-                    prompt += f"\n * **{schema['title']}**: {schema['description']}"
+                    prompt += f"\n\n## **{schema['title']}\n\n{schema['description']}"
                 except Exception as e:
                     logger.error(
                         f"Error while building prompt for action {action}: {e}"

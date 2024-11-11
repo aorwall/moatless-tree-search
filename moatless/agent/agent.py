@@ -133,6 +133,9 @@ class ActionAgent(BaseModel):
             include_git_patch=self.include_git_patch,
         )
 
+        if node.message:
+            messages.append(UserMessage(content=node.message))
+
         action_args = [action.args_schema for action in possible_actions]
 
         try:
@@ -164,7 +167,7 @@ class ActionAgent(BaseModel):
                 f"Node{node.node_id}: Action {node.action.name} not found in action map. "
                 f"Available actions: {self._action_map.keys()}"
             )
-            raise Exception(f"Action {node.action} not found in action map.")
+            raise Exception(f"Action {type(node.action)} not found in action map.")
 
     def determine_possible_actions(self, node: Node) -> List[Action]:
         """Determine which actions that the agent can take based on the current node state."""
@@ -177,8 +180,6 @@ class ActionAgent(BaseModel):
     def generate_system_prompt(self, possible_actions: List[Action]) -> str:
         """Generate a system prompt for the agent."""
         return self.system_prompt
-
-
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         dump = super().model_dump(**kwargs)

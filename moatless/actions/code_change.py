@@ -181,14 +181,12 @@ class RequestCodeChange(Action):
             return Observation(
                 message=f"File {args.file_path} not found.",
                 properties={"fail_reason": "file_not_found"},
-                expect_correction=True,
             )
 
         if self._repository.is_directory(args.file_path):
             return Observation(
                 message=f"{args.file_path} is a directory. Please provide a file path.",
                 properties={"fail_reason": "is_directory"},
-                expect_correction=True,
             )
 
         if not file_context.has_file(args.file_path) and args.change_type != ChangeType.addition:
@@ -200,7 +198,6 @@ class RequestCodeChange(Action):
             return Observation(
                 message=message,
                 properties={"fail_reason": "file_not_in_context"},
-                expect_correction=True,
             )
 
         context_file = file_context.get_file(args.file_path)

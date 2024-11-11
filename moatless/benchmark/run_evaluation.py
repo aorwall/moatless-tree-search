@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 
 def evaluate_search_and_code(
-    resolved_by: Optional[int] = None,
     instance_ids: Optional[list] = None,
     repo_base_dir: str | None = None,
     use_testbed: bool = False,
@@ -26,6 +25,8 @@ def evaluate_search_and_code(
     evaluations_dir=None,
     date=None,
     tree_search_settings: TreeSearchSettings = None,
+    min_resolved: Optional[int] = None,
+    max_resolved: Optional[int] = None,
     **kwargs,
 ):
     temperature = tree_search_settings.model.temperature or kwargs.get("temp_bias", 0.2)
@@ -69,7 +70,6 @@ def evaluate_search_and_code(
     logger.info(f"Max iterations: {tree_search_settings.max_iterations}")
     logger.info(f"Number of Workers: {num_workers}")
     logger.info(f"Use Testbed: {use_testbed}")
-    logger.info(f"Resolved By: {resolved_by}")
     logger.info(f"Instance IDs: {instance_ids}")
 
     evaluation = Evaluation(
@@ -83,8 +83,9 @@ def evaluate_search_and_code(
     )
 
     evaluation.run_evaluation(
-        resolved_by=resolved_by,
         instance_ids=instance_ids,
+        min_resolved=min_resolved,
+        max_resolved=max_resolved,
     )
 
     return os.path.join(evaluations_dir, evaluation_name)
@@ -141,6 +142,18 @@ def main():
         help="Maximum number of expansions per node"
     )
     search_group.add_argument(
+        "--min_finished_nodes", 
+        type=int, 
+        default=3,
+        help="Minimum number of finished nodes before stopping"
+    )
+    search_group.add_argument(
+        "--max_finished_nodes", 
+        type=int, 
+        default=5,
+        help="Maximum number of finished nodes before stopping"
+    )
+    search_group.add_argument(
         "--max_iterations", 
         type=int, 
         default=50,
@@ -156,7 +169,7 @@ def main():
         "--reward_threshold", 
         type=int, 
         default=None,
-        help="Reward threshold for early stopping"
+        help="Minimum reward threshold to consider before finishing"
     )
     search_group.add_argument(
         "--sample_first", 
@@ -211,6 +224,18 @@ def main():
         type=int, 
         default=None,
         help="Filter instances by resolved solutions (e.g., 1, 2, 3, ...)"
+    )
+    instance_group.add_argument(
+        "--min_resolved",
+        type=int,
+        default=None,
+        help="Filter instances by minimum number of resolved solutions"
+    )
+    instance_group.add_argument(
+        "--max_resolved",
+        type=int,
+        default=None,
+        help="Filter instances by maximum number of resolved solutions"
     )
 
     # Other settings
@@ -316,12 +341,14 @@ def main():
     # logging.getLogger("mcts_tree").setLevel(logging.INFO)
 
     # Create ModelSettings instance
-    model_settings = ModelSettings(model=args.model, temperature=args.temp)
+    model_settings = ModelSettings(model=args.model, temperature=args.temp, max_tokens=3000)
 
     tree_search_settings = TreeSearchSettings(
         max_iterations=args.max_iterations,
-        min_finished_nodes=3,
-        max_finished_nodes=5,
+        max_expansions=args.max_expansions,
+        min_finished_nodes=args.min_finished_nodes,
+        max_finished_nodes=args.max_finished_nodes,
+        max_cost=args.max_cost,
         reward_threshold=args.reward_threshold,
         provide_feedback=args.feedback,
         debate=args.debate,
@@ -339,7 +366,8 @@ def main():
         use_testbed=args.use_testbed,
         num_workers=args.num_workers,
         best_first=not args.sample_first,
-        resolved_by=args.resolved_by,
+        min_resolved=args.min_resolved,
+        max_resolved=args.max_resolved,
     )
 
 if __name__ == "__main__":
