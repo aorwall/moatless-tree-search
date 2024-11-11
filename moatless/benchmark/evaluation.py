@@ -421,7 +421,7 @@ class Evaluation:
                         repository=repository,
                         code_index=code_index,
                         runtime=runtime,
-                        use_edit_actions=True
+                        use_edit_actions=False
                     )
 
                     if self.settings.best_first:
