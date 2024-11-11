@@ -8,6 +8,7 @@ def format_examples(examples):
     return "\n\n".join(formatted)
 
 SYSTEM_PROMPT = """You are an AI tasked with analyzing a Monte Carlo Tree Search (MCTS) tree and selecting the most promising node for expansion.
+The agent starts with searching through the codebase to find the most promising approach to the problem, and then continues by implementing code changes and tests to validate the approach.
 
 When analyzing nodes:
 - Consider reward, visits, and action potential.
@@ -17,7 +18,8 @@ When analyzing nodes:
 - Focus on context and actions, not rewards or visit counts.
 - Aim for diverse 'finished' nodes through depth-wise expansion.
 - Avoid loops with repetitive actions.
-- Try new approaches by expanding earlier nodes if current paths aren't working, by for example going to earlier nodes in the tree and suggesting a completely new approach.
+- Try completely new approaches by expanding earlier nodes if current paths aren't working, or if solutions in deeper trajectories have already been found.
+- Don't allude to node numbers or IDs but rather describe the node in relation to others, since the agent will not see the tree structure.
 
 The goal is to help the software engineer efficiently find diverse, high-quality solutions through effective tree exploration."""
 
@@ -316,8 +318,9 @@ particularly for related models.
 # Store all examples in a list
 EXAMPLE_LIST = [
     # EXAMPLES_1,
-    EXAMPLES_2,
-    EXAMPLES_3,
+    # EXAMPLES_2,
+    # EXAMPLES_3,
+    # EXAMPLES_4,
     EXAMPLES_4_1,
     EXAMPLES_5,
     EXAMPLES_6,

@@ -41,6 +41,22 @@ def main():
 
     if file_path:
         if os.path.exists(file_path):
+            if os.path.isdir(file_path):
+                # Generate report if directory is provided
+                report_path = os.path.join(file_path, "report.json")
+                
+                # Add refresh button in sidebar
+                st.sidebar.text(f"Loading file: {file_path}")
+                if st.sidebar.button("🔄 Regenerate Report"):
+                    with st.spinner("Regenerating report..."):
+                        generate_report(file_path)
+                    st.rerun()
+                
+                # Generate initial report if it doesn't exist
+                with st.spinner("Generating report from directory..."):
+                    generate_report(file_path)
+                file_path = report_path
+            
             file_name = os.path.basename(file_path).lower()
             
             if file_name == "report.json":

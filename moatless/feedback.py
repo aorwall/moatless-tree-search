@@ -11,9 +11,9 @@ logger = logging.getLogger(__name__)
 
 class FeedbackGenerator(BaseModel):
     def generate_feedback(self, node: Node) -> str | None:
-        # if node.reward:
-        #     if node.reward.feedback:
-        #         return self._create_message_feedback_llmselector(node)
+        if node.reward:
+            if node.reward.feedback:
+                return self._create_message_feedback_llmselector(node)
 
         # else:
         visited_children = [child for child in node.children if child.reward]

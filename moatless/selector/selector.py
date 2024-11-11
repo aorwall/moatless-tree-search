@@ -618,7 +618,7 @@ class LLMSelector(Selector):
             logger.error(f"Error building action definitions: {e}")
             return "\nAction definitions unavailable."
 
-    def build_ascii_tree(self, node: Node, previous_attempts: str = "", n_iterations: int = 0, require_feedback: bool = False) -> NodeSelection:
+    def build_ascii_tree(self, node: Node, previous_attempts: str = "", n_iterations: int = 0, require_feedback: bool = True) -> NodeSelection:
         # Generate ASCII tree representation
         ascii_tree = generate_ascii_tree(
             node, 

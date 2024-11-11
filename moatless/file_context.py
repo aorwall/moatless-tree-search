@@ -271,20 +271,10 @@ class ContextFile(BaseModel):
     def _apply_patched_file(self, content: str, patched_file) -> str:
         """
         Applies a single patched file's hunks to the content.
-
-        Args:
-            content (str): The original content.
-            patched_file: The patched file object from the PatchSet.
-
-        Returns:
-            str: The patched content.
-
-        Raises:
-            Exception: If there is a context mismatch during patch application.
         """
         content_lines = content.splitlines(keepends=True)
         new_content_lines = []
-        line_no = 0  # 0-based index
+        line_no = 0
 
         for hunk in patched_file:
             # Copy unchanged lines before the hunk
@@ -296,9 +286,21 @@ class ContextFile(BaseModel):
             for line in hunk:
                 if line.is_context:
                     if line_no >= len(content_lines):
-                        raise Exception(f"Patch context mismatch. Line no {line_no} is larger than content_lines length {len(content_lines)}")
-                    elif line.value.strip() and content_lines[line_no] != line.value:
-                        raise Exception(f"Patch context mismatch. Line {line_no} does not match expected content. \"{content_lines[line_no]}\" != \"{line.value}\"")
+                        raise Exception(
+                            f"Line number {line_no + 1} out of range (content has {len(content_lines)} lines)"
+                        )
+                    
+                    # Normalize line endings and whitespace for comparison
+                    expected = line.value.rstrip('\n\r').rstrip()
+                    actual = content_lines[line_no].rstrip('\n\r').rstrip()
+                    
+                    if expected != actual:
+                        raise Exception(
+                            f"Context mismatch at line {line_no + 1}:\n"
+                            f"Expected: '{expected}'\n"
+                            f"Found: '{actual}'\n"
+                            f"Diff: {set(expected) - set(actual)}"
+                        )
                     new_content_lines.append(content_lines[line_no])
                     line_no += 1
                 elif line.is_added:
@@ -306,30 +308,12 @@ class ContextFile(BaseModel):
                 elif line.is_removed:
                     line_no += 1
 
-                # Apply changes from the hunk
-                for line in hunk:
-                    if line.is_context:
-                        if line_no >= len(content_lines):
-                            logger.warning(f"Context line {line_no} not found in content of length {len(content_lines)}")
-                            raise Exception("Patch context mismatch: line number exceeds content length")
-                        if content_lines[line_no] != line.value:
-                            logger.warning(f"Context mismatch at line {line_no}")
-                            raise Exception("Patch context mismatch: line content differs")
-                        new_content_lines.append(content_lines[line_no])
-                        line_no += 1
-                    elif line.is_added:
-                        new_content_lines.append(line.value)
-                    elif line.is_removed:
-                        if line_no >= len(content_lines):
-                            logger.warning(f"Trying to remove line {line_no} but content length is {len(content_lines)}")
-                            raise Exception("Patch context mismatch: cannot remove line beyond content length")
-                        line_no += 1
+        # Copy remaining unchanged lines
+        while line_no < len(content_lines):
+            new_content_lines.append(content_lines[line_no])
+            line_no += 1
 
-            # Copy remaining lines after the last hunk
-            if line_no < len(content_lines):
-                new_content_lines.extend(content_lines[line_no:])
-
-            return "".join(new_content_lines)
+        return "".join(new_content_lines)
 
     def generate_full_patch(self) -> str:
         """
