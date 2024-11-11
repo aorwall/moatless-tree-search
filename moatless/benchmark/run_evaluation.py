@@ -83,7 +83,7 @@ def evaluate_search_and_code(
     )
 
     evaluation.run_evaluation(
-        resolved_by=resolved_by,
+        min_resolved=resolved_by,
         instance_ids=instance_ids,
     )
 
