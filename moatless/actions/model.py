@@ -18,7 +18,7 @@ _action_args: Dict[str, Type["ActionArguments"]] = {}
 
 
 class ActionArguments(OpenAISchema, ABC):
-    scratch_pad: str = Field("", description="Your reasoning for the action.")
+    scratch_pad: str = Field(description="Your reasoning for the action.")
 
     class Config:
         title = "Action"

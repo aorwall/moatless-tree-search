@@ -5,6 +5,7 @@ from moatless.actions.model import ActionArguments
 from moatless.actions.run_tests import RunTests
 from moatless.node import Node
 from moatless.feedback.feedback import FeedbackGenerator
+from typing import List, Any
 
 class RewardFeedbackGenerator(FeedbackGenerator):
     def generate_feedback(self, node: Node, actions: List[ActionArguments] | None = None) -> str | None:
