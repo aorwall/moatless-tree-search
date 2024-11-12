@@ -101,7 +101,8 @@ class RunTests(Action):
         
 
         logger.info(f"Running tests: {test_files}")
-        test_results = self._runtime.run_tests(file_context, test_files)
+        patch = file_context.generate_git_patch()
+        test_results = self._runtime.run_tests(patch, test_files)
         failing_tests = [
             issue
             for issue in test_results

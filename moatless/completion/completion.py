@@ -20,7 +20,7 @@ from instructor import OpenAISchema
 from instructor.exceptions import InstructorRetryException
 from litellm.types.utils import ModelResponse
 from openai import AzureOpenAI, OpenAI, LengthFinishReasonError
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, field_validator
 from litellm.exceptions import BadRequestError, NotFoundError, AuthenticationError, APIError
 from moatless.completion.model import Message, Completion
 from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
@@ -71,6 +71,14 @@ class CompletionModel(BaseModel):
                 self.response_format = LLMResponseFormat.JSON
 
         return self
+
+    @field_validator('response_format', mode='before')
+    @classmethod
+    def fix_unknown_response_format(cls, v):
+        if isinstance(v, str):
+            if v not in LLMResponseFormat.__members__:
+                return LLMResponseFormat.TOOLS
+        return v
 
     @property
     def supports_anthropic_prompt_caching(self):

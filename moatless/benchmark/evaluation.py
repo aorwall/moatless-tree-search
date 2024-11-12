@@ -278,6 +278,7 @@ class Evaluation:
         self,
         split: str = "lite",
         instance_ids: list[str] | None = None,
+        repos: list[str] | None = None,
         ignore_repos: list[str] | None = None,
         min_resolved: Optional[int] = None,
         max_resolved: Optional[int] = None,
@@ -327,6 +328,17 @@ class Evaluation:
 
             logger.info(
                 f"Running evaluation for {len(instances)} instances filtered by max_resolved <= {max_resolved}"
+            )
+
+        if repos:
+            instances = [
+                instance
+                for instance in instances
+                if instance["repo"] in repos
+            ]
+
+            logger.info(
+                f"Running evaluation for {len(instances)} instances filtered by repos"
             )
 
         if ignore_repos:
@@ -474,7 +486,7 @@ class Evaluation:
                         )
 
                         if self.settings.provide_feedback:
-                            feedback = RewardFeedbackGenerator(completion_model=self._create_completion_model())
+                            feedback = FeedbackAgent(completion_model=self._create_completion_model())
                         else:
                             feedback = None
                     else:

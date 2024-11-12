@@ -18,8 +18,10 @@ from moatless.codeblocks.codeblocks import (
     SpanType,
 )
 from moatless.codeblocks.module import Module
+from moatless.index import CodeIndex
 from moatless.repository import FileRepository
 from moatless.repository.repository import Repository
+from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.schema import FileWithSpans, RankedFileSpan
 
 logger = logging.getLogger(__name__)
@@ -765,18 +767,29 @@ class ContextFile(BaseModel):
 
 class FileContext(BaseModel):
     _repo: Repository | None = PrivateAttr(None)
+    _code_index: CodeIndex = PrivateAttr()
+    _runtime: RuntimeEnvironment = PrivateAttr()
+
     _files: Dict[str, ContextFile] = PrivateAttr(default_factory=dict)
     _test_files: set[str] = PrivateAttr(default_factory=set)
     _max_tokens: int = PrivateAttr(default=8000)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def __init__(self, repo: Repository | None, **data):
+    def __init__(self,
+                 repo: Repository | None,
+                 runtime: RuntimeEnvironment | None = None,
+                 code_index: CodeIndex | None = None,
+                 **data):
         super().__init__(**data)
 
         self._repo = repo
+        self._runtime = runtime
+        self._code_index = code_index
+
         if "_files" not in self.__dict__:
             self.__dict__["_files"] = {}
+
         if "_max_tokens" not in self.__dict__:
             self.__dict__["_max_tokens"] = data.get("max_tokens", 8000)
 
@@ -968,219 +981,6 @@ class FileContext(BaseModel):
             self._files[file_path].spans.extend(context_file.spans)
             self._files[file_path].show_all_spans = context_file.show_all_spans
 
-    def add_ranked_spans(
-        self,
-        ranked_spans: List[Union[RankedFileSpan, Dict]],
-        decay_rate: float = 1.05,
-        min_tokens: int = 50,
-    ):
-        if not ranked_spans:
-            logger.info("No ranked spans provided")
-            return
-
-        # Convert dictionaries to RankedFileSpan objects if necessary
-        processed_spans = []
-        for span in ranked_spans:
-            if isinstance(span, dict):
-                processed_spans.append(RankedFileSpan(**span))
-            else:
-                processed_spans.append(span)
-
-        sum_tokens = sum(span.tokens for span in processed_spans)
-        if sum_tokens < self._max_tokens:
-            logger.info(
-                f"Adding all {len(processed_spans)} spans with {sum_tokens} tokens"
-            )
-            for span in processed_spans:
-                self.add_span_to_context(span.file_path, span.span_id)
-            return
-
-        processed_spans.sort(key=lambda x: x.rank)
-
-        base_tokens_needed = sum(
-            min(span.tokens, min_tokens) for span in processed_spans
-        )
-
-        # Filter out the lowest ranking spans if necessary
-        while base_tokens_needed > self._max_tokens and processed_spans:
-            removed_span = processed_spans.pop()
-            base_tokens_needed -= min(removed_span.tokens, min_tokens)
-
-        if not processed_spans:
-            raise ValueError(
-                "Not enough tokens to meet the minimum token requirement for any span"
-            )
-
-        remaining_tokens = self._max_tokens - base_tokens_needed
-
-        # Calculate total weights using exponential decay
-        total_weight = sum([decay_rate ** (-span.rank) for span in processed_spans])
-
-        # Assign tokens based on the weight and the span's token count
-        tokens_distribution = []
-        for span in processed_spans:
-            weight = decay_rate ** (-span.rank)
-            allocated_tokens = min(
-                span.tokens,
-                min_tokens + int(remaining_tokens * (weight / total_weight)),
-            )
-            tokens_distribution.append((span, allocated_tokens))
-
-        # Adjust tokens for spans with the same rank
-        rank_groups = {}
-        for span, tokens in tokens_distribution:
-            if span.rank not in rank_groups:
-                rank_groups[span.rank] = []
-            rank_groups[span.rank].append((span, tokens))
-
-        final_tokens_distribution = []
-        for _rank, group in rank_groups.items():
-            for span, tokens in group:
-                adjusted_tokens = min(span.tokens, tokens)
-                final_tokens_distribution.append((span, adjusted_tokens))
-
-        # Distribute tokens and add spans to the context
-        sum_tokens = 0
-        for span, tokens in final_tokens_distribution:
-            self.add_span_to_context(span.file_path, span.span_id, tokens)
-            sum_tokens += tokens
-
-        logger.info(
-            f"Added {len(final_tokens_distribution)} spans with {sum_tokens} tokens"
-        )
-
-    def expand_classes(self, max_tokens_per_class: int):
-        total_added_tokens = 0
-        expanded_classes = set()
-
-        # Sort files by the number of spans, prioritizing files with more spans
-        sorted_files = sorted(
-            self._files.values(), key=lambda f: len(f.spans), reverse=True
-        )
-
-        all_classes = []
-        for file in sorted_files:
-            if not file.file.supports_codeblocks:
-                continue
-
-            class_blocks = []
-            for span in file.spans:
-                block_span = file.module.find_span_by_id(span.span_id)
-                if not block_span:
-                    continue
-
-                if block_span.initiating_block.type != CodeBlockType.CLASS:
-                    class_block = block_span.initiating_block.find_type_in_parents(
-                        CodeBlockType.CLASS
-                    )
-                elif block_span.initiating_block.type == CodeBlockType.CLASS:
-                    class_block = block_span.initiating_block
-                else:
-                    continue
-
-                if class_block and not any(
-                    c.full_path() == class_block.full_path() for c in class_blocks
-                ):
-                    class_blocks.append(class_block)
-
-            all_classes.extend((file, class_block) for class_block in class_blocks)
-
-        # Sort all classes by the number of spans they contain that are already in context
-        all_classes.sort(
-            key=lambda x: len(set(x[1].get_all_span_ids()) & x[0].span_ids),
-            reverse=True,
-        )
-
-        for file, class_block in all_classes:
-            logger.debug(f"Checking class {class_block.full_path()} ")
-
-            # Skip if the class is already expanded
-            if class_block.belongs_to_span.span_id in expanded_classes:
-                logger.debug(f"Skipping class {class_block.full_path()}")
-                continue
-
-            # Expand the class
-            class_tokens = class_block.belongs_to_span.tokens
-            file.add_span(class_block.belongs_to_span.span_id)
-            for span in class_block.get_all_spans():
-                if class_tokens + span.tokens > max_tokens_per_class:
-                    break
-
-                # Check if adding this class would exceed the total token limit
-                if total_added_tokens + class_tokens > self._max_tokens:
-                    logger.debug(
-                        f"Exceeded total token limit, stopping. Total added tokens: {total_added_tokens}, class tokens: {class_tokens}, max tokens: {self._max_tokens}"
-                    )
-                    break
-
-                file.add_span(span.span_id)
-                class_tokens += span.tokens
-
-            total_added_tokens += class_tokens
-            expanded_classes.add(class_block.belongs_to_span.span_id)
-
-            logger.debug(
-                f"Expanded class {class_block.full_path()} with {class_tokens} tokens, total added tokens: {total_added_tokens}"
-            )
-
-        logger.info(
-            f"Expanded {len(expanded_classes)} classes, total added tokens: {total_added_tokens}"
-        )
-
-    def expand_context_with_related_spans(
-        self, max_tokens: int, set_tokens: bool = False
-    ):
-        # Add related spans if context allows it
-        if self.context_size() > max_tokens:
-            return
-
-        spans = []
-        for file in self._files.values():
-            if not file.file.supports_codeblocks:
-                continue
-            if not file.span_ids:
-                continue
-
-            for span in file.spans:
-                spans.append((file, span))
-
-        spans.sort(key=lambda x: x[1].tokens or 0, reverse=True)
-
-        relations = []
-
-        for file, span in spans:
-            span_id = span.span_id
-            related_span_ids = file.module.find_related_span_ids(span_id)
-
-            for related_span_id in related_span_ids:
-                if related_span_id in file.span_ids:
-                    continue
-
-                related_span = file.module.find_span_by_id(related_span_id)
-
-                tokens = max(related_span.tokens, span.tokens or 0)
-                if tokens + self.context_size() > max_tokens:
-                    return spans
-
-                if set_tokens:
-                    file.add_span(related_span_id, tokens=tokens)
-                else:
-                    file.add_span(related_span_id)
-
-                relation = (file.file_path, span.span_id, related_span_id)
-                if relation not in relations:
-                    relations.append(relation)
-
-        relation_str = "\n".join(
-            [
-                f"{file_path}: {span_id} -> {related_span_id}"
-                for file_path, span_id, related_span_id in relations
-            ]
-        )
-        logger.info(f"Expanded context with related spans:\n{relation_str}")
-
-        return spans
-
     def has_file(self, file_path: str):
         return file_path in self._files and self._files[file_path].spans
 
@@ -1310,3 +1110,4 @@ class FileContext(BaseModel):
                     updated_files.add(file_path)
                 
         return updated_files
+

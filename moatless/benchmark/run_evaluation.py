@@ -27,6 +27,7 @@ def evaluate_search_and_code(
     tree_search_settings: TreeSearchSettings = None,
     min_resolved: Optional[int] = None,
     max_resolved: Optional[int] = None,
+    repos: Optional[list[str]] = None,
     **kwargs,
 ):
     temperature = tree_search_settings.model.temperature or kwargs.get("temp_bias", 0.2)
@@ -84,6 +85,7 @@ def evaluate_search_and_code(
 
     evaluation.run_evaluation(
         instance_ids=instance_ids,
+        repos=repos,
         min_resolved=min_resolved,
         max_resolved=max_resolved,
     )
@@ -218,6 +220,13 @@ def main():
         nargs="+", 
         default=None,
         help="Specific instance IDs to evaluate"
+    )
+    instance_group.add_argument(
+        "--repos",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Filter instances by repository names"
     )
     instance_group.add_argument(
         "--resolved_by", 
@@ -362,6 +371,7 @@ def main():
         repo_base_dir=args.repo_base_dir,
         tree_search_settings=tree_search_settings,
         instance_ids=args.instance_ids,
+        repos=args.repos,
         date=args.date,
         use_testbed=args.use_testbed,
         num_workers=args.num_workers,

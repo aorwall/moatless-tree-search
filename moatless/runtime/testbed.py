@@ -7,7 +7,7 @@ from typing import List
 
 from moatless.runtime.runtime import RuntimeEnvironment
 
-from moatless.file_context import RankedFileSpan, FileContext
+from moatless.schema import RankedFileSpan
 from moatless.repository import GitRepository
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import TestResult, TestStatus
@@ -15,6 +15,7 @@ from testbeds.schema import EvaluationResult, TraceItem
 from testbeds.sdk import TestbedSDK
 from testbeds.sdk.exceptions import TestbedError
 from moatless.exceptions import RuntimeError
+
 logger = logging.getLogger(__name__)
 
 
@@ -56,10 +57,8 @@ class TestbedEnvironment(RuntimeEnvironment):
         return hashlib.sha256(combined.encode()).hexdigest()
 
     def run_tests(
-        self, file_context: FileContext, test_files: List[str] | None = None
+        self, patch: str, test_files: List[str] | None = None
     ) -> List[TestResult]:
-        patch = file_context.generate_git_patch()
-
         if patch and not patch.endswith("\n"):
             patch += "\n"
 

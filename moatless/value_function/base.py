@@ -1,7 +1,7 @@
 import logging
 from typing import List, Optional, Tuple
 
-from pydantic import BaseModel, PrivateAttr
+from pydantic import BaseModel, PrivateAttr, Field
 
 from moatless.actions.action import Action, RewardScaleEntry
 from moatless.completion.completion import CompletionModel
@@ -15,11 +15,17 @@ logger = logging.getLogger(__name__)
 class ValueFunction(BaseModel):
     _completion: CompletionModel = PrivateAttr()
 
+    correction_award: Optional[int] = Field(None, description="The reward value to automatically assign when the agent expects a correction.")
+
     def __init__(self, completion: CompletionModel):
         super().__init__()
         self._completion = completion
 
     def get_reward(self, node: Node) -> Tuple[Reward, Optional[Completion]]:
+        if node.observation.expect_correction and self.correction_award:
+            return Reward(value=self.correction_award, explanation="Expects a correction"), None
+
+
         messages = node.generate_message_history(
             message_history_type=MessageHistoryType.MESSAGES,
             include_extra_history=True,

@@ -107,6 +107,7 @@ class TrajectoryStats(BaseModel):
     test_edits: int = 0
     failed_actions: int = 0
     expect_corrections: int = 0
+    max_repeated_actions: int = 0
 
     missing_test_files: int = 0
     
@@ -162,6 +163,7 @@ class BenchmarkResult(BaseModel):
     test_edits: int = 0
     failed_actions: int = 0
     expect_corrections: int = 0
+    max_repeated_actions: int = 0
 
     context_stats: FileContextStats | None = None
     actions: dict[str, int] = {}
@@ -175,6 +177,7 @@ class BenchmarkResult(BaseModel):
     alternative_solutions: int = 0
     reward: Optional[float] = None
     error: str = ""
+
 
 
 def create_sha256_hash(input_string):
@@ -207,11 +210,20 @@ def create_trajectory_stats(
     )
     nodes = trajectory_state.get_trajectory()
 
+    last_action = None
+    current_repeated = 1
     test_files = []
     for node in nodes:
         if node.action:
             if node.action.name not in result.actions:
                 result.actions[node.action.name] = 0
+
+            if not last_action or last_action != node.action.name:
+                last_action = node.action.name
+                current_repeated = 1
+            else:
+                current_repeated += 1
+                result.max_repeated_actions = max(result.max_repeated_actions, current_repeated)
 
             result.actions[node.action.name] += 1
 
@@ -396,6 +408,8 @@ def to_result(
                 eval_report.get("node_results", {}).get(str(leaf_node.node_id)),
             )
             result.trajectories.append(traj)
+
+            result.max_repeated_actions = max(result.max_repeated_actions, traj.max_repeated_actions)
 
             if traj.status == "finished":
                 result.solutions += 1
@@ -621,6 +635,7 @@ def to_dataframe(
             "resolved_max_reward",
             "failed_max_reward",
             "failed_actions",
+            "max_repeated_actions",
             "duplicated_search_actions",
             "trajectory_path",
         ]
@@ -713,7 +728,7 @@ def read_results_from_json(file_path: str) -> List[BenchmarkResult]:
     return results
 
 
-def generate_report(dir: str):
+def generate_report(dir: str, split: str = "lite"):
     result_path = os.path.join(dir, "result.json")
 
     external_result = None
@@ -725,13 +740,12 @@ def generate_report(dir: str):
     logger.info(f"Search trees: {len(search_trees)}")
     if not search_trees:
         raise ValueError("No trajectories found")
-    instances = get_moatless_instances()
 
     results = []
     for search_tree in search_trees:
         instance_id = search_tree.metadata["instance_id"]
 
-        instance = instances.get(instance_id)
+        instance = get_moatless_instance(instance_id)
         if not instance:
             logger.error(f"Instance {instance_id} not found")
             continue

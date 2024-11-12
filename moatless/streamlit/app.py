@@ -56,7 +56,7 @@ def main():
                     report_dir = os.path.dirname(file_path)
                     if st.button("Regenerate Report"):
                         with st.spinner("Regenerating report..."):
-                            generate_report(report_dir)
+                            generate_report(report_dir, split="verified")
                             st.rerun()
                     
                     
