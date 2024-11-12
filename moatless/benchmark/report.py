@@ -273,6 +273,7 @@ def create_trajectory_stats(
         result.missing_test_files = len(missing_test_files)
 
     if evaluation_result:
+        print(f"Evaluation result: {evaluation_result.get('resolved')}")
         result.resolved = (
             evaluation_result.get("resolved")
             if evaluation_result.get("resolved") is not None
@@ -336,13 +337,6 @@ def to_result(
     if not eval_report:
         eval_report = {}
 
-    if external_result:
-        resolved = info.get("instance_id", "") in external_result["resolved_ids"]
-    elif eval_report and eval_report.get("resolved") is not None:
-        resolved = eval_report.get("resolved")
-    else:
-        resolved = None
-
     if previous_result:
         previous_resolved = (
             info.get("instance_id", "") in previous_result["resolved_ids"]
@@ -360,21 +354,16 @@ def to_result(
                 instance,
                 eval_report.get("node_results", {}).get(str(best_node.node_id))
             )
-
-        if resolved is not None and resolved:
-            status = "resolved"
-        elif resolved is not None and not resolved:
-            status = "failed"
+            status = best_stats.search_status
         else:
-            finished_nodes = search_tree.get_finished_nodes()
-            if finished_nodes:
-                status = "finished"
-            elif search_tree.get_leaf_nodes() and search_tree.get_leaf_nodes()[0].action and search_tree.get_leaf_nodes()[0].action.name == "Reject":
-                status = "rejected"
-            elif search_tree.is_finished():
-                status = "abandoned"
-            else:
-                status = "running"
+            status = "unknown"
+            
+        if external_result:
+            resolved = info.get("instance_id", "") in external_result["resolved_ids"]
+        elif best_stats:
+            resolved = best_stats.resolved
+        else:
+            resolved = None
 
         total_usage = search_tree.total_usage()
 
@@ -382,6 +371,7 @@ def to_result(
             instance_id=instance["instance_id"],
             trajectories = [],
             status=status,
+            resolved=resolved,
             previous_resolved=previous_resolved,
             duration=info.get("duration", 0),
             total_cost=total_usage.completion_cost,

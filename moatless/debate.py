@@ -9,7 +9,7 @@ from litellm import token_counter
 
 from moatless.utils.misc import save_to_json
 from moatless.completion.completion import CompletionModel, LLMResponseFormat
-from moatless.completion.model import Completion, Message, UserMessage
+from moatless.completion.model import Completion, Message, UserMessage, StructuredOutput
 
 from pydantic import Field, BaseModel, PrivateAttr
 
@@ -29,7 +29,7 @@ VALUE_OUTPUT_FORMAT = """OUTPUT FORMAT:
 <Reward>: integer reward (range: -100 to 100)."""
 
 
-class ValueFunctionDebateConclusion(OpenAISchema):
+class ValueFunctionDebateConclusion(StructuredOutput):
     explanation: str = Field(
         description="2-3 sentences explaining the the reasoning in your decision, alluding to the *common mistakes* where appropriate."
     )
@@ -60,7 +60,7 @@ class MultiAgentDebate(BaseModel):
         self,
         messages: List[Message],
         system_prompt: str,
-        output_format: type[OpenAISchema],
+        output_format: type[StructuredOutput],
     ):
         if not messages:
             raise ValueError("Messages list cannot be empty.")

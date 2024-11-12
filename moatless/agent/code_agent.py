@@ -74,11 +74,22 @@ class CodingAgent(ActionAgent):
                 if action.__class__ not in [Finish, Reject]
             ]
 
+        # Remove Finish if a sibling has already finished
+        # possible_actions = self.filter_finished(node, possible_actions)
 
         logger.info(
             f"Possible actions for Node{node.node_id}: {[action.__class__.__name__ for action in possible_actions]}"
         )
 
+        return possible_actions
+
+    def filter_finished(self, node: Node, possible_actions: List[Action]):
+        siblings = node.get_sibling_nodes()
+        has_finished = any(child.action.name == "Finish" for child in siblings)
+        if has_finished:
+            possible_actions = [
+                action for action in possible_actions if action.name != "Finish"
+            ]
         return possible_actions
 
     def filter_duplicates(self, node: Node, possible_actions: List[Action]):

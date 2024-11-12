@@ -18,11 +18,9 @@ logger = logging.getLogger(__name__)
 
 IDENTIFY_SYSTEM_PROMPT = """You are an autonomous AI assistant tasked with identifying relevant code in a codebase. Your goal is to select key code spans from the search results provided by another AI agent to address a specified issue.
 
-# Input Structure:
-
-<thoughts>: Contains the analysis and reflections from the initial AI agent on the task requirements.
-<search_parameters>: Contains the search parameters used to retrieve code segments.
-<search_results>: Contains the new search results, including various code spans.
+<thoughts> Contains the analysis and reflections from the initial AI agent on the task requirements.
+<search_parameters> Contains the search parameters used to retrieve code segments.
+<search_results> Contains the new search results, including various code spans.
 
 # Your Task:
 
@@ -36,7 +34,7 @@ IDENTIFY_SYSTEM_PROMPT = """You are an autonomous AI assistant tasked with ident
   * Consider entire sections of code to ensure a complete understanding of the context and logic.
   * Note any references to other parts of the codebase that might be necessary to fulfill the previous agent's intentions.
 
- 3. Respond Using the Identify Function:
+ 3. Respond with the Identify Action:
   * Select and respond with the code spans that best align with the previous AI agent's search intentions and expectations.
   * Ensure that your response provides adequate context and completeness, reflecting the previous agent's thought process.
 """
@@ -61,6 +59,11 @@ class IdentifiedSpans(BaseModel):
 
 class Identify(ActionArguments):
     """Identify if the provided search result is relevant to the reported issue."""
+
+    scratch_pad: str = Field(
+        ...,
+        description="Your thoughts and analysis on the search results and how they relate to the reported issue.",
+    )
 
     identified_spans: Optional[list[IdentifiedSpans]] = Field(
         default=None,
@@ -135,7 +138,6 @@ class SearchBaseAction(Action):
 
         properties["search_tokens"] = search_tokens
 
-
         if search_tokens > self.max_search_tokens or span_count > self.max_hits:
             logger.info(
                 f"{self.name}: Search too large. {search_tokens=} {span_count=}, will ask for clarification."
@@ -156,21 +158,25 @@ class SearchBaseAction(Action):
                 response_model=Identify,
             )
 
+            message = "\nSearch results found:"
+            for hit in search_result.hits:
+                message += f"\n- File: {hit.file_path}, code spans: {', '.join(span.span_id for span in hit.spans)}"
+
             if identified_code.identified_spans:
-
+                message += "\n\nIdentified relevant code spans:"
                 for identified_spans in identified_code.identified_spans:
-                    new_span_ids = set()
-
                     search_result_context.add_spans_to_context(identified_spans.file_path, set(identified_spans.span_ids))
 
                     for span_id in identified_spans.span_ids:
                         if not file_context.has_span(identified_spans.file_path, span_id):
                             found_files.add(identified_spans.file_path)
                             file_context.add_span_to_context(identified_spans.file_path, span_id)
-                            new_span_ids.add(span_id)
 
-                    if new_span_ids:
-                        new_spans_str += f"\n- File: {identified_spans.file_path}\n  Span IDs: \n  - {', '.join(new_span_ids)}"
+                    message += f"\n- File: {identified_spans.file_path}, Span IDs: \n  - {', '.join(identified_spans.span_ids)}"
+            else:
+                message += "\n\nNo relevant code spans were identified."
+
+            message += f"\n\nReasoning:\n{identified_code.scratch_pad}"
 
         else:
             for hit in search_result.hits:
@@ -186,21 +192,10 @@ class SearchBaseAction(Action):
                 if new_span_ids:
                     new_spans_str += f"\n- File: {hit.file_path}\n  Span IDs: \n  - {', '.join(new_span_ids)}"
 
-        if new_spans_str:
-            message = f"\n\nAdded the following new code spans to context:\n{new_spans_str}"
-        else:
-            message = "\n\nNo new relevant code spans were identified."
-
-        #if not search_result_context.is_empty():
-        #    search_result_str = search_result_context.create_prompt(
-        #        show_span_ids=False,
-        #        show_line_numbers=False,
-        #        exclude_comments=False,
-        #        show_outcommented_code=True,
-        #        outcomment_code_comment="... rest of the code",
-        #    )
-
-        #    message += f"\n\n<search_results>\n{search_result_str}\n</search_result>\n"
+            if new_spans_str:
+                message = f"\n\nAdded the following new code spans to context:{new_spans_str}"
+            else:
+                message = "\n\nNo new relevant code spans were identified."
 
         return Observation(message=message, properties=properties, completion=completion)
 

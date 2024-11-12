@@ -15,18 +15,19 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class UCTScore:
-    final_score: float
-    exploitation: float
-    exploration: float
-    depth_bonus: float
-    depth_penalty: float
-    high_value_leaf_bonus: float
-    high_value_bad_children_bonus: float
-    high_value_child_penalty: float
-    high_value_parent_bonus: float
-    finished_trajectory_penalty: float
-    expect_correction_bonus: float
-    diversity_bonus: float
+    final_score: float = 0.0
+    exploitation: float = 0.0
+    exploration: float = 0.0
+    depth_bonus: float = 0.0
+    depth_penalty: float = 0.0
+    high_value_leaf_bonus: float = 0.0
+    high_value_bad_children_bonus: float = 0.0
+    high_value_child_penalty: float = 0.0
+    high_value_parent_bonus: float = 0.0
+    finished_trajectory_penalty: float = 0.0
+    expect_correction_bonus: float = 0.0
+    diversity_bonus: float = 0.0
+    duplicate_child_penalty: float = 0.0
 
     def __str__(self):
         components = [
@@ -42,6 +43,7 @@ class UCTScore:
             f"Finished Trajectory Penalty: {self.finished_trajectory_penalty:.2f}",
             f"Expect Correction Bonus: {self.expect_correction_bonus:.2f}",
             f"Diversity Bonus: {self.diversity_bonus:.2f}",
+            f"Duplicate Child Penalty: {self.duplicate_child_penalty:.2f}",
         ]
         return ", ".join(components)
 
@@ -99,8 +101,12 @@ class Selector(BaseModel):
         description="List of action types to check for when calculating the high value bad children bonus.",
     )
     diversity_weight: float = Field(
-        default=200.0,
+        default=100.0,
         description="Weight factor for the diversity bonus. Higher values increase the bonus for nodes with low similarity to other explored nodes."
+    )
+    duplicate_child_penalty_constant: float = Field(
+        default=25.0,
+        description="Constant used in penalizing nodes that have duplicate children. Penalty increases with each duplicate."
     )
 
     _similarity_cache: Dict[Tuple[int, int], float] = PrivateAttr(default_factory=dict)
@@ -116,7 +122,7 @@ class Selector(BaseModel):
         balancing exploration and exploitation while considering node-specific factors.
         """
         if node.visits == 0:
-            return UCTScore(float("inf"), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+            return UCTScore(final_score=float("inf"))
 
         exploitation = self.calculate_exploitation(node)
         exploration = self.calculate_exploration(node)
@@ -131,6 +137,7 @@ class Selector(BaseModel):
         finished_trajectory_penalty = self.calculate_finished_trajectory_penalty(node)
         expect_correction_bonus = self.calculate_expect_correction_bonus(node)
         diversity_bonus = self.calculate_diversity_bonus(node)
+        duplicate_child_penalty = self.calculate_duplicate_child_penalty(node)
 
         final_score = (
             exploitation
@@ -144,6 +151,7 @@ class Selector(BaseModel):
             - finished_trajectory_penalty
             + expect_correction_bonus
             + diversity_bonus
+            - duplicate_child_penalty
         )
 
         return UCTScore(
@@ -159,6 +167,7 @@ class Selector(BaseModel):
             finished_trajectory_penalty=finished_trajectory_penalty,
             expect_correction_bonus=expect_correction_bonus,
             diversity_bonus=diversity_bonus,
+            duplicate_child_penalty=duplicate_child_penalty,
         )
 
     def calculate_exploitation(self, node: Node) -> float:
@@ -364,6 +373,20 @@ class Selector(BaseModel):
         diversity_bonus = self.diversity_weight * (1 - average_similarity)
 
         return diversity_bonus
+
+    def calculate_duplicate_child_penalty(self, node: Node) -> float:
+        """
+        Calculate penalty for nodes that have duplicate children.
+        The penalty increases with each duplicate child.
+
+        Purpose: Discourages exploration of nodes that tend to generate duplicate states,
+        as these are likely to be less productive paths in the search space.
+        """
+        duplicate_count = sum(1 for child in node.children if child.is_duplicate)
+        if duplicate_count > 0:
+            # Penalty increases quadratically with number of duplicates
+            return self.duplicate_child_penalty_constant * (duplicate_count ** 2)
+        return 0
 
     def get_similarity(self, node_a: Node, node_b: Node) -> float:
         """

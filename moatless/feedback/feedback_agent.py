@@ -9,12 +9,12 @@ from moatless.actions.model import ActionArguments
 from moatless.node import Node, MessageHistoryType
 from moatless.feedback.feedback import FeedbackGenerator
 from moatless.completion.completion import CompletionModel
-from moatless.completion.model import Message, UserMessage, Completion
+from moatless.completion.model import Message, UserMessage, Completion, StructuredOutput
 
 logger = logging.getLogger(__name__)
 
 
-class FeedbackResponse(OpenAISchema):
+class FeedbackResponse(StructuredOutput):
     key_insights: List[str] = Field(..., description="Key insights to consider")
     feedback: str = Field(..., description="Direct feedback to the AI assistant")
     

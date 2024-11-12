@@ -7,7 +7,7 @@ from pydantic import Field, BaseModel, PrivateAttr
 
 from moatless.completion.completion import CompletionModel
 from moatless.node import Node
-from moatless.completion.model import Completion, Message, UserMessage
+from moatless.completion.model import Completion, Message, UserMessage, StructuredOutput
 from moatless.debate import MultiAgentDebate
 
 logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ class BestRewardDiscriminator(Discriminator):
             return None
 
 
-class AgentDiscriminatorChoice(OpenAISchema):
+class AgentDiscriminatorChoice(StructuredOutput):
     ID: int
     EXPLANATION: str
 

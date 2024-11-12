@@ -1111,3 +1111,23 @@ class FileContext(BaseModel):
                 
         return updated_files
 
+    def get_updated_context(self, old_context: "FileContext") -> "FileContext":
+        diff_context = FileContext(repo=self._repo)
+
+        for file_path, current_file in self._files.items():
+            old_file = old_context._files.get(file_path)
+
+            if old_file is None:
+                logger.info(f"File {file_path} is new")
+                diff_context.add_spans_to_context(file_path, current_file.span_ids)
+            else:
+
+                current_spans = current_file.span_ids
+                old_spans = old_file.span_ids
+                new_spans = current_spans - old_spans
+                if new_spans:
+                    logger.info(f"File {file_path} has new spans: {new_spans}")
+                    diff_context.add_spans_to_context(file_path, new_spans)
+
+        return diff_context
+

@@ -140,41 +140,42 @@ def build_graph(
 
 
 def show_completion(completion):
-    st.json(
-        {
-            "model": completion.model,
-            "usage": completion.usage.model_dump() if completion.usage else None,
-        }
-    )
-    if completion.input:
-        st.subheader("Input prompts")
-        for input_idx, input_msg in enumerate(completion.input):
-            if "content" in input_msg:
-                if isinstance(input_msg["content"], str):
-                    content = input_msg["content"]
-                elif isinstance(input_msg["content"], list) and input_msg['role'] == 'user':
-                    content_list = [c.get("content") for c in input_msg["content"]]
+    if completion:
+        st.json(
+            {
+                "model": completion.model,
+                "usage": completion.usage.model_dump() if completion.usage else None,
+            }
+        )
+        if completion.input:
+            st.subheader("Input prompts")
+            for input_idx, input_msg in enumerate(completion.input):
+                if "content" in input_msg:
+                    if isinstance(input_msg["content"], str):
+                        content = input_msg["content"]
+                    elif isinstance(input_msg["content"], list) and input_msg['role'] == 'user':
+                        content_list = [c.get("content") for c in input_msg["content"]]
 
-                    content = "\n\n".join(content_list)
+                        content = "\n\n".join(content_list)
+                    else:
+                        content = json.dumps(input_msg["content"], indent=2)
+
+                    tokens = count_tokens(content)
+                    with st.expander(
+                        f"Message {input_idx + 1} by {input_msg['role']} ({tokens} tokens)",
+                        expanded=(input_idx == len(completion.input) - 1),
+                    ):
+                        st.code(content, language="")
                 else:
-                    content = json.dumps(input_msg["content"], indent=2)
+                    with st.expander(
+                        f"Message {input_idx + 1} by {input_msg['role']}",
+                        expanded=(input_idx == len(completion.input) - 1),
+                    ):
+                        st.json(input_msg)
 
-                tokens = count_tokens(content)
-                with st.expander(
-                    f"Message {input_idx + 1} by {input_msg['role']} ({tokens} tokens)",
-                    expanded=(input_idx == len(completion.input) - 1),
-                ):
-                    st.code(content, language="")
-            else:
-                with st.expander(
-                    f"Message {input_idx + 1} by {input_msg['role']}",
-                    expanded=(input_idx == len(completion.input) - 1),
-                ):
-                    st.json(input_msg)
-
-    if completion.response:
-        st.subheader("Completion response")
-        st.json(completion.response)
+        if completion.response:
+            st.subheader("Completion response")
+            st.json(completion.response)
 
 
 def rerun_node(node_id: int, trajectory_path: str, instance: dict):
@@ -229,7 +230,6 @@ def rerun_node(node_id: int, trajectory_path: str, instance: dict):
 
 
 def update_visualization(container, search_tree: SearchTree, selected_tree_path: str):
-    # eval_result file
     eval_result = None
     logger.info(f"Selected tree path: {selected_tree_path}")
     directory_path = os.path.dirname(selected_tree_path)
@@ -730,20 +730,25 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                 node_id = st.session_state.selected_node_id
                 selected_node = find_node_by_id(search_tree.root, node_id)
 
+                tabs = ["Summary"]
+
+                if not selected_node or selected_node.node_id == 0:
+                    if eval_result and eval_result.get("error"):
+                        tabs.append("Error")
+
                 if selected_node:
-                    tabs = ["Summary"]
 
                     if selected_node.file_context:
                         tabs.append("FileContext")
 
                     if selected_node.action and selected_node.completions.get(
                         "build_action"
-                    ):
+                    ) is not None:
                         tabs.append("Build")
 
                     if selected_node.action and selected_node.completions.get(
                         "execute_action"
-                    ):
+                    ) is not None:
                         tabs.append("Execution")
 
                     if selected_node.reward:
@@ -751,7 +756,7 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
 
                     if eval_result and str(selected_node.node_id) in eval_result.get(
                         "node_results", {}
-                    ):
+                    ) is not None:
                         tabs.append("Evaluation")
 
                     tabs.append("JSON")
@@ -766,10 +771,14 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
 
                     with tab_contents[tabs.index("Summary")]:
                         if selected_node.action:
-                            st.subheader(
-                                f"Node{selected_node.node_id}"
-                            )
+                            if selected_node.message:
+                                st.subheader(
+                                    f"Message"
+                                )
+                                st.write(selected_node.message)
+
                             if hasattr(selected_node.action, "scratch_pad"):
+                                st.subheader("Thoughts")
                                 st.write(selected_node.action.scratch_pad)
 
                             st.subheader(f"Action: {selected_node.action.name}")
@@ -780,8 +789,16 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                                 st.code(selected_node.observation.message)
                                 if selected_node.observation.extra:
                                     st.code(selected_node.observation.extra)
-                        if selected_node.message:
-                            st.write(selected_node.message)
+
+                            if selected_node.parent:
+                                updated_context = selected_node.file_context.get_updated_context(selected_node.parent.file_context)
+                                if not updated_context.is_empty():
+                                    st.subheader("Updated Context")
+                                    st.json(updated_context.model_dump())
+
+                    if "Error" in tabs:
+                        with tab_contents[tabs.index("Error")]:
+                            st.code(eval_result["error"])
 
                     if "FileContext" in tabs:
                         with tab_contents[tabs.index("FileContext")]:

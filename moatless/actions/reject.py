@@ -18,6 +18,8 @@ class RejectArgs(ActionArguments):
     def to_prompt(self):
         return f"Reject with reason: {self.rejection_reason}"
 
+    def equals(self, other: "ActionArguments") -> bool:
+        return isinstance(other, RejectArgs)
 
 class Reject(Action):
     args_schema: ClassVar[Type[ActionArguments]] = RejectArgs

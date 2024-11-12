@@ -1,8 +1,9 @@
 import json
 import logging
-from typing import Optional, Any, Union
+from typing import Optional, Any, Union, Self
 
 import litellm
+from instructor import OpenAISchema
 from litellm import cost_per_token, NotFoundError
 from pydantic import BaseModel, model_validator, Field
 
@@ -156,3 +157,105 @@ class Completion(BaseModel):
             response=response,
             usage=usage,
         )
+
+
+class StructuredOutput(OpenAISchema):
+
+    @classmethod
+    def model_validate_json(
+            cls,
+            json_data: str | bytes | bytearray,
+            **kwarg,
+    ) -> Self:
+        message = json_data
+        logger.info(f"parse_json() Original message: {repr(message)}")
+
+        # Clean control characters from the message, preserving tabs and newlines
+        cleaned_message = ''.join(char for char in message if ord(char) >= 32 or char in '\n\r')
+        if cleaned_message != message:
+            logger.info(f"parse_json() Cleaned control chars: {repr(message)} -> {repr(cleaned_message)}")
+        message = cleaned_message
+
+        # Extract JSON using the new function
+        message, all_jsons = extract_json_from_message(message)
+        if len(all_jsons) > 1:
+            logger.warning(f"Found multiple JSON objects, using the first one. All found: {all_jsons}")
+        if all_jsons:
+            logger.info(f"parse_json() Extracted JSON: {repr(message)}")
+
+        # Normalize line endings to \n
+        if isinstance(message, str):
+            message = message.replace('\r\n', '\n').replace('\r', '\n')
+
+        logger.debug(f"parse_json() Final message to validate: {repr(message)}")
+
+        __tracebackhide__ = True
+        return super().model_validate_json(
+            message if isinstance(message, str) else json.dumps(message),
+            **kwarg
+        )
+
+def extract_json_from_message(message: str) -> tuple[dict | str, list[dict]]:
+    """
+    Extract JSON from a message, handling both code blocks and raw JSON.
+    Returns a tuple of (selected_json_dict, all_found_json_dicts).
+
+    Args:
+        message: The message to parse
+
+    Returns:
+        tuple[dict | str, list[dict]]: (The selected JSON dict to use or original message, List of all JSON dicts found)
+    """
+    all_found_jsons = []
+
+    # First try to find ```json blocks
+    try:
+        current_pos = 0
+        while True:
+            start = message.find("```json", current_pos)
+            if start == -1:
+                break
+            start += 7  # Move past ```json
+            end = message.find("```", start)
+            if end == -1:
+                break
+            potential_json = message[start:end].strip()
+            try:
+                json_dict = json.loads(potential_json)
+                all_found_jsons.append(json_dict)
+            except json.JSONDecodeError:
+                pass
+            current_pos = end + 3
+
+        if all_found_jsons:
+            return all_found_jsons[0], all_found_jsons
+    except Exception as e:
+        logger.warning(f"Failed to extract JSON from code blocks: {e}")
+
+    # If no ```json blocks found, try to find raw JSON objects
+    try:
+        current_pos = 0
+        while True:
+            start = message.find("{", current_pos)
+            if start == -1:
+                break
+            # Try to parse JSON starting from each { found
+            for end in range(len(message), start, -1):
+                try:
+                    potential_json = message[start:end]
+                    json_dict = json.loads(potential_json)
+                    all_found_jsons.append(json_dict)
+                    break
+                except json.JSONDecodeError:
+                    continue
+            if not all_found_jsons:  # If no valid JSON found, move past this {
+                current_pos = start + 1
+            else:
+                current_pos = end
+
+        if all_found_jsons:
+            return all_found_jsons[0], all_found_jsons
+    except Exception as e:
+        logger.warning(f"Failed to extract raw JSON objects: {e}")
+
+    return message, all_found_jsons

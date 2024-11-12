@@ -22,7 +22,7 @@ from litellm.types.utils import ModelResponse
 from openai import AzureOpenAI, OpenAI, LengthFinishReasonError
 from pydantic import BaseModel, Field, model_validator, field_validator
 from litellm.exceptions import BadRequestError, NotFoundError, AuthenticationError, APIError
-from moatless.completion.model import Message, Completion
+from moatless.completion.model import Message, Completion, StructuredOutput
 from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
 
 logger = logging.getLogger(__name__)
@@ -106,8 +106,8 @@ class CompletionModel(BaseModel):
         self,
         messages: List[Message],
         system_prompt: str,
-        actions: List[type[OpenAISchema]] | None = None,
-    ) -> Tuple[OpenAISchema, Completion]:
+        actions: List[type[StructuredOutput]] | None = None,
+    ) -> Tuple[StructuredOutput, Completion]:
         if not system_prompt:
             raise ValueError("System prompt is required")
 
@@ -194,8 +194,8 @@ class CompletionModel(BaseModel):
         self,
         messages: list[Message],
         system_prompt: str,
-        response_model: type[OpenAISchema]
-    ) -> Tuple[OpenAISchema, ModelResponse]:
+        response_model: type[StructuredOutput]
+    ) -> Tuple[StructuredOutput, ModelResponse]:
         if not self.response_format == LLMResponseFormat.JSON:
             return self.create_completion(messages, system_prompt, actions=[response_model])
 
@@ -237,9 +237,9 @@ class CompletionModel(BaseModel):
     def _litellm_tool_completion(
         self,
         messages: list[dict],
-        actions: list[type[OpenAISchema]],
+        actions: list[type[StructuredOutput]],
         is_retry: bool = False,
-    ) -> Tuple[OpenAISchema, ModelResponse]:
+    ) -> Tuple[StructuredOutput, ModelResponse]:
         litellm.drop_params = True
 
         tools = []
@@ -392,9 +392,9 @@ class CompletionModel(BaseModel):
     def _instructor_completion(
         self,
         messages: list[dict],
-        actions: List[type[OpenAISchema]] | None = None,
+        actions: List[type[StructuredOutput]] | None = None,
         is_retry: bool = False,
-    ) -> Tuple[OpenAISchema, ModelResponse]:
+    ) -> Tuple[StructuredOutput, ModelResponse]:
         if self.response_format == LLMResponseFormat.JSON:
             client = instructor.from_litellm(
                 litellm.completion, mode=instructor.Mode.MD_JSON
@@ -406,7 +406,7 @@ class CompletionModel(BaseModel):
 
         if actions:
 
-            class TakeAction(OpenAISchema):
+            class TakeAction(StructuredOutput):
                 action: Union[tuple(actions)] = Field(...)
                 action_type: str = Field(..., description="The type of action being taken")
 
@@ -436,52 +436,6 @@ class CompletionModel(BaseModel):
                         # Validate the action data using the specific action class
                         data['action'] = action_class.model_validate(data['action'])
                     return data
-
-                @classmethod
-                def model_validate_json(
-                        cls,
-                        json_data: str | bytes | bytearray,
-                        **kwarg,
-                ) -> Self:
-                    message = json_data
-                    logger.info(f"parse_json() Original message: {repr(message)}")
-
-                    # Clean control characters from the message, preserving tabs and newlines
-                    cleaned_message = ''.join(char for char in message if ord(char) >= 32 or char in '\n\r')
-                    if cleaned_message != message:
-                        logger.info(f"parse_json() Cleaned control chars: {repr(message)} -> {repr(cleaned_message)}")
-                    message = cleaned_message
-
-                    try:
-                        # Look specifically for json if "json" in message:
-                        start = message.index("json") + 7 # Find the next closing
-                        end = message.find("```", start)
-                        if end != -1:
-                            json_message = message[start:end].strip()
-                            logger.info(f"parse_json() Extracted JSON from codeblock: {repr(json_message)}")
-                            message = json_message
-                    except Exception as e:
-                        logger.warning(f"Failed to extract JSON from message: {e}")
-
-                    # Extract JSON from codeblock if present
-                    json_message = extract_json_from_codeblock(message)
-                    if json_message != message:
-                        logger.info(f"parse_json() Extracted JSON: {repr(json_message)}")
-                    message = json_message
-
-                    # Normalize line endings to \n
-                    message = message.replace('\r\n', '\n').replace('\r', '\n')
-
-                    logger.debug(f"parse_json() Final message to validate: {repr(message)}")
-
-                    __tracebackhide__ = True
-                    return super().model_validate_json(
-                        message,
-                        **kwarg
-                    )
-
-                #class Config:
-                #    smart_union = True
 
             action_type = TakeAction
         else:
@@ -541,8 +495,8 @@ class CompletionModel(BaseModel):
     def _openai_completion(
         self,
         messages: list[dict],
-        actions: List[type[OpenAISchema]] | None = None,
-        response_format: type[OpenAISchema] | None = None,
+        actions: List[type[StructuredOutput]] | None = None,
+        response_format: type[StructuredOutput] | None = None,
         is_retry: bool = False,
     ):
         if os.getenv("AZURE_API_KEY"):
@@ -629,8 +583,8 @@ class CompletionModel(BaseModel):
         self,
         messages: list[dict],
         system_prompt: str | None = None,
-        actions: List[type[OpenAISchema]] | None = None,
-    ) -> Tuple[OpenAISchema | str, Any]:
+        actions: List[type[StructuredOutput]] | None = None,
+    ) -> Tuple[StructuredOutput | str, Any]:
 
         if actions:
             tools = []
@@ -941,3 +895,68 @@ def _inject_prompt_caching(
                 content[-1].pop("cache_control", None)
                 # we'll only every have one extra turn per loop
                 break
+
+def extract_json_from_message(message: str) -> tuple[dict | str, list[dict]]:
+    """
+    Extract JSON from a message, handling both code blocks and raw JSON.
+    Returns a tuple of (selected_json_dict, all_found_json_dicts).
+    
+    Args:
+        message: The message to parse
+        
+    Returns:
+        tuple[dict | str, list[dict]]: (The selected JSON dict to use or original message, List of all JSON dicts found)
+    """
+    all_found_jsons = []
+    
+    # First try to find ```json blocks
+    try:
+        current_pos = 0
+        while True:
+            start = message.find("```json", current_pos)
+            if start == -1:
+                break
+            start += 7  # Move past ```json
+            end = message.find("```", start)
+            if end == -1:
+                break
+            potential_json = message[start:end].strip()
+            try:
+                json_dict = json.loads(potential_json)
+                all_found_jsons.append(json_dict)
+            except json.JSONDecodeError:
+                pass
+            current_pos = end + 3
+
+        if all_found_jsons:
+            return all_found_jsons[0], all_found_jsons
+    except Exception as e:
+        logger.warning(f"Failed to extract JSON from code blocks: {e}")
+
+    # If no ```json blocks found, try to find raw JSON objects
+    try:
+        current_pos = 0
+        while True:
+            start = message.find("{", current_pos)
+            if start == -1:
+                break
+            # Try to parse JSON starting from each { found
+            for end in range(len(message), start, -1):
+                try:
+                    potential_json = message[start:end]
+                    json_dict = json.loads(potential_json)
+                    all_found_jsons.append(json_dict)
+                    break
+                except json.JSONDecodeError:
+                    continue
+            if not all_found_jsons:  # If no valid JSON found, move past this {
+                current_pos = start + 1
+            else:
+                current_pos = end
+
+        if all_found_jsons:
+            return all_found_jsons[0], all_found_jsons
+    except Exception as e:
+        logger.warning(f"Failed to extract raw JSON objects: {e}")
+
+    return message, all_found_jsons

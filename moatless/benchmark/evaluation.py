@@ -167,6 +167,16 @@ class TreeSearchSettings(BaseModel):
         description="The settings for the debate.",
     )
 
+    use_edit_actions: bool = Field(
+        False,
+        description="Whether to use edit actions instead of RequestCodeChange.",
+    )
+
+    feedback_type: Optional[str] = Field(
+        None,
+        description="Type of feedback generator to use ('reward', 'agent', or None).",
+    )
+
     def create_evaluation_name(
         self,
         date: str | None = None,
@@ -463,7 +473,7 @@ class Evaluation:
                         repository=repository,
                         code_index=code_index,
                         runtime=runtime,
-                        use_edit_actions=False
+                        use_edit_actions=self.settings.use_edit_actions
                     )
 
                     if self.settings.best_first:
@@ -486,7 +496,12 @@ class Evaluation:
                         )
 
                         if self.settings.provide_feedback:
-                            feedback = FeedbackAgent(completion_model=self._create_completion_model())
+                            if self.settings.feedback_type == 'agent':
+                                feedback = FeedbackAgent(completion_model=self._create_completion_model())
+                            elif self.settings.feedback_type == 'reward':
+                                feedback = RewardFeedbackGenerator()
+                            else:
+                                feedback = None
                         else:
                             feedback = None
                     else:

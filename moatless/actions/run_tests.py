@@ -185,7 +185,7 @@ class RunTests(Action):
 
         response_msg = f"Running {len(test_results)} tests in the following files:"
         for test_file in test_files:
-            response_msg += f"\n## {test_file}"
+            response_msg += f"\n * {test_file}"
 
         if test_result_strings:
             response_msg += "\n\n"

@@ -3,8 +3,10 @@ from instructor import OpenAISchema
 
 from pydantic import BaseModel, Field
 
+from moatless.completion.model import StructuredOutput
 
-class Reward(OpenAISchema):
+
+class Reward(StructuredOutput):
     explanation: Optional[str] = Field(
         None, description="An explanation and the reasoning behind your decision."
     )

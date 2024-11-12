@@ -183,7 +183,8 @@ class Node(BaseModel):
         total_usage = Usage()
 
         for completion in self.completions.values():
-            total_usage += completion.usage
+            if completion:
+                total_usage += completion.usage
 
         return total_usage
 
@@ -246,6 +247,7 @@ class Node(BaseModel):
 
         content += self._format_feedback()
         return [UserMessage(content=content)]
+
 
     def _generate_message_history(self, previous_nodes: List["Node"]) -> list[Message]:
         """Generate a sequence of messages representing the full conversation history."""
@@ -390,7 +392,7 @@ class Node(BaseModel):
             if node.completions and "completions" not in exclude_set:
                 node_dict["completions"] = {
                     key: completion.model_dump(**kwargs)
-                    for key, completion in node.completions.items()
+                    for key, completion in node.completions.items() if completion
                 }
 
             if node.reward and "reward" not in exclude_set:
