@@ -1,26 +1,36 @@
+import json
 import logging
 from typing import List, Type
-import json
 
-from pydantic import model_validator
-
-from moatless.actions import FindClass, FindFunction, FindCodeSnippet, SemanticSearch, RequestMoreContext
+from moatless.actions import (
+    FindClass,
+    FindFunction,
+    FindCodeSnippet,
+    SemanticSearch,
+    ViewCode,
+)
 from moatless.actions.action import Action
 from moatless.actions.apply_change_and_test import ApplyCodeChangeAndTest
 from moatless.actions.code_change import RequestCodeChange
+from moatless.actions.create_file import CreateFile
 from moatless.actions.edit import ClaudeEditTool
 from moatless.actions.finish import Finish
+from moatless.actions.insert_line import InsertLine
 from moatless.actions.reject import Reject
 from moatless.actions.run_tests import RunTests
 from moatless.actions.string_replace import StringReplace
-from moatless.actions.insert_line import InsertLine
-from moatless.actions.create_file import CreateFile
 from moatless.agent.agent import ActionAgent
-from moatless.agent.code_prompts import SYSTEM_PROMPT, CLAUDE_PROMPT, SIMPLE_CODE_PROMPT, EDIT_SYSTEM_PROMPT
-from moatless.completion.completion import (
-    LLMResponseFormat, CompletionModel,
+from moatless.agent.code_prompts import (
+    CLAUDE_REACT_PROMPT,
+    REACT_SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
+    SIMPLE_CODE_PROMPT,
+    EDIT_SYSTEM_PROMPT,
 )
-from moatless.completion.model import Message
+from moatless.completion.completion import (
+    LLMResponseFormat,
+    CompletionModel,
+)
 from moatless.index import CodeIndex
 from moatless.node import Node, MessageHistoryType
 from moatless.repository.repository import Repository
@@ -30,26 +40,39 @@ logger = logging.getLogger(__name__)
 
 
 class CodingAgent(ActionAgent):
-
     def generate_system_prompt(self, possible_actions: List[Type[Action]]) -> str:
         if self.system_prompt:
             prompt = self.system_prompt
+        elif self.message_history_type == MessageHistoryType.REACT:
+            prompt = REACT_SYSTEM_PROMPT
+        elif any(action.name == "StringReplace" for action in possible_actions):
+            prompt = EDIT_SYSTEM_PROMPT
         else:
             prompt = SYSTEM_PROMPT
 
-        if self.completion.response_format == LLMResponseFormat.JSON:
-            few_shot_examples = []
-            for action in possible_actions:
-                examples = action.get_few_shot_examples()
-                if examples:
-                    few_shot_examples.extend(examples)
+        few_shot_examples = []
+        for action in possible_actions:
+            examples = action.get_few_shot_examples()
+            if examples:
+                few_shot_examples.extend(examples)
 
-            if few_shot_examples:
-                prompt += "\n\nHere are some examples of how to use the available actions:\n\n"
-                for example in few_shot_examples:
+        if few_shot_examples:
+            prompt += "\n\n# Examples\nHere are some examples of how to use the available actions:\n\n"
+            for i, example in enumerate(few_shot_examples):
+                if self.completion.response_format == LLMResponseFormat.REACT:
+                    prompt += f"\n**Example {i+1}**"
+                    action_data = example.action.model_dump()
+                    scratch_pad = action_data.pop("scratch_pad", "")
+                    prompt += (
+                        f"\nTask: {example.user_input}"
+                        f"Thought: {scratch_pad}\n"
+                        f"Action: {example.action.name}\n"
+                        f"Action Input: {json.dumps(action_data, indent=2)}\n\n"
+                    )
+                elif self.completion.response_format == LLMResponseFormat.JSON:
                     action_json = {
                         "action": example.action.model_dump(),
-                        "action_type": example.action.name
+                        "action_type": example.action.name,
                     }
                     prompt += f"User: {example.user_input}\nAssistant:\n```json\n{json.dumps(action_json, indent=2)}\n```\n\n"
 
@@ -63,7 +86,15 @@ class CodingAgent(ActionAgent):
             possible_actions = [
                 action
                 for action in possible_actions
-                if action.__class__ not in [ApplyCodeChangeAndTest, RequestCodeChange, StringReplace, CreateFile, InsertLine, RunTests]
+                if action.__class__
+                not in [
+                    ApplyCodeChangeAndTest,
+                    RequestCodeChange,
+                    StringReplace,
+                    CreateFile,
+                    InsertLine,
+                    RunTests,
+                ]
             ]
 
         # Remove Finish and Reject if there's no file context or no code changes
@@ -117,7 +148,8 @@ class CodingAgent(ActionAgent):
         code_index: CodeIndex | None = None,
         runtime: RuntimeEnvironment | None = None,
         edit_completion_model: CompletionModel | None = None,
-        use_edit_actions: bool = False
+        use_edit_actions: bool = False,
+        **kwargs,
     ):
         system_prompt = None
         if completion_model.supports_anthropic_computer_use:
@@ -125,15 +157,15 @@ class CodingAgent(ActionAgent):
                 repository=repository,
                 code_index=code_index,
                 runtime=runtime,
-                completion_model=completion_model
+                completion_model=completion_model,
             )
-            system_prompt = CLAUDE_PROMPT
+            system_prompt = CLAUDE_REACT_PROMPT
         elif use_edit_actions:
             actions = create_edit_code_actions(
                 repository=repository,
                 code_index=code_index,
                 runtime=runtime,
-                completion_model=completion_model
+                completion_model=completion_model,
             )
 
             system_prompt = EDIT_SYSTEM_PROMPT
@@ -153,10 +185,10 @@ class CodingAgent(ActionAgent):
             completion=completion_model,
             actions=actions,
             system_prompt=system_prompt,
-            message_history_type=MessageHistoryType.MESSAGES,
             include_extra_history=True,
             include_file_context=False,
             include_git_patch=False,
+            **kwargs,
         )
 
 
@@ -167,12 +199,29 @@ def create_base_actions(
 ) -> List[Action]:
     """Create the common base actions used across all action creators."""
     return [
-        SemanticSearch(code_index=code_index, repository=repository, completion_model=completion_model),
-        FindClass(code_index=code_index, repository=repository, completion_model=completion_model),
-        FindFunction(code_index=code_index, repository=repository, completion_model=completion_model),
-        FindCodeSnippet(code_index=code_index, repository=repository, completion_model=completion_model),
-        RequestMoreContext(repository=repository),
+        SemanticSearch(
+            code_index=code_index,
+            repository=repository,
+            completion_model=completion_model,
+        ),
+        FindClass(
+            code_index=code_index,
+            repository=repository,
+            completion_model=completion_model,
+        ),
+        FindFunction(
+            code_index=code_index,
+            repository=repository,
+            completion_model=completion_model,
+        ),
+        FindCodeSnippet(
+            code_index=code_index,
+            repository=repository,
+            completion_model=completion_model,
+        ),
+        ViewCode(repository=repository),
     ]
+
 
 def create_coding_actions(
     repository: Repository,
@@ -182,22 +231,26 @@ def create_coding_actions(
     edit_completion_model: CompletionModel | None = None,
 ) -> List[Action]:
     actions = create_base_actions(repository, code_index, identify_completion_model)
-    
+
     if runtime:
-        actions.append(ApplyCodeChangeAndTest(
-            code_index=code_index, 
-            repository=repository, 
-            runtime=runtime, 
-            completion_model=edit_completion_model
-        ))
+        actions.append(
+            ApplyCodeChangeAndTest(
+                code_index=code_index,
+                repository=repository,
+                runtime=runtime,
+                completion_model=edit_completion_model,
+            )
+        )
     else:
-        actions.append(RequestCodeChange(
-            repository=repository, 
-            completion_model=edit_completion_model
-        ))
+        actions.append(
+            RequestCodeChange(
+                repository=repository, completion_model=edit_completion_model
+            )
+        )
 
     actions.extend([Finish(), Reject()])
     return actions
+
 
 def create_edit_code_actions(
     repository: Repository,
@@ -207,16 +260,17 @@ def create_edit_code_actions(
 ) -> List[Action]:
     """Create a list of simple code modification actions."""
     actions = create_base_actions(repository, code_index, completion_model)
-    
+
     edit_actions = [
         StringReplace(repository=repository, runtime=runtime, code_index=code_index),
-        InsertLine(repository=repository, runtime=runtime, code_index=code_index),
+        # InsertLine(repository=repository, runtime=runtime, code_index=code_index),
         CreateFile(repository=repository, runtime=runtime, code_index=code_index),
     ]
-    
+
     actions.extend(edit_actions)
     actions.extend([Finish(), Reject()])
     return actions
+
 
 def create_claude_coding_actions(
     repository: Repository,
@@ -225,6 +279,8 @@ def create_claude_coding_actions(
     completion_model: CompletionModel | None = None,
 ) -> List[Action]:
     actions = create_base_actions(repository, code_index, completion_model)
-    actions.append(ClaudeEditTool(code_index=code_index, repository=repository, runtime=runtime))
+    actions.append(
+        ClaudeEditTool(code_index=code_index, repository=repository, runtime=runtime)
+    )
     actions.extend([Finish(), Reject()])
     return actions

@@ -1,22 +1,29 @@
 import logging
 import os
-import pandas as pd
-import streamlit as st
-from dotenv import load_dotenv
 import sys
 
+import streamlit as st
+from dotenv import load_dotenv
+
 from moatless.benchmark.report import generate_report
-from moatless.streamlit.shared import trajectory_table
 from moatless.search_tree import SearchTree
+from moatless.streamlit.shared import trajectory_table
 from moatless.streamlit.tree_vizualization import update_visualization
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 load_dotenv()
 
+
 def main():
-    st.set_page_config(layout="wide", page_title="Moatless Visualizer", initial_sidebar_state="collapsed")
+    st.set_page_config(
+        layout="wide",
+        page_title="Moatless Visualizer",
+        initial_sidebar_state="collapsed",
+    )
     container = st.container()
 
     # Get file path from command line args if provided
@@ -49,7 +56,7 @@ def main():
     if file_path:
         if os.path.exists(file_path):
             file_name = os.path.basename(file_path).lower()
-            
+
             if file_name == "report.json":
                 with st.spinner("Loading report..."):
                     trajectory_table(file_path)
@@ -58,18 +65,22 @@ def main():
                         with st.spinner("Regenerating report..."):
                             generate_report(report_dir, split="verified")
                             st.rerun()
-                    
-                    
+
             else:
                 with st.spinner("Loading search tree from trajectory file"):
                     st.session_state.search_tree = SearchTree.from_file(file_path)
                     # directory path
-                    update_visualization(container, st.session_state.search_tree, file_path)
+                    update_visualization(
+                        container, st.session_state.search_tree, file_path
+                    )
         else:
-            st.error("The specified file does not exist. Please check the path and try again.")
+            st.error(
+                "The specified file does not exist. Please check the path and try again."
+            )
 
     if not file_path:
         st.info("Please provide a valid file path and click 'Load File' to begin.")
+
 
 if __name__ == "__main__":
     main()

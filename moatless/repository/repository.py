@@ -1,5 +1,6 @@
+import importlib
 from abc import ABC, abstractmethod
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 
 from pydantic import BaseModel, Field
 
@@ -17,6 +18,31 @@ class Repository(BaseModel, ABC):
 
     def is_directory(self, file_path: str) -> bool:
         return False
+
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        dump = super().model_dump(**kwargs)
+        dump["repository_class"] = (
+            f"{self.__class__.__module__}.{self.__class__.__name__}"
+        )
+        return dump
+
+    @classmethod
+    def model_validate(cls, obj: Any) -> "Repository":
+        if isinstance(obj, dict):
+            obj = obj.copy()
+            repository_class_path = obj.pop("repository_class", None)
+
+            if repository_class_path:
+                module_name, class_name = repository_class_path.rsplit(".", 1)
+                module = importlib.import_module(module_name)
+                repository_class = getattr(module, class_name)
+                instance = repository_class(**obj)
+            else:
+                return None
+
+            return instance
+
+        return super().model_validate(obj)
 
 
 class InMemRepository(Repository):

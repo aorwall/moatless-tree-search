@@ -1,13 +1,14 @@
 import logging
 from pathlib import Path
-from typing import Literal, Optional, List, Any
+from typing import Literal, Optional, List
 
-from pydantic import Field, model_validator, PrivateAttr
+from pydantic import Field, PrivateAttr
 
 from moatless.actions import RunTests
 from moatless.actions.action import Action
-from moatless.actions.model import ActionArguments, Observation
+from moatless.actions.model import ActionArguments, Observation, RetryException
 from moatless.actions.run_tests import RunTestsArgs
+from moatless.actions.string_replace import StringReplace, StringReplaceArgs
 from moatless.completion.model import ToolCall
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
@@ -36,8 +37,12 @@ class EditActionArguments(ActionArguments):
 
     command: Command = Field(..., description="The edit command to execute")
     path: str = Field(..., description="The file path to edit")
-    file_text: Optional[str] = Field(None, description="The text content for file creation")
-    view_range: Optional[List[int]] = Field(None, description="Range of lines to view [start, end]")
+    file_text: Optional[str] = Field(
+        None, description="The text content for file creation"
+    )
+    view_range: Optional[List[int]] = Field(
+        None, description="Range of lines to view [start, end]"
+    )
     old_str: Optional[str] = Field(None, description="String to replace")
     new_str: Optional[str] = Field(None, description="Replacement string")
     insert_line: Optional[int] = Field(None, description="Line number for insertion")
@@ -46,7 +51,9 @@ class EditActionArguments(ActionArguments):
         title = "str_replace_editor"
 
     def to_tool_call(self) -> ToolCall:
-        return ToolCall(name=self.name, type="text_editor_20241022", input=self.model_dump())
+        return ToolCall(
+            name=self.name, type="text_editor_20241022", input=self.model_dump()
+        )
 
 
 class ClaudeEditTool(Action):
@@ -77,7 +84,9 @@ class ClaudeEditTool(Action):
         self._code_index = code_index
         self._repository = repository
 
-    def execute(self, args: EditActionArguments, file_context: FileContext) -> Observation:
+    def execute(
+        self, args: EditActionArguments, file_context: FileContext
+    ) -> Observation:
         # Claude tends to add /repo in the start of the file path.
         # TODO: Maybe we should add /repo as default on all paths?
         if args.path.startswith("/repo"):
@@ -99,42 +108,52 @@ class ClaudeEditTool(Action):
             )
 
         if args.command == "view":
-            return self._view(file_context, path, args.view_range)
+            return self._view(file_context, path, args)
         elif args.command == "create":
             if not args.file_text:
-                return Observation(
+                raise RetryException(
                     message="Parameter `file_text` is required for command: create",
-                    properties={"fail_reason": "missing_file_text"},
-                    expect_correction=True,
+                    action_args=args,
                 )
             observation = self._create(file_context, path, args.file_text)
         elif args.command == "str_replace":
             if not args.old_str:
-                return Observation(
+                raise RetryException(
                     message="Parameter `old_str` is required for command: str_replace",
-                    properties={"fail_reason": "missing_old_str"},
-                    expect_correction=True,
+                    action_args=args,
                 )
-            observation = self._str_replace(file_context, path, args.old_str, args.new_str or "")
+            str_replace = StringReplace(
+                runtime=self._runtime,
+                code_index=self._code_index,
+                repository=self._repository,
+            )
+            return str_replace.execute(
+                StringReplaceArgs(
+                    path=args.path,
+                    old_str=args.old_str,
+                    new_str=args.new_str or "",
+                    scratch_pad=args.scratch_pad,
+                ),
+                file_context,
+            )
         elif args.command == "insert":
             if args.insert_line is None:
-                return Observation(
+                raise RetryException(
                     message="Parameter `insert_line` is required for command: insert",
-                    properties={"fail_reason": "missing_insert_line"},
-                    expect_correction=True,
+                    action_args=args,
                 )
             if args.new_str is None:
-                return Observation(
+                raise RetryException(
                     message="Parameter `new_str` is required for command: insert",
-                    properties={"fail_reason": "missing_new_str"},
-                    expect_correction=True,
+                    action_args=args,
                 )
-            observation = self._insert(file_context, path, args.insert_line, args.new_str)
+            observation = self._insert(
+                file_context, path, args.insert_line, args.new_str
+            )
         else:
-            return Observation(
+            raise RetryException(
                 message=f"Unknown command: {args.command}",
-                properties={"fail_reason": "unknown_command"},
-                expect_correction=True,
+                action_args=args,
             )
 
         if not observation.properties or not observation.properties.get("diff"):
@@ -143,7 +162,11 @@ class ClaudeEditTool(Action):
         if not self._runtime:
             return observation
 
-        run_tests = RunTests(repository=self._repository, runtime=self._runtime, code_index=self._code_index)
+        run_tests = RunTests(
+            repository=self._repository,
+            runtime=self._runtime,
+            code_index=self._code_index,
+        )
         test_observation = run_tests.execute(
             RunTestsArgs(
                 scratch_pad=args.scratch_pad,
@@ -157,12 +180,14 @@ class ClaudeEditTool(Action):
 
         return observation
 
-    def validate_path(self, file_context: FileContext, command: str, path: Path) -> str | None:
+    def validate_path(
+        self, file_context: FileContext, command: str, path: Path
+    ) -> str | None:
         """
         Check that the path/command combination is valid.
         """
         # TODO: Check if its an absolute path?
-        #if not path.is_absolute():
+        # if not path.is_absolute():
         #    suggested_path = Path("") / path
         #    return (
         #        f"The path {path} is not an absolute path, it should start with `/`. Maybe you meant {suggested_path}?"
@@ -170,25 +195,21 @@ class ClaudeEditTool(Action):
 
         # Check if path exists
         if not file_context.file_exists(str(path)) and command != "create":
-            return (
-                f"The path {path} does not exist. Please provide a valid path."
-            )
+            return f"The path {path} does not exist. Please provide a valid path."
 
         if file_context.file_exists(str(path)) and command == "create":
-            return (
-                f"File already exists at: {path}. Cannot overwrite files using command `create`."
-            )
+            return f"File already exists at: {path}. Cannot overwrite files using command `create`."
 
         # Check if the path points to a directory
         if file_context._repo.is_directory(str(path)):
             if command != "view":
-                return (
-                    f"The path {path} is a directory and only the `view` command can be used on directories"
-                )
+                return f"The path {path} is a directory and only the `view` command can be used on directories"
 
         return None
 
-    def _view(self, file_context: FileContext, path: Path, view_range: Optional[List[int]]) -> Observation:
+    def _view(
+        self, file_context: FileContext, path: Path, args: EditActionArguments
+    ) -> Observation:
         context_file = file_context.get_context_file(str(path))
         if not context_file:
             return Observation(
@@ -201,67 +222,68 @@ class ClaudeEditTool(Action):
         file_lines = file_content.split("\n")
         n_lines = len(file_lines)
 
+        view_range = args.view_range
         if view_range:
             if len(view_range) != 2:
-                return Observation(
+                raise RetryException(
                     message="Invalid view_range. It should be a list of two integers.",
-                    properties={"fail_reason": "invalid_view_range"},
-                    expect_correction=True,
+                    action_args=args,
                 )
 
             init_line, final_line = view_range
-            
+
             if init_line < 1 or init_line > n_lines:
-                return Observation(
+                raise RetryException(
                     message=f"Invalid view_range start line: {init_line}. Should be between 1 and {n_lines}",
-                    properties={"fail_reason": "invalid_view_range"},
-                    expect_correction=True,
+                    action_args=args,
                 )
 
             if final_line == -1:
-                file_content = "\n".join(file_lines[init_line - 1:])
+                file_content = "\n".join(file_lines[init_line - 1 :])
             else:
-                file_content = "\n".join(file_lines[init_line - 1: final_line])
+                file_content = "\n".join(file_lines[init_line - 1 : final_line])
         else:
             final_line = n_lines
 
         tokens = count_tokens(file_content)
         if tokens > self.max_tokens_to_view:
+            view_context = FileContext(self._repository)
+            view_context.add_file(str(path), show_all_spans=True)
 
-            file_content = context_file.to_prompt(
+            file_content = view_context.create_prompt(
+                show_span_ids=True,
                 show_outcommented_code=True,
-                show_all_spans=True,
                 only_signatures=True,
-                show_line_numbers=True
+                show_line_numbers=True,
             )
 
-            return Observation(
+            raise RetryException(
                 message=f"File {path} is too large ({tokens} tokens) to view in its entirety. Maximum allowed is {self.max_tokens_to_view} tokens. "
-                        f"Please specify a line range using view_range, spans with RequestMoreContext to view specific code.\n"
-                        f"Here's a structure of the file {file_content}",
-                properties={"flag": "too_many_tokens"},
-                expect_correction=True,
+                f"Please specify a line range using view_range or spans with ViewCode to view specific parts of the file.\n"
+                f"Here's a structure of the file {file_content}",
+                action_args=args,
             )
 
-        file_context.add_line_span_to_context(str(path), init_line, final_line)
-
-        if view_range:
-            message = f"Adding lines {init_line} to {final_line} of {path} to the file context."
-        else:
-            message = f"Adding the file {path} to context"
-
-        return Observation(
-            message=message,
-            properties={"success": True},
+        properties = {}
+        added_spans = file_context.add_line_span_to_context(
+            str(path), init_line, final_line
         )
+        if not added_spans:
+            properties["flag"] = "no_new_spans"
 
-    def _create(self, file_context: FileContext, path: Path, file_text: str) -> Observation:
+        message = self._make_output(file_content, f"{path}", init_line)
+
+        return Observation(message=message, properties=properties)
+
+    def _create(
+        self, file_context: FileContext, path: Path, file_text: str
+    ) -> Observation:
         if path.exists():
             return Observation(
                 message=f"File already exists at: {path}",
                 properties={"fail_reason": "file_exists"},
             )
-        
+
         context_file = file_context.add_file(str(path))
         context_file.apply_changes(file_text)
 
@@ -272,7 +294,9 @@ class ClaudeEditTool(Action):
             properties={"diff": diff, "success": True},
         )
 
-    def _str_replace(self, file_context: FileContext, path: Path, old_str: str, new_str: str) -> Observation:
+    def _str_replace(
+        self, file_context: FileContext, path: Path, old_str: str, new_str: str
+    ) -> Observation:
         SNIPPET_LINES = 4
 
         context_file = file_context.get_context_file(str(path))
@@ -281,7 +305,7 @@ class ClaudeEditTool(Action):
                 message=f"Could not get context for file: {path}",
                 properties={"fail_reason": "context_error"},
             )
-            
+
         file_content = context_file.content.expandtabs()
         old_str = old_str.expandtabs()
         new_str = new_str.expandtabs()
@@ -298,12 +322,15 @@ class ClaudeEditTool(Action):
             if new_str_occurrences > 0:
                 return Observation(
                     message=f"New string '{new_str}' already exists in {path}. No changes were made.",
-                    properties={"fail_reason": "string_already_exists"}
+                    properties={"fail_reason": "string_already_exists"},
                 )
 
             return Observation(
                 message=f"String '{old_str}' not found in {path}",
-                properties={"fail_reason": "string_not_found", "file_content": file_content},
+                properties={
+                    "fail_reason": "string_not_found",
+                    "file_content": file_content,
+                },
                 expect_correction=True,
             )
         elif occurrences > 1:
@@ -321,7 +348,10 @@ class ClaudeEditTool(Action):
 
             return Observation(
                 message=f"Multiple occurrences of string found starting at lines {lines}",
-                properties={"fail_reason": "multiple_occurrences", "file_content": file_content},
+                properties={
+                    "fail_reason": "multiple_occurrences",
+                    "file_content": file_content,
+                },
                 expect_correction=True,
             )
 
@@ -332,7 +362,7 @@ class ClaudeEditTool(Action):
         # Find the line numbers where new_str appears
         lines = file_content.split("\n")
         file_str = "\n".join(lines)  # Ensure consistent line endings
-        
+
         start_pos = file_str.find(new_str)
         if start_pos != -1:
             # Count newlines before the match to get starting line number
@@ -381,7 +411,9 @@ class ClaudeEditTool(Action):
             properties=properties,
         )
 
-    def _insert(self, file_context: FileContext, path: Path, insert_line: int, new_str: str) -> Observation:
+    def _insert(
+        self, file_context: FileContext, path: Path, insert_line: int, new_str: str
+    ) -> Observation:
         context_file = file_context.get_context_file(str(path))
         if not context_file:
             return Observation(
@@ -471,6 +503,7 @@ class ClaudeEditTool(Action):
 
 TRUNCATED_MESSAGE: str = "<response clipped><NOTE>To save on context only part of this file has been shown to you. You should retry this tool after you have searched inside the file with `grep -n` in order to find the line numbers of what you are looking for.</NOTE>"
 MAX_RESPONSE_LEN: int = 16000
+
 
 def maybe_truncate(content: str, truncate_after: int | None = MAX_RESPONSE_LEN):
     """Truncate content and append a notice if content exceeds the specified length."""

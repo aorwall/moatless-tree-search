@@ -18,7 +18,6 @@ from llama_index.core.vector_stores.types import (
     BasePydanticVectorStore,
     VectorStoreQuery,
 )
-from pydantic import BaseModel
 from rapidfuzz import fuzz
 
 from moatless.codeblocks import CodeBlock, CodeBlockType
@@ -278,6 +277,12 @@ class CodeIndex:
                     and query
                     and span.initiating_block.has_content(query, span.span_id)
                 )
+
+                if code_snippet and not span.initiating_block.has_content(
+                    code_snippet, span.span_id
+                ):
+                    filtered_out += 1
+                    continue
 
                 if has_exact_query_match:
                     spans_with_exact_query_match += 1

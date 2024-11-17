@@ -35,8 +35,8 @@ def calculate_similarity(context_a: FileContext, context_b: FileContext) -> floa
     # Step 3: Patch similarity
     patch_similarities = []
     for file_path in files_a.intersection(files_b):
-        patch_a = context_a._files[file_path].patch or ''
-        patch_b = context_b._files[file_path].patch or ''
+        patch_a = context_a._files[file_path].patch or ""
+        patch_b = context_b._files[file_path].patch or ""
         if patch_a or patch_b:
             patch_similarity = string_similarity(patch_a, patch_b)
             patch_similarities.append(patch_similarity)
@@ -50,9 +50,9 @@ def calculate_similarity(context_a: FileContext, context_b: FileContext) -> floa
 
     # Combine the similarities with weights
     total_similarity = (
-            0.4 * file_path_similarity +
-            0.2 * average_span_similarity +
-            0.4 * average_patch_similarity
+        0.4 * file_path_similarity
+        + 0.2 * average_span_similarity
+        + 0.4 * average_patch_similarity
     )
 
     return total_similarity

@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import sys
 
 import pandas as pd
 
@@ -28,8 +27,9 @@ def read_predictions(pred_path: str):
                         try:
                             all_preds.append(json.loads(line))
                         except Exception as e:
-                            logging.exception(f"Error parsing line {line} in predictions from {pred_path}")
-
+                            logging.exception(
+                                f"Error parsing line {line} in predictions from {pred_path}"
+                            )
 
             for prediction in all_preds:
                 predictions[prediction["instance_id"]] = prediction["model_patch"]
@@ -163,7 +163,11 @@ def generate_report(
 
 if __name__ == "__main__":
     dataset_path = "swebench_verified_all_evaluations.json"
-    df = generate_report(dataset_path, experiments_dir="/home/albert/repos/stuffs/experiments/evaluation/verified", dataset_name="princeton-nlp/SWE-bench_Verified")
+    df = generate_report(
+        dataset_path,
+        experiments_dir="/home/albert/repos/stuffs/experiments/evaluation/verified",
+        dataset_name="princeton-nlp/SWE-bench_Verified",
+    )
 
     # df to csv
-    df.to_csv('evaluation_dataset.csv', index=False)
+    df.to_csv("evaluation_dataset.csv", index=False)

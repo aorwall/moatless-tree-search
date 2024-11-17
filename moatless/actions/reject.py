@@ -21,6 +21,7 @@ class RejectArgs(ActionArguments):
     def equals(self, other: "ActionArguments") -> bool:
         return isinstance(other, RejectArgs)
 
+
 class Reject(Action):
     args_schema: ClassVar[Type[ActionArguments]] = RejectArgs
 

@@ -2,47 +2,53 @@ import logging
 from pathlib import Path
 from typing import List
 
-from pydantic import Field, PrivateAttr
+from pydantic import Field
 
 from moatless.actions.action import Action
-from moatless.actions.model import ActionArguments, Observation, FewShotExample
-from moatless.completion.model import ToolCall
-from moatless.file_context import FileContext
-from moatless.repository.file import do_diff
-from moatless.actions.run_tests import RunTests, RunTestsArgs
-from moatless.index import CodeIndex
-from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.actions.code_action_value_mixin import CodeActionValueMixin
 from moatless.actions.code_modification_mixin import CodeModificationMixin
+from moatless.actions.model import ActionArguments, Observation, FewShotExample
+from moatless.actions.run_tests import RunTests, RunTestsArgs
+from moatless.file_context import FileContext
+from moatless.index import CodeIndex
+from moatless.repository.file import do_diff
+from moatless.repository.repository import Repository
+from moatless.runtime.runtime import RuntimeEnvironment
 
 logger = logging.getLogger(__name__)
 
 SNIPPET_LINES = 4
 
+
 class InsertLineArgs(ActionArguments):
     """
     Insert text at a specific line number in a file.
-    
+
     Notes:
     * The text will be inserted AFTER the specified line number
     * Line numbers start at 1
     * The insert_line must be within the valid range of lines in the file
     * Proper indentation should be maintained in the inserted text
     """
+
     path: str = Field(..., description="Path to the file to edit")
-    insert_line: int = Field(..., description="Line number after which to insert the new text (indexing starts at 1)")
-    new_str: str = Field(..., description="Text content to insert at the specified line")
+    insert_line: int = Field(
+        ...,
+        description="Line number after which to insert the new text (indexing starts at 1)",
+    )
+    new_str: str = Field(
+        ..., description="Text content to insert at the specified line"
+    )
 
     class Config:
         title = "InsertLines"
-
 
 
 class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
     """
     Action to insert text at a specific line in a file.
     """
+
     args_schema = InsertLineArgs
 
     def __init__(
@@ -54,9 +60,9 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
     ):
         super().__init__(**data)
         # Initialize mixin attributes directly
-        object.__setattr__(self, '_runtime', runtime)
-        object.__setattr__(self, '_code_index', code_index)
-        object.__setattr__(self, '_repository', repository)
+        object.__setattr__(self, "_runtime", runtime)
+        object.__setattr__(self, "_code_index", code_index)
+        object.__setattr__(self, "_repository", repository)
 
     def execute(self, args: InsertLineArgs, file_context: FileContext) -> Observation:
         if args.path.startswith("/repo"):
@@ -93,9 +99,9 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
 
         new_str_lines = new_str.split("\n")
         new_file_text_lines = (
-            file_text_lines[:args.insert_line]
+            file_text_lines[: args.insert_line]
             + new_str_lines
-            + file_text_lines[args.insert_line:]
+            + file_text_lines[args.insert_line :]
         )
         snippet_lines = (
             file_text_lines[max(0, args.insert_line - SNIPPET_LINES) : args.insert_line]
@@ -130,7 +136,11 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
         if not self._runtime:
             return observation
 
-        run_tests = RunTests(repository=self._repository, runtime=self._runtime, code_index=self._code_index)
+        run_tests = RunTests(
+            repository=self._repository,
+            runtime=self._runtime,
+            code_index=self._code_index,
+        )
         test_observation = run_tests.execute(
             RunTestsArgs(
                 scratch_pad=args.scratch_pad,
@@ -144,7 +154,6 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
 
         return observation
 
-
     @classmethod
     def get_few_shot_examples(cls) -> List[FewShotExample]:
         return [
@@ -154,8 +163,8 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
                     scratch_pad="Adding import for datetime module",
                     path="utils/time_helper.py",
                     insert_line=1,
-                    new_str="from datetime import datetime, timezone"
-                )
+                    new_str="from datetime import datetime, timezone",
+                ),
             ),
             FewShotExample.create(
                 user_input="Add a new method to the UserProfile class",
@@ -166,8 +175,8 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
                     new_str="""    def update_preferences(self, preferences: dict) -> None:
         self._preferences.update(preferences)
         self._last_updated = datetime.now(timezone.utc)
-        logger.info(f"Updated preferences for user {self.username}")"""
-                )
+        logger.info(f"Updated preferences for user {self.username}")""",
+                ),
             ),
             FewShotExample.create(
                 user_input="Add a new configuration option",
@@ -180,7 +189,7 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
     'port': 6379,
     'db': 0,
     'password': None
-}"""
-                )
-            )
+}""",
+                ),
+            ),
         ]

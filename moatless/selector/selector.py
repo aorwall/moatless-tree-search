@@ -2,13 +2,13 @@ import logging
 import math
 import random
 from dataclasses import dataclass
-from typing import List, Type, Literal, Dict, Any, Optional, Tuple
+from typing import List, Type, Literal, Dict, Any, Tuple
 
 import numpy as np
 from pydantic import BaseModel, Field, PrivateAttr
 
-from moatless.selector.similarity import calculate_similarity
 from moatless.node import Node
+from moatless.selector.similarity import calculate_similarity
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,7 @@ class UCTScore:
     expect_correction_bonus: float = 0.0
     diversity_bonus: float = 0.0
     duplicate_child_penalty: float = 0.0
+    duplicate_action_penalty: float = 0.0
 
     def __str__(self):
         components = [
@@ -44,6 +45,7 @@ class UCTScore:
             f"Expect Correction Bonus: {self.expect_correction_bonus:.2f}",
             f"Diversity Bonus: {self.diversity_bonus:.2f}",
             f"Duplicate Child Penalty: {self.duplicate_child_penalty:.2f}",
+            f"Duplicate Action Penalty: {self.duplicate_action_penalty:.2f}",
         ]
         return ", ".join(components)
 
@@ -51,6 +53,14 @@ class UCTScore:
 class Selector(BaseModel):
     type: Literal["BestFirstSelector", "SoftmaxSelector"] = Field(
         ..., description="The type of selector"
+    )
+    exploitation_weight: float = Field(
+        default=1.0,
+        description="Weight factor for the exploitation term in the UCT score calculation. Higher values favor exploitation over exploration.",
+    )
+    use_average_reward: bool = Field(
+        default=False,
+        description="If True, uses average reward across the trajectory for exploitation calculation instead of node reward.",
     )
     exploration_weight: float = Field(
         default=1.0,
@@ -65,11 +75,11 @@ class Selector(BaseModel):
         description="Factor used in calculating the depth bonus. Higher values increase the bonus for exploring deeper nodes, especially near the root.",
     )
     high_value_threshold: float = Field(
-        default=55.0,
+        default=50.0,
         description="Threshold for considering a node's reward as 'high value'. Used in various bonus calculations.",
     )
     low_value_threshold: float = Field(
-        default=50.0,
+        default=0.0,
         description="Threshold for considering a node's reward as 'low value'. Used in various penalty calculations.",
     )
     very_high_value_threshold: float = Field(
@@ -77,7 +87,7 @@ class Selector(BaseModel):
         description="Threshold for considering a node's reward as 'very high value'. Used in the high value child penalty calculation.",
     )
     high_value_leaf_bonus_constant: float = Field(
-        default=20.0,
+        default=50.0,
         description="Constant bonus applied to high-value leaf nodes to encourage their exploration.",
     )
     high_value_bad_children_bonus_constant: float = Field(
@@ -93,7 +103,7 @@ class Selector(BaseModel):
         description="Penalty applied to nodes on a trajectory that has already finished with a high reward, discouraging revisiting completed paths.",
     )
     expect_correction_bonus: float = Field(
-        default=0.0,
+        default=50.0,
         description="Bonus applied to nodes expecting correction, prioritizing exploration of potential fix paths.",
     )
     check_for_bad_child_actions: List[str] = Field(
@@ -102,11 +112,15 @@ class Selector(BaseModel):
     )
     diversity_weight: float = Field(
         default=100.0,
-        description="Weight factor for the diversity bonus. Higher values increase the bonus for nodes with low similarity to other explored nodes."
+        description="Weight factor for the diversity bonus. Higher values increase the bonus for nodes with low similarity to other explored nodes.",
     )
     duplicate_child_penalty_constant: float = Field(
         default=25.0,
-        description="Constant used in penalizing nodes that have duplicate children. Penalty increases with each duplicate."
+        description="Constant used in penalizing nodes that have duplicate children. Penalty increases with each duplicate.",
+    )
+    duplicate_action_penalty_constant: float = Field(
+        default=50.0,
+        description="Constant used in penalizing nodes that have siblings with the same action name.",
     )
 
     _similarity_cache: Dict[Tuple[int, int], float] = PrivateAttr(default_factory=dict)
@@ -138,6 +152,7 @@ class Selector(BaseModel):
         expect_correction_bonus = self.calculate_expect_correction_bonus(node)
         diversity_bonus = self.calculate_diversity_bonus(node)
         duplicate_child_penalty = self.calculate_duplicate_child_penalty(node)
+        duplicate_action_penalty = self.calculate_duplicate_action_penalty(node)
 
         final_score = (
             exploitation
@@ -152,6 +167,7 @@ class Selector(BaseModel):
             + expect_correction_bonus
             + diversity_bonus
             - duplicate_child_penalty
+            - duplicate_action_penalty
         )
 
         return UCTScore(
@@ -168,6 +184,7 @@ class Selector(BaseModel):
             expect_correction_bonus=expect_correction_bonus,
             diversity_bonus=diversity_bonus,
             duplicate_child_penalty=duplicate_child_penalty,
+            duplicate_action_penalty=duplicate_action_penalty,
         )
 
     def calculate_exploitation(self, node: Node) -> float:
@@ -177,7 +194,12 @@ class Selector(BaseModel):
         Purpose: Favors nodes with higher rewards, encouraging the algorithm to exploit
         known good paths in the search tree.
         """
-        return node.reward.value if node.reward else 0
+        if self.use_average_reward:
+            reward = node.calculate_mean_reward()
+        else:
+            reward = node.reward.value if node.reward else 0
+
+        return self.exploitation_weight * reward
 
     def calculate_exploration(self, node: Node) -> float:
         """
@@ -337,8 +359,15 @@ class Selector(BaseModel):
         as the parent node accumulates more children, encouraging exploration of less-visited
         correction paths.
         """
-        if (node.observation and node.observation.expect_correction and
-                not (node.parent and node.parent.observation and node.parent.observation.expect_correction)):  # TODO: Set parent as decay factor  instead?
+        if (
+            node.observation
+            and node.observation.expect_correction
+            and not (
+                node.parent
+                and node.parent.observation
+                and node.parent.observation.expect_correction
+            )
+        ):  # TODO: Set parent as decay factor  instead?
             # Use a more aggressive decay factor
             decay_factor = 1 / (1 + len(node.children) ** 2)
             return self.expect_correction_bonus * decay_factor
@@ -355,7 +384,15 @@ class Selector(BaseModel):
         if not self.diversity_weight:
             return 0
 
-        expandable_nodes = [n for n in node.get_root().get_expanded_descendants() if n.node_id != node.node_id]
+        # Ignore nodes without any code added to file context yet
+        if node.file_context.is_empty():
+            return 0
+
+        expandable_nodes = [
+            n
+            for n in node.get_root().get_expanded_descendants()
+            if n.node_id != node.node_id
+        ]
 
         if not expandable_nodes:
             # No other nodes to compare; return maximum bonus
@@ -385,8 +422,37 @@ class Selector(BaseModel):
         duplicate_count = sum(1 for child in node.children if child.is_duplicate)
         if duplicate_count > 0:
             # Penalty increases quadratically with number of duplicates
-            return self.duplicate_child_penalty_constant * (duplicate_count ** 2)
+            return self.duplicate_child_penalty_constant * (duplicate_count**2)
         return 0
+
+    def calculate_duplicate_action_penalty(self, node: Node) -> float:
+        """
+        Calculate penalty for nodes that have children with duplicate action names.
+        The penalty increases with each duplicate action.
+
+        Purpose: Discourages selecting nodes whose children perform the same type of action
+        multiple times, promoting more diverse action sequences.
+        """
+        if not node.children:
+            return 0.0
+
+        # Count occurrences of each action name among children
+        action_counts = {}
+        for child in node.children:
+            if child.action:
+                action_name = child.action.__class__.__name__
+                action_counts[action_name] = action_counts.get(action_name, 0) + 1
+
+        # Sum up penalties for all action types that have duplicates
+        total_penalty = 0.0
+        for count in action_counts.values():
+            if count > 1:  # Only penalize actions that appear more than once
+                # Penalty increases quadratically with number of duplicates
+                total_penalty += self.duplicate_action_penalty_constant * (
+                    (count - 1) ** 2
+                )
+
+        return total_penalty
 
     def get_similarity(self, node_a: Node, node_b: Node) -> float:
         """
@@ -395,7 +461,10 @@ class Selector(BaseModel):
         if node_a.file_context is None or node_b.file_context is None:
             return 0.0
 
-        node_ids = (min(node_a.node_id, node_b.node_id), max(node_a.node_id, node_b.node_id))
+        node_ids = (
+            min(node_a.node_id, node_b.node_id),
+            max(node_a.node_id, node_b.node_id),
+        )
         if node_ids in self._similarity_cache:
             return self._similarity_cache[node_ids]
 

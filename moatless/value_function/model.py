@@ -1,7 +1,6 @@
 from typing import Optional
-from instructor import OpenAISchema
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from moatless.completion.model import StructuredOutput
 

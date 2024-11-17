@@ -1,10 +1,15 @@
 import logging
-from typing import List, Any, Dict
+from typing import List, Any
 
 from pydantic import Field, PrivateAttr
 
 from moatless.actions.action import Action
-from moatless.actions.model import ActionArguments, FewShotExample, Observation, RewardScaleEntry
+from moatless.actions.model import (
+    ActionArguments,
+    FewShotExample,
+    Observation,
+    RewardScaleEntry,
+)
 from moatless.file_context import FileContext
 from moatless.index.code_index import CodeIndex, is_test
 from moatless.repository.repository import Repository
@@ -69,11 +74,13 @@ class RunTests(Action):
             raise ValueError(
                 "File context must be provided to execute the run tests action."
             )
-        
-        test_files = [test_file for test_file 
-                      in args.test_files
-                      if file_context.get_file(test_file) is not None and is_test(test_file)]
-        
+
+        test_files = [
+            test_file
+            for test_file in args.test_files
+            if file_context.get_file(test_file) is not None and is_test(test_file)
+        ]
+
         if not test_files:
             file_paths = args.test_files
             if not file_paths:
@@ -86,19 +93,15 @@ class RunTests(Action):
 
                 for search_result in search_results:
                     test_files.append(search_result.file_path)
-                
 
         for test_file in test_files:
-           if not file_context.has_file(test_file):
+            if not file_context.has_file(test_file):
                 logger.info(f"Adding test file: {test_file} to context")
-                file_context.add_file(test_file, add_import_span=False)
+                file_context.add_file(test_file, add_extra=False)
 
         test_files = [
-            file.file_path
-            for file in file_context.files
-            if is_test(file.file_path)
+            file.file_path for file in file_context.files if is_test(file.file_path)
         ]
-        
 
         logger.info(f"Running tests: {test_files}")
         patch = file_context.generate_git_patch()
@@ -135,7 +138,9 @@ class RunTests(Action):
 
         return self.create_output(test_results, test_files)
 
-    def create_output(self, test_results: List[TestResult], test_files: List[str]) -> Observation:
+    def create_output(
+        self, test_results: List[TestResult], test_files: List[str]
+    ) -> Observation:
         if not test_results:
             return Observation(
                 message="No tests were run",
@@ -191,7 +196,9 @@ class RunTests(Action):
             response_msg += "\n\n"
             response_msg += "\n".join(test_result_strings)
 
-        response_msg += f"\n\n{passed_count} passed. {failure_count} failed. {error_count} errors."
+        response_msg += (
+            f"\n\n{passed_count} passed. {failure_count} failed. {error_count} errors."
+        )
 
         result_dicts = [result.model_dump() for result in test_results]
 
@@ -275,8 +282,8 @@ class RunTests(Action):
                     scratch_pad="We need to run the authentication tests to ensure the login flow changes haven't introduced any regressions.",
                     test_files=[
                         "tests/auth/test_authentication.py",
-                        "tests/auth/test_login.py"
-                    ]
-                )
+                        "tests/auth/test_login.py",
+                    ],
+                ),
             )
         ]

@@ -4,9 +4,14 @@ import pkgutil
 from abc import ABC
 from typing import List, Type, Tuple, Any, Dict, Optional, ClassVar
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict
 
-from moatless.actions.model import ActionArguments, Observation, RewardScaleEntry, FewShotExample
+from moatless.actions.model import (
+    ActionArguments,
+    Observation,
+    RewardScaleEntry,
+    FewShotExample,
+)
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.repository import Repository
@@ -149,6 +154,7 @@ At this stage, the agent is still working on the solution. Your task is twofold:
         obj = obj.copy()
         obj.pop("args_schema", None)
         action_class_path = obj.pop("action_class", None)
+
         if action_class_path:
             module_name, class_name = action_class_path.rsplit(".", 1)
             module = importlib.import_module(module_name)

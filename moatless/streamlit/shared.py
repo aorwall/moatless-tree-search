@@ -64,6 +64,7 @@ def generate_summary(df: pd.DataFrame):
                             f'Running ({status_counts.get("Running", 0)})',
                             f'Failed ({status_counts.get("Failed", 0)})',
                             f'Rejected ({status_counts.get("Rejected", 0)})',
+                            f'Error ({status_counts.get("Error", 0)})',
                         ],
                         range=[
                             "#4CAF50",
@@ -72,6 +73,7 @@ def generate_summary(df: pd.DataFrame):
                             "#2196F3",
                             "#F44336",
                             "#A52A2A",
+                            "#9C27B0",
                         ],
                     ),
                 ),
@@ -103,21 +105,28 @@ def trajectory_table(report_path: str):
     logger.info(f"Loaded {len(results)} trajectory reports")
     df = to_dataframe(results)
 
-    # Add a new column for success status
+    # Extract all unique fail reasons from the results
+    all_fail_reasons = set()
+    for result in results:
+        if result.fail_reasons:  # Check if fail_reasons exists and is not empty
+            all_fail_reasons.update(result.fail_reasons)
+
     df["success_status"] = df.apply(
         lambda row: "Resolved"
-        if row["status"] == "resolved"
-        else "Running with Resolved Solutions"
-        if row["status"] == "running" and row["resolved_solutions"] > 0
+        if row["resolved"] is not None and row["resolved"]
         else "Partially Resolved"
         if row["resolved_solutions"] > 0
+        else "Failed"
+        if row["failed_solutions"] > 0
         else "Rejected"
         if row["status"] == "rejected"
         else "Running"
         if row["status"] == "running"
         else "Finished"
         if row["status"] == "finished"
-        else "Failed",
+        else "Error"
+        if row["status"] == "error"
+        else "Unknown",
         axis=1,
     )
 
@@ -137,40 +146,42 @@ def trajectory_table(report_path: str):
             "Status", df["status"].unique(), key="status_filter"
         )
     with col2:
-        has_resolved_solutions = st.multiselect("Has Resolved Solutions", ["Yes", "No"])
+        has_resolved_solutions = st.multiselect(
+            "Has Resolved Solutions", ["Yes", "No"], key="resolved_solutions_filter"
+        )
     with col3:
-        instance_filter = st.multiselect(
-            "Instance", df["instance_id"].unique(), key="instance_filter"
+        fail_reason_filter = st.multiselect(
+            "Fail Reasons", sorted(list(all_fail_reasons)), key="fail_reason_filter"
         )
     with col4:
-        llmonkeys_rate_range = st.slider("LLMonkeys Rate (%)", 0, 100, (0, 100), 1)
-
-    # Apply filters
-    mask = pd.Series(True, index=df.index)
-    if status_filter:
-        mask &= df["status"].isin(status_filter)
-    if instance_filter:
-        mask &= df["instance_id"].isin(instance_filter)
-    if has_resolved_solutions:
-        if "Yes" in has_resolved_solutions:
-            mask &= df["resolved_solutions"] > 0
-        if "No" in has_resolved_solutions:
-            mask &= df["resolved_solutions"] == 0
-
-    if int(df["resolved_by"].min()) < int(df["resolved_by"].max()):
-        with col5:
+        if int(df["resolved_by"].min()) < int(df["resolved_by"].max()):
             resolved_by_range = st.slider(
                 "Resolved By",
                 int(df["resolved_by"].min()),
                 int(df["resolved_by"].max()),
                 (int(df["resolved_by"].min()), int(df["resolved_by"].max())),
+                key=f"resolved_by_slider",
             )
 
-        # Apply new filters
-        mask &= df["llmonkeys_rate"].apply(
-            lambda x: float(x.strip("%")) >= llmonkeys_rate_range[0]
-            and float(x.strip("%")) <= llmonkeys_rate_range[1]
+    # Apply filters
+    mask = pd.Series(True, index=df.index)
+    if status_filter:
+        mask &= df["status"].isin(status_filter)
+    if has_resolved_solutions:
+        if "Yes" in has_resolved_solutions:
+            mask &= df["resolved_solutions"] > 0
+        if "No" in has_resolved_solutions:
+            mask &= df["resolved_solutions"] == 0
+    if fail_reason_filter:
+        # Filter based on selected fail reasons
+        mask &= df.apply(
+            lambda row: any(
+                reason in row.get("fail_reasons", []) for reason in fail_reason_filter
+            ),
+            axis=1,
         )
+
+    if int(df["resolved_by"].min()) < int(df["resolved_by"].max()):
         mask &= df["resolved_by"].between(resolved_by_range[0], resolved_by_range[1])
 
     filtered_df = df[mask]
@@ -218,6 +229,10 @@ def trajectory_table(report_path: str):
             return ["background-color: rgba(255, 235, 59, 0.3)"] * len(row)
         elif row["success_status"] == "Running":
             return ["background-color: rgba(33, 150, 243, 0.3)"] * len(row)
+        elif row["success_status"] == "Error":
+            return ["background-color: rgba(156, 39, 176, 0.3)"] * len(
+                row
+            )  # Purple for error
         else:
             return ["background-color: rgba(244, 67, 54, 0.3)"] * len(row)
 

@@ -1,42 +1,45 @@
 import logging
 from pathlib import Path
-from typing import Optional, List
+from typing import List
 
-from pydantic import Field, PrivateAttr
+from pydantic import Field
 
 from moatless.actions.action import Action
-from moatless.actions.model import ActionArguments, Observation, FewShotExample
-from moatless.completion.model import ToolCall
-from moatless.file_context import FileContext
-from moatless.repository.file import do_diff
-from moatless.actions.run_tests import RunTests, RunTestsArgs
-from moatless.index import CodeIndex
-from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.actions.code_action_value_mixin import CodeActionValueMixin
 from moatless.actions.code_modification_mixin import CodeModificationMixin
+from moatless.actions.model import ActionArguments, Observation, FewShotExample
+from moatless.actions.run_tests import RunTests, RunTestsArgs
+from moatless.file_context import FileContext
+from moatless.index import CodeIndex
+from moatless.repository.file import do_diff
+from moatless.repository.repository import Repository
+from moatless.runtime.runtime import RuntimeEnvironment
 
 logger = logging.getLogger(__name__)
+
 
 class CreateFileArgs(ActionArguments):
     """
     Create a new file with specified content.
-    
+
     Notes:
     * Cannot be used if the specified path already exists
     * Will create parent directories if they don't exist
     * File content should include proper indentation and formatting
     """
+
     path: str = Field(..., description="Path where the new file should be created")
     file_text: str = Field(..., description="Complete content to write to the new file")
 
     class Config:
         title = "CreateFile"
 
+
 class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
     """
     Action to create a new file with specified content.
     """
+
     args_schema = CreateFileArgs
 
     def __init__(
@@ -48,9 +51,9 @@ class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
     ):
         super().__init__(**data)
         # Initialize mixin attributes directly
-        object.__setattr__(self, '_runtime', runtime)
-        object.__setattr__(self, '_code_index', code_index)
-        object.__setattr__(self, '_repository', repository)
+        object.__setattr__(self, "_runtime", runtime)
+        object.__setattr__(self, "_code_index", code_index)
+        object.__setattr__(self, "_repository", repository)
 
     def execute(self, args: CreateFileArgs, file_context: FileContext) -> Observation:
         if args.path.startswith("/repo"):
@@ -79,7 +82,11 @@ class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
         if not self._runtime:
             return observation
 
-        run_tests = RunTests(repository=self._repository, runtime=self._runtime, code_index=self._code_index)
+        run_tests = RunTests(
+            repository=self._repository,
+            runtime=self._runtime,
+            code_index=self._code_index,
+        )
         test_observation = run_tests.execute(
             RunTestsArgs(
                 scratch_pad=args.scratch_pad,
@@ -124,8 +131,8 @@ class UserAuth:
 
         self._users[username] = password
         logger.info(f"User {username} registered successfully")
-        return True"""
-                )
+        return True""",
+                ),
             ),
             FewShotExample.create(
                 user_input="Create a new configuration file",
@@ -149,7 +156,7 @@ LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'level': 'INFO'
-}"""
-                )
-            )
+}""",
+                ),
+            ),
         ]

@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Set, Union
+from typing import Optional, List, Dict, Set
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from unidiff import PatchSet
@@ -22,7 +22,7 @@ from moatless.index import CodeIndex
 from moatless.repository import FileRepository
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
-from moatless.schema import FileWithSpans, RankedFileSpan
+from moatless.schema import FileWithSpans
 
 logger = logging.getLogger(__name__)
 
@@ -304,27 +304,46 @@ class ContextFile(BaseModel):
         line_no = 0  # 0-based index
 
         for hunk in patched_file:
-            # Copy unchanged lines before the hunk
-            while line_no < hunk.source_start - 1:
-                new_content_lines.append(content_lines[line_no])
-                line_no += 1
-
-            # Apply changes from the hunk
-            for line in hunk:
-                if line.is_context:
-                    if line_no >= len(content_lines):
-                        raise Exception(f"Patch context mismatch. Line no {line_no} is larger than content_lines length {len(content_lines)}")
-                    elif line.value.strip() and content_lines[line_no] != line.value:
-                        raise Exception(f"Patch context mismatch. Line {line_no} does not match expected content. \"{content_lines[line_no]}\" != \"{line.value}\"")
+            try:
+                # Copy unchanged lines before the hunk
+                while line_no < hunk.source_start - 1 and line_no < len(content_lines):
                     new_content_lines.append(content_lines[line_no])
                     line_no += 1
-                elif line.is_added:
-                    new_content_lines.append(line.value)
-                elif line.is_removed:
-                    line_no += 1
 
-        # Copy remaining lines after the last hunk
-        new_content_lines.extend(content_lines[line_no:])
+                # Apply changes from the hunk
+                for line in hunk:
+                    if line.is_context:
+                        if line_no >= len(content_lines):
+                            raise Exception(
+                                f"Patch context mismatch: Line {line_no} is beyond end of file"
+                            )
+                        elif (
+                            line.value.strip()
+                            and content_lines[line_no].strip() != line.value.strip()
+                        ):
+                            raise Exception(
+                                f'Patch context mismatch at line {line_no}: Expected "{line.value.strip()}", got "{content_lines[line_no].strip()}"'
+                            )
+                        new_content_lines.append(content_lines[line_no])
+                        line_no += 1
+                    elif line.is_added:
+                        new_content_lines.append(line.value)
+                    elif line.is_removed:
+                        if line_no >= len(content_lines):
+                            raise Exception(
+                                f"Patch context mismatch: Cannot remove line {line_no} as it is beyond end of file"
+                            )
+                        line_no += 1
+
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to apply patch to {self.file_path}. Line number {line_no}. Hunk: {hunk}"
+                ) from e
+
+        # Copy any remaining lines after the last hunk
+        if line_no < len(content_lines):
+            new_content_lines.extend(content_lines[line_no:])
+
         return "".join(new_content_lines)
 
     def generate_full_patch(self) -> str:
@@ -393,7 +412,7 @@ class ContextFile(BaseModel):
         show_outcommented_code=False,
         outcomment_code_comment: str = "...",
         show_all_spans: bool = False,
-        only_signatures: bool = False
+        only_signatures: bool = False,
     ):
         if self.module:
             if (
@@ -414,7 +433,7 @@ class ContextFile(BaseModel):
                 show_outcommented_code=show_outcommented_code,
                 exclude_comments=exclude_comments,
                 show_all_spans=show_all_spans or self.show_all_spans,
-                only_signatures=only_signatures
+                only_signatures=only_signatures,
             )
         else:
             code = self._to_prompt_with_line_spans(show_span_id=show_span_ids)
@@ -475,7 +494,7 @@ class ContextFile(BaseModel):
         show_line_numbers: bool = False,
         exclude_comments: bool = False,
         show_all_spans: bool = False,
-        only_signatures: bool = False
+        only_signatures: bool = False,
     ):
         if current_span is None:
             current_span = CurrentPromptSpan()
@@ -556,7 +575,7 @@ class ContextFile(BaseModel):
                     current_span=current_span,
                     show_line_numbers=show_line_numbers,
                     show_all_spans=show_all_spans,
-                    only_signatures=only_signatures
+                    only_signatures=only_signatures,
                 )
             elif (
                 show_outcommented_code
@@ -602,16 +621,18 @@ class ContextFile(BaseModel):
         span_ids: Set[str],
         tokens: Optional[int] = None,
         pinned: bool = False,
+        add_extra: bool = True,
     ):
         for span_id in span_ids:
-            self.add_span(span_id, tokens=tokens, pinned=pinned)
+            self.add_span(span_id, tokens=tokens, pinned=pinned, add_extra=add_extra)
 
     def add_span(
         self,
         span_id: str,
         tokens: Optional[int] = None,
         pinned: bool = False,
-    ):
+        add_extra: bool = True,
+    ) -> bool:
         existing_span = next(
             (span for span in self.spans if span.span_id == span_id), None
         )
@@ -619,17 +640,21 @@ class ContextFile(BaseModel):
         if existing_span:
             existing_span.tokens = tokens
             existing_span.pinned = pinned
+            return False
         else:
             span = self.module.find_span_by_id(span_id)
             if span:
                 self.spans.append(
                     ContextSpan(span_id=span_id, tokens=tokens, pinned=pinned)
                 )
-                self._add_class_span(span)
+                if add_extra:
+                    self._add_class_span(span)
+                return True
             else:
                 logger.warning(
                     f"Tried to add not existing span id {span_id} in file {self.file_path}"
                 )
+                return False
 
     def _add_class_span(self, span: BlockSpan):
         if span.initiating_block.type != CodeBlockType.CLASS:
@@ -659,7 +684,9 @@ class ContextFile(BaseModel):
         if class_block.belongs_to_span.span_id not in self.span_ids:
             self.spans.append(ContextSpan(span_id=class_block.belongs_to_span.span_id))
 
-    def add_line_span(self, start_line: int, end_line: int) -> list[str]:
+    def add_line_span(
+        self, start_line: int, end_line: int | None = None, add_extra: bool = True
+    ) -> list[str]:
         if not self.module:
             logger.warning(f"Could not find module for file {self.file_path}")
             return []
@@ -670,32 +697,53 @@ class ContextFile(BaseModel):
         )
 
         added_spans = []
+        tokens = 0
         for block in blocks:
-            if block.belongs_to_span:
-                if block.belongs_to_span.span_id not in self.span_ids:
-                    added_spans.append(block.belongs_to_span.span_id)
-                    self.add_span(block.belongs_to_span.span_id)
+            if (
+                block.belongs_to_span
+                and block.belongs_to_span.span_id not in self.span_ids
+            ):
+                added_spans.append(block.belongs_to_span.span_id)
+                self.add_span(block.belongs_to_span.span_id, add_extra=add_extra)
+                tokens += block.belongs_to_span.tokens
 
         logger.info(
-            f"Added {added_spans} spans on lines {start_line} - {end_line} to {self.file_path} to context"
+            f"Added {added_spans} with {tokens} tokens on lines {start_line} - {end_line} to {self.file_path} to context"
         )
         return added_spans
-    
+
     def lines_is_in_context(self, start_line: int, end_line: int) -> bool:
+        """
+        Check if the given line range's start and end points are covered by spans in the context.
+        A single span can cover both points, or different spans can cover each point.
+
+        Args:
+            start_line (int): Start line number
+            end_line (int): End line number
+
+        Returns:
+            bool: True if both start and end lines are covered by spans in context, False otherwise
+        """
         if self.show_all_spans:
             return True
 
-        blocks = self.module.find_blocks_by_line_numbers(
-            start_line, end_line, include_parents=True
-        )
+        if not self.module:
+            return False
 
-        for block in blocks:
-            if block.belongs_to_span:
-                if block.belongs_to_span.span_id not in self.span_ids:
-                    return False
+        start_covered = False
+        end_covered = False
 
-        return True
+        for span in self.spans:
+            block_span = self.module.find_span_by_id(span.span_id)
+            if block_span:
+                if block_span.start_line <= start_line <= block_span.end_line:
+                    start_covered = True
+                if block_span.start_line <= end_line <= block_span.end_line:
+                    end_covered = True
+                if start_covered and end_covered:
+                    return True
 
+        return False
 
     def remove_span(self, span_id: str):
         self.spans = [span for span in self.spans if span.span_id != span_id]
@@ -776,11 +824,13 @@ class FileContext(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def __init__(self,
-                 repo: Repository | None,
-                 runtime: RuntimeEnvironment | None = None,
-                 code_index: CodeIndex | None = None,
-                 **data):
+    def __init__(
+        self,
+        repo: Repository | None,
+        runtime: RuntimeEnvironment | None = None,
+        code_index: CodeIndex | None = None,
+        **data,
+    ):
         super().__init__(**data)
 
         self._repo = repo
@@ -865,7 +915,9 @@ class FileContext(BaseModel):
                 file_with_spans.file_path, set(file_with_spans.span_ids)
             )
 
-    def add_file(self, file_path: str, show_all_spans: bool = False, add_import_span: bool = True) -> ContextFile:
+    def add_file(
+        self, file_path: str, show_all_spans: bool = False, add_extra: bool = True
+    ) -> ContextFile:
         if file_path not in self._files:
             self._files[file_path] = ContextFile(
                 file_path=file_path,
@@ -873,7 +925,7 @@ class FileContext(BaseModel):
                 show_all_spans=show_all_spans,
                 repo=self._repo,
             )
-            if add_import_span:
+            if add_extra:
                 self._files[file_path]._add_import_span()
 
         return self._files[file_path]
@@ -904,10 +956,15 @@ class FileContext(BaseModel):
         span_ids: Set[str],
         tokens: Optional[int] = None,
         pinned: bool = False,
+        add_extra: bool = True,
     ):
-        context_file = self.get_context_file(file_path)
+        if not self.has_file(file_path):
+            context_file = self.add_file(file_path)
+        else:
+            context_file = self.get_context_file(file_path)
+
         if context_file:
-            context_file.add_spans(span_ids, tokens, pinned=pinned)
+            context_file.add_spans(span_ids, tokens, pinned=pinned, add_extra=add_extra)
         else:
             logger.warning(f"Could not find file {file_path} in the repository")
 
@@ -917,19 +974,38 @@ class FileContext(BaseModel):
         span_id: str,
         tokens: Optional[int] = None,
         pinned: bool = False,
-    ):
-        context_file = self.get_context_file(file_path)
-        if context_file:
-            context_file.add_span(span_id, tokens=tokens, pinned=pinned)
+        add_extra: bool = True,
+    ) -> bool:
+        if not self.has_file(file_path):
+            context_file = self.add_file(file_path)
         else:
-            logger.warning(f"Could not find file {file_path} in the repository")
+            context_file = self.get_context_file(file_path)
 
-    def add_line_span_to_context(self, file_path: str, start_line: int, end_line: int):
-        context_file = self.get_context_file(file_path)
         if context_file:
-            context_file.add_line_span(start_line, end_line)
+            return context_file.add_span(
+                span_id, tokens=tokens, pinned=pinned, add_extra=add_extra
+            )
         else:
             logger.warning(f"Could not find file {file_path} in the repository")
+            return False
+
+    def add_line_span_to_context(
+        self,
+        file_path: str,
+        start_line: int,
+        end_line: int | None = None,
+        add_extra: bool = True,
+    ) -> List[str]:
+        if not self.has_file(file_path):
+            context_file = self.add_file(file_path)
+        else:
+            context_file = self.get_context_file(file_path)
+
+        if context_file:
+            return context_file.add_line_span(start_line, end_line, add_extra=add_extra)
+        else:
+            logger.warning(f"Could not find file {file_path} in the repository")
+            return []
 
     def remove_span_from_context(
         self, file_path: str, span_id: str, remove_file: bool = False
@@ -991,7 +1067,10 @@ class FileContext(BaseModel):
         context_file = self._files.get(file_path)
         return context_file or self._repo.file_exists(file_path)
 
-    def get_context_file(self, file_path: str) -> Optional[ContextFile]:
+    def get_context_file(
+        self, file_path: str, add_extra: bool = False
+    ) -> Optional[ContextFile]:
+        file_path = self._repo.get_relative_path(file_path)
         context_file = self._files.get(file_path)
 
         if not context_file:
@@ -1003,13 +1082,14 @@ class FileContext(BaseModel):
                 logger.info(f"get_context_file({file_path}) File is a directory")
                 return None
 
-            self.add_file(file_path)
+            self.add_file(file_path, add_extra=add_extra)
             context_file = self._files[file_path]
 
         return context_file
 
     def get_context_files(self) -> List[ContextFile]:
-        for file_path in self._files.keys():
+        file_paths = list(self._files.keys())
+        for file_path in file_paths:
             yield self.get_context_file(file_path)
 
     def context_size(self):
@@ -1038,6 +1118,7 @@ class FileContext(BaseModel):
         show_outcommented_code=False,
         outcomment_code_comment: str = "...",
         files: set | None = None,
+        only_signatures: bool = False,
     ):
         file_contexts = []
         for context_file in self.get_context_files():
@@ -1048,6 +1129,7 @@ class FileContext(BaseModel):
                     exclude_comments,
                     show_outcommented_code,
                     outcomment_code_comment,
+                    only_signatures=only_signatures,
                 )
                 file_contexts.append(content)
 
@@ -1077,23 +1159,25 @@ class FileContext(BaseModel):
 
         return "\n".join(full_patch)
 
-    def get_updated_files(self, old_context: "FileContext", include_patches: bool = False) -> set[str]:
+    def get_updated_files(
+        self, old_context: "FileContext", include_patches: bool = False
+    ) -> set[str]:
         """
         Compares this FileContext with an older one and returns a set of files that have been updated.
         Updates include content changes, span additions/removals, and file additions.
-        
+
         Args:
             old_context: The previous FileContext to compare against
-            
+
         Returns:
             set[str]: Set of file paths that have different content or spans between the two contexts
         """
         updated_files = set()
-        
+
         # Check files in current context
         for file_path, current_file in self._files.items():
             old_file = old_context._files.get(file_path)
-            
+
             if old_file is None:
                 # New file added
                 updated_files.add(file_path)
@@ -1102,16 +1186,16 @@ class FileContext(BaseModel):
                 if include_patches and current_file.content != old_file.content:
                     updated_files.add(file_path)
                     continue
-                    
+
                 # Check for span changes
                 current_spans = current_file.span_ids
                 old_spans = old_file.span_ids
                 if current_spans != old_spans:
                     updated_files.add(file_path)
-                
+
         return updated_files
 
-    def get_updated_context(self, old_context: "FileContext") -> "FileContext":
+    def get_context_diff(self, old_context: "FileContext") -> "FileContext":
         diff_context = FileContext(repo=self._repo)
 
         for file_path, current_file in self._files.items():
@@ -1119,15 +1203,96 @@ class FileContext(BaseModel):
 
             if old_file is None:
                 logger.info(f"File {file_path} is new")
-                diff_context.add_spans_to_context(file_path, current_file.span_ids)
+                diff_context._files[file_path] = current_file
             else:
-
                 current_spans = current_file.span_ids
                 old_spans = old_file.span_ids
                 new_spans = current_spans - old_spans
                 if new_spans:
-                    logger.info(f"File {file_path} has new spans: {new_spans}")
-                    diff_context.add_spans_to_context(file_path, new_spans)
+                    diff_context._files[file_path] = ContextFile(
+                        file_path=file_path,
+                        repo=self._repo,
+                    )
+                    diff_context._files[file_path].spans.extend(
+                        [
+                            span
+                            for span in current_file.spans
+                            if span.span_id in new_spans
+                        ]
+                    )
 
         return diff_context
 
+    def create_summary(self) -> str:
+        """
+        Creates a summary of the files and spans in the context.
+
+        Returns:
+            str: A formatted summary string listing files and their spans
+        """
+        if self.is_empty():
+            return "No files in context"
+
+        summary = ""
+        for context_file in self.get_context_files():
+            summary += f"\nFile: {context_file.file_path}\n"
+
+            if context_file.show_all_spans:
+                summary += "- Showing all code in file\n"
+                continue
+
+            if not context_file.spans:
+                continue
+
+            for span in context_file.spans:
+                if span.start_line and span.end_line:
+                    summary += f"- Lines {span.start_line}-{span.end_line}\n"
+                else:
+                    summary += f"- {span.span_id}\n"
+
+        return summary
+
+    def add_file_context(self, other_context: "FileContext") -> List[str]:
+        """
+        Adds spans from another FileContext to the current one and returns newly added span IDs.
+
+        Args:
+            other_context: The FileContext to merge into this one
+
+        Returns:
+            List[str]: List of newly added span IDs
+        """
+        new_span_ids = []
+
+        for other_file in other_context.files:
+            file_path = other_file.file_path
+
+            if not self.has_file(file_path):
+                # Create new file if it doesn't exist
+                context_file = self.add_file(file_path)
+            else:
+                context_file = self.get_context_file(file_path)
+
+            # Add spans that don't already exist
+            for span in other_file.spans:
+                if context_file.add_span(span.span_id):
+                    new_span_ids.append(span.span_id)
+
+            # Copy show_all_spans flag if either context has it enabled
+            context_file.show_all_spans = (
+                context_file.show_all_spans or other_file.show_all_spans
+            )
+
+        return new_span_ids
+
+    def span_count(self) -> int:
+        """
+        Returns the total number of span IDs across all files in the context.
+
+        Returns:
+            int: Total number of span IDs
+        """
+        span_ids = []
+        for file in self._files.values():
+            span_ids.extend(file.span_ids)
+        return len(span_ids)

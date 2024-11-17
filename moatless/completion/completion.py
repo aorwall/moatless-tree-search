@@ -1,35 +1,44 @@
 import json
 import logging
 import os
-import random
-import string
 from enum import Enum
-from typing import Optional, Union, List, Tuple, Any, Self
+from textwrap import dedent
+from typing import Optional, Union, List, Tuple, Any
 
 import anthropic
 import instructor
-from instructor.utils import extract_json_from_codeblock
-from jsonschema import ValidationError
 import litellm
 import openai
 import tenacity
 from anthropic import Anthropic, AnthropicBedrock, NOT_GIVEN
 from anthropic.types import ToolUseBlock, TextBlock
-from anthropic.types.beta import BetaToolUseBlock, BetaTextBlock, BetaMessageParam, BetaCacheControlEphemeralParam
-from instructor import OpenAISchema
-from instructor.exceptions import InstructorRetryException
+from anthropic.types.beta import (
+    BetaToolUseBlock,
+    BetaTextBlock,
+    BetaMessageParam,
+    BetaCacheControlEphemeralParam,
+)
+from litellm.exceptions import (
+    BadRequestError,
+    NotFoundError,
+    AuthenticationError,
+    APIError,
+)
 from litellm.types.utils import ModelResponse
 from openai import AzureOpenAI, OpenAI, LengthFinishReasonError
-from pydantic import BaseModel, Field, model_validator, field_validator
-from litellm.exceptions import BadRequestError, NotFoundError, AuthenticationError, APIError
+from pydantic import BaseModel, Field, model_validator, ValidationError
+
 from moatless.completion.model import Message, Completion, StructuredOutput
 from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
 
 logger = logging.getLogger(__name__)
 
+
 class LLMResponseFormat(str, Enum):
     TOOLS = "tool_call"
     JSON = "json"
+    ANTHROPIC_TOOLS = "anthropic_tools"
+    REACT = "react"
 
 
 class CompletionModel(BaseModel):
@@ -50,35 +59,31 @@ class CompletionModel(BaseModel):
     stop_words: Optional[list[str]] = Field(
         default=None, description="The stop words to use for completion"
     )
+    metadata: Optional[dict] = Field(
+        default=None, description="Additional metadata for the completion model"
+    )
 
     @model_validator(mode="after")
     def validate_response_format(self):
-        # Always use JSON response format for deepseek chat as it isn't reliable with tools
-        if self.model == "deepseek/deepseek-chat":
-            self.response_format = LLMResponseFormat.JSON
-        else:
-            try:
-                support_function_calling = litellm.supports_function_calling(
-                    model=self.model
-                )
-            except Exception as e:
-                support_function_calling = False
-
-            if not support_function_calling:
-                logger.debug(
-                    f"The model {self.model} doens't support function calling, set response format to JSON"
-                )
+        if self.response_format == LLMResponseFormat.TOOLS:
+            # Always use JSON response format for deepseek chat as it isn't reliable with tools
+            if self.model == "deepseek/deepseek-chat":
                 self.response_format = LLMResponseFormat.JSON
+            else:
+                try:
+                    support_function_calling = litellm.supports_function_calling(
+                        model=self.model
+                    )
+                except Exception as e:
+                    support_function_calling = False
+
+                if not support_function_calling:
+                    logger.debug(
+                        f"The model {self.model} doens't support function calling, set response format to JSON"
+                    )
+                    self.response_format = LLMResponseFormat.JSON
 
         return self
-
-    @field_validator('response_format', mode='before')
-    @classmethod
-    def fix_unknown_response_format(cls, v):
-        if isinstance(v, str):
-            if v not in LLMResponseFormat.__members__:
-                return LLMResponseFormat.TOOLS
-        return v
 
     @property
     def supports_anthropic_prompt_caching(self):
@@ -96,7 +101,7 @@ class CompletionModel(BaseModel):
     @property
     def use_openai_client(self):
         """Skip LiteLLm and use OpenAI's client for beta features"""
-        return self.model in  [
+        return self.model in [
             "gpt-4o-2024-08-06",
             "gpt-4o-mini-2024-07-18",
             "gpt-4o-mini",
@@ -106,42 +111,45 @@ class CompletionModel(BaseModel):
         self,
         messages: List[Message],
         system_prompt: str,
-        actions: List[type[StructuredOutput]] | None = None,
+        response_model: List[type[StructuredOutput]]
+        | type[StructuredOutput]
+        | None = None,
     ) -> Tuple[StructuredOutput, Completion]:
         if not system_prompt:
             raise ValueError("System prompt is required")
 
         completion_messages = self._map_completion_messages(messages)
-
-        if not self.supports_anthropic_computer_use and not self.supports_anthropic_prompt_caching:
-            completion_messages.insert(0, {"role": "system", "content": system_prompt})
-
+        completion_response = None
         try:
             if self.use_anthropic_client:
                 action_args, completion_response = self._anthropic_completion(
-                    completion_messages, system_prompt, actions
+                    completion_messages, system_prompt, response_model
+                )
+            elif response_model is None:
+                completion_messages.insert(
+                    0, {"role": "system", "content": system_prompt}
+                )
+                action_args, completion_response = self._litellm_text_completion(
+                    completion_messages,
+                )
+            elif self.response_format == LLMResponseFormat.REACT and isinstance(
+                response_model, list
+            ):
+                action_args, completion_response = self._litellm_react_completion(
+                    completion_messages, system_prompt, response_model
                 )
             elif self.use_openai_client:
                 action_args, completion_response = self._openai_completion(
-                    completion_messages, actions
+                    completion_messages, system_prompt, response_model
                 )
             elif self.response_format == LLMResponseFormat.TOOLS:
                 action_args, completion_response = self._litellm_tool_completion(
-                    completion_messages, actions
+                    completion_messages, system_prompt, response_model
                 )
             else:
-                action_args, completion_response = self._instructor_completion(
-                    completion_messages, actions
+                action_args, completion_response = self._litellm_completion(
+                    completion_messages, system_prompt, response_model
                 )
-
-        except InstructorRetryException as e:
-            logger.warning(
-                f"Instructor failed after {e.n_attempts} attempts. Last completion: {e.last_completion}. Messages: {e.messages}")
-            raise CompletionRejectError(
-                f"Failed to parse response. Did {e.n_attempts} attempts. Error: {e}",
-                last_completion=e.last_completion,
-                messages=e.messages
-            )
         except CompletionRejectError as e:
             raise e
         except Exception as e:
@@ -149,22 +157,39 @@ class CompletionModel(BaseModel):
                 logger.error(
                     f"Request failed. self.model: {self.model}, base_url: {self.model_base_url}. Model: {e.model}, Provider {e.llm_provider}. Litellm {e.litellm_debug_info}. Exception {e.message}"
                 )
+                if e.status_code >= 500:
+                    raise CompletionRejectError(
+                        f"Failed to create completion: {e}",
+                        messages=completion_messages,
+                        last_completion=completion_response,
+                    ) from e
+
             else:
                 logger.error(f"Failed to get completion response from litellm: {e}")
+
             raise CompletionRuntimeError(
                 f"Failed to get completion response: {e}",
+                messages=completion_messages,
+                last_completion=completion_response,
             ) from e
 
-        completion = Completion.from_llm_completion(
-            input_messages=completion_messages,
-            completion_response=completion_response,
-            model=self.model,
-        )
+        if completion_response:
+            completion = Completion.from_llm_completion(
+                input_messages=completion_messages,
+                completion_response=completion_response,
+                model=self.model,
+            )
+        else:
+            completion = None
 
-        if "stop_reason" in completion.response and completion.response["stop_reason"] == "max_tokens":
+        if (
+            "stop_reason" in completion.response
+            and completion.response["stop_reason"] == "max_tokens"
+        ):
             raise CompletionRejectError(
                 f"Max tokens reached in completion response",
-                last_completion=completion_response
+                messages=completion_messages,
+                last_completion=completion_response,
             )
 
         return action_args, completion
@@ -172,7 +197,10 @@ class CompletionModel(BaseModel):
     def create_text_completion(self, messages: List[Message], system_prompt: str):
         completion_messages = self._map_completion_messages(messages)
 
-        if self.supports_anthropic_computer_use or self.supports_anthropic_prompt_caching:
+        if (
+            self.supports_anthropic_computer_use
+            or self.supports_anthropic_prompt_caching
+        ):
             response, completion_response = self._anthropic_completion(
                 completion_messages, system_prompt
             )
@@ -190,57 +218,335 @@ class CompletionModel(BaseModel):
 
         return response, completion
 
-    def create_completion_with_response_model(
+    def _litellm_completion(
         self,
-        messages: list[Message],
+        messages: list[dict],
         system_prompt: str,
-        response_model: type[StructuredOutput]
+        structured_output: type[StructuredOutput] | list[type[StructuredOutput]],
     ) -> Tuple[StructuredOutput, ModelResponse]:
-        if not self.response_format == LLMResponseFormat.JSON:
-            return self.create_completion(messages, system_prompt, actions=[response_model])
+        if not structured_output:
+            raise CompletionRuntimeError(f"Response model are required for completion")
 
-        completion_messages = self._map_completion_messages(messages)
-        completion_messages.insert(0, {"role": "system", "content": system_prompt})
+        if isinstance(structured_output, list) and len(structured_output) > 1:
+            avalabile_actions = [
+                action for action in structured_output if hasattr(action, "name")
+            ]
+            if not avalabile_actions:
+                raise CompletionRuntimeError(f"No actions found in {structured_output}")
 
-        client = instructor.from_litellm(
-            litellm.completion, mode=instructor.Mode.JSON
-        )
+            class TakeAction(StructuredOutput):
+                action: Union[tuple(structured_output)] = Field(...)
+                action_type: str = Field(
+                    ..., description="The type of action being taken"
+                )
+
+                @model_validator(mode="before")
+                def validate_action(cls, data: dict) -> dict:
+                    action_type = data.get("action_type")
+                    if not action_type:
+                        return data
+
+                    # Find the correct action class based on action_type
+                    action_class = next(
+                        (
+                            action
+                            for action in avalabile_actions
+                            if action.name == action_type
+                        ),
+                        None,
+                    )
+                    if not action_class:
+                        action_names = [action.name for action in avalabile_actions]
+                        raise ValidationError(
+                            f"Unknown action type: {action_type}. Available actions: {', '.join(action_names)}"
+                        )
+
+                    # Validate the action data using the specific action class
+                    data["action"] = action_class.model_validate(data["action"])
+                    return data
+
+            response_model = TakeAction
+        else:
+            response_model = structured_output
+
+        system_prompt += dedent(f"""\n# Response format
+You must respond with only a JSON object that match the following json_schema:\n
+
+{json.dumps(response_model.model_json_schema(), indent=2, ensure_ascii=False)}
+
+Make sure to return an instance of the JSON, not the schema itself.""")
+
+        messages.insert(0, {"role": "system", "content": system_prompt})
 
         retries = tenacity.Retrying(
-            retry=tenacity.retry_if_not_exception_type((APIError, BadRequestError, NotFoundError, AuthenticationError)),
+            retry=tenacity.retry_if_not_exception_type(
+                (APIError, BadRequestError, NotFoundError, AuthenticationError)
+            ),
             stop=tenacity.stop_after_attempt(3),
-            #before=lambda x: logger.info(x),
-            #after=lambda x: logger.info(x),
         )
-        response, completion_response = (
-            client.chat.completions.create_with_completion(
-                model=self.model,
-                api_base=self.model_base_url,
-                api_key=self.model_api_key,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                stop=self.stop_words,
-                messages=completion_messages,
-                response_model=response_model,
-                max_retries=retries,  # type: ignore
+
+        def _do_completion():
+            try:
+                completion_response = litellm.completion(
+                    model=self.model,
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                    api_base=self.model_base_url,
+                    api_key=self.model_api_key,
+                    stop=self.stop_words,
+                    messages=messages,
+                    response_format={"type": "json_object"},
+                    metadata=self.metadata,
+                )
+
+                if isinstance(
+                    completion_response.choices[0].message.content, BaseModel
+                ):
+                    assistant_message = completion_response.choices[
+                        0
+                    ].message.content.model_dump()
+                else:
+                    assistant_message = completion_response.choices[0].message.content
+
+                messages.append({"role": "assistant", "content": assistant_message})
+
+                response = response_model.from_response(
+                    completion_response, mode=instructor.Mode.JSON
+                )
+
+                if hasattr(response, "action"):
+                    return response.action, completion_response
+
+                return response, completion_response
+
+            except (ValidationError, json.JSONDecodeError) as e:
+                logger.warning(
+                    f"Completion attempt failed with error: {e}. Will retry."
+                )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"The response was invalid. Fix the errors, exceptions found\n{e}",
+                    }
+                )
+                raise CompletionRejectError(
+                    message=e.message,
+                    last_completion=completion_response,
+                    messages=messages,
+                )
+            except Exception as e:
+                logger.error(f"Completion attempt failed with error: {e}. Will retry.")
+
+                raise CompletionRuntimeError(
+                    f"Failed to get completion response: {e}",
+                )
+
+        try:
+            return retries(_do_completion)
+        except tenacity.RetryError as e:
+            raise e.reraise()
+
+    def _validate_react_format(self, response_text: str):
+        # Split into lines and remove empty ones
+        lines = [line.strip() for line in response_text.split("\n") if line.strip()]
+
+        # Count occurrences of each section
+        thought_count = sum(1 for line in lines if line.startswith("Thought:"))
+        action_count = sum(1 for line in lines if line.startswith("Action:"))
+        action_input_count = sum(
+            1 for line in lines if line.startswith("Action Input:")
+        )
+
+        # Check for multiple action blocks
+        if thought_count > 1 or action_count > 1 or action_input_count > 1:
+            raise ValueError(
+                "You can only specify one action at a time. If you need to perform multiple actions, describe your next steps in the Thought section and execute them one at a time."
             )
+
+        # Check if all sections exist
+        if thought_count != 1 or action_count != 1 or action_input_count != 1:
+            raise ValueError(
+                "Response must have exactly one 'Thought:', 'Action:', and 'Action Input:' section"
+            )
+
+        # Find the starting lines for each section
+        thought_line = next(
+            (i for i, line in enumerate(lines) if line.startswith("Thought:")), -1
+        )
+        action_line = next(
+            (i for i, line in enumerate(lines) if line.startswith("Action:")), -1
+        )
+        action_input_line = next(
+            (i for i, line in enumerate(lines) if line.startswith("Action Input:")), -1
         )
 
-        completion = Completion.from_llm_completion(
-            input_messages=completion_messages,
-            completion_response=completion_response,
+        # Check if sections are in correct order
+        if not (thought_line < action_line < action_input_line):
+            raise ValueError("Sections must be in order: Thought, Action, Action Input")
+
+    def _litellm_react_completion(
+        self,
+        messages: list[dict],
+        system_prompt: str,
+        actions: list[type[StructuredOutput]],
+    ) -> Tuple[StructuredOutput, ModelResponse]:
+        action_input_schemas_str = ""
+
+        for action in actions:
+            schema = action.model_json_schema()
+            if "scratch_pad" in schema["properties"]:
+                del schema["properties"]["scratch_pad"]
+
+            action_input_schemas_str += f"\n * {action.name}: {json.dumps(schema)}"
+
+        system_prompt += dedent(f"""\n# Response format
+
+Use the following format:
+
+Thought: You should always think about what to do
+Action: The action to take
+Action Input: The input to the action. Always use valid JSON format with double quotes for strings and 'null' for null values. For example: 'Action Input: {{"file_pattern": "path/to/file", "optional_field": null}}'
+
+You have access to the following tools: {action_input_schemas_str}
+
+Important: Do not include multiple Thought-Action-Observation blocks. Do not include code blocks or additional text outside of this format.
+""")
+
+        system_prompt += """\n
+**Examples of How to Use the Response Format:**
+
+**Correct Usage:**
+
+Thought: I need to update the error message in the authentication function to be more descriptive.
+Action: StringReplace
+Action Input: {
+  "path": "auth/validator.py",
+  "old_str": "    if not user.is_active:\n        raise ValueError(\"Invalid user\")\n    return user",
+  "new_str": "    if not user.is_active:\n        raise ValueError(f\"Invalid user: {username} is not active\")\n    return user"
+}
+
+**Incorrect Usage (Multiple Actions in One Response):**
+Thought: I need to view the current implementation of the logger configuration and then update it to include a file handler.
+Action: ViewCode
+Action Input: {
+  "files": [
+    {
+      "file_path": "utils/logger.py",
+      "start_line": null,
+      "end_line": null,
+      "span_ids": ["configure_logger"]
+    }
+  ]
+}
+Action: StringReplace
+Action Input: {
+  "path": "utils/logger.py",
+  "old_str": "logging.basicConfig(level=logging.INFO, format=\"%(levelname)s - %(message)s\")",
+  "new_str": "logging.basicConfig(level=logging.INFO, format=\"%(asctime)s - %(levelname)s - %(message)s\", handlers=[logging.FileHandler(\"app.log\"), logging.StreamHandler()])"
+}"""
+
+        messages.insert(0, {"role": "system", "content": system_prompt})
+
+        retries = tenacity.Retrying(
+            retry=tenacity.retry_if_not_exception_type(
+                (APIError, BadRequestError, NotFoundError, AuthenticationError)
+            ),
+            stop=tenacity.stop_after_attempt(3),
+        )
+
+        def _do_completion():
+            response_text, completion_response = self._litellm_text_completion(messages)
+
+            try:
+                self._validate_react_format(response_text)
+
+                thought_start = response_text.find("Thought:")
+                action_start = response_text.find("Action:")
+                action_input_start = response_text.find("Action Input:")
+
+                if (
+                    thought_start == -1
+                    or action_start == -1
+                    or action_input_start == -1
+                ):
+                    raise ValueError("Missing Thought, Action or Action Input sections")
+
+                thought = response_text[thought_start + 8 : action_start].strip()
+                action = response_text[action_start + 7 : action_input_start].strip()
+                action_input = response_text[action_input_start + 13 :].strip()
+
+                if not action or not action_input:
+                    raise ValueError("Missing Action or Action Input values")
+
+                # Find the matching action class
+                action_class = next((a for a in actions if a.name == action), None)
+                if not action_class:
+                    action_names = [a.name for a in actions]
+                    raise ValueError(
+                        f"Unknown action: {action}. Available actions: {', '.join(action_names)}"
+                    )
+
+                action_request = action_class.model_validate_json(action_input)
+                action_request.scratch_pad = thought
+                return action_request, completion_response
+
+            except Exception as e:
+                logger.warning(f"ReAct parsing failed: {e}. Response: {response_text}")
+
+                messages.append({"role": "assistant", "content": response_text})
+
+                if isinstance(e, ValidationError):
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": f"The action input JSON is invalid. Please fix the following validation errors:\n{e}",
+                        }
+                    )
+                else:
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": f"The response was invalid. Please follow the exact format:\n\nThought: your reasoning\nAction: the action name\nAction Input: the JSON input\n\nError: {e}",
+                        }
+                    )
+
+                raise CompletionRejectError(
+                    message=str(e),
+                    last_completion=completion_response,
+                    messages=messages,
+                )
+
+        try:
+            return retries(_do_completion)
+        except tenacity.RetryError as e:
+            raise e.reraise()
+
+    def _litellm_text_completion(
+        self, messages: list[dict]
+    ) -> Tuple[str, ModelResponse]:
+        litellm.drop_params = True
+
+        completion_response = litellm.completion(
             model=self.model,
+            api_base=self.model_base_url,
+            api_key=self.model_api_key,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            stop=self.stop_words,
+            messages=messages,
+            metadata=self.metadata,
         )
-
-        return response, completion
+        return completion_response.choices[0].message.content, completion_response
 
     def _litellm_tool_completion(
         self,
         messages: list[dict],
+        system_prompt: str,
         actions: list[type[StructuredOutput]],
         is_retry: bool = False,
     ) -> Tuple[StructuredOutput, ModelResponse]:
         litellm.drop_params = True
+        messages.insert(0, {"role": "system", "content": system_prompt})
 
         tools = []
         for action in actions:
@@ -256,6 +562,7 @@ class CompletionModel(BaseModel):
             tools=tools,
             tool_choice="auto",
             messages=messages,
+            metadata=self.metadata,
         )
 
         tool_args, tool_name, retry_message = None, None, None
@@ -373,128 +680,10 @@ class CompletionModel(BaseModel):
         messages.append(new_message)
         return messages
 
-    def _litellm_text_completion(
-        self, messages: list[dict]
-    ) -> Tuple[str, ModelResponse]:
-        litellm.drop_params = True
-
-        completion_response = litellm.completion(
-            model=self.model,
-            api_base=self.model_base_url,
-            api_key=self.model_api_key,
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-            stop=self.stop_words,
-            messages=messages,
-        )
-        return completion_response.choices[0].message.content, completion_response
-
-    def _instructor_completion(
-        self,
-        messages: list[dict],
-        actions: List[type[StructuredOutput]] | None = None,
-        is_retry: bool = False,
-    ) -> Tuple[StructuredOutput, ModelResponse]:
-        if self.response_format == LLMResponseFormat.JSON:
-            client = instructor.from_litellm(
-                litellm.completion, mode=instructor.Mode.MD_JSON
-            )
-        else:
-            client = instructor.from_litellm(
-                litellm.completion, mode=instructor.Mode.TOOLS
-            )
-
-        if actions:
-
-            class TakeAction(StructuredOutput):
-                action: Union[tuple(actions)] = Field(...)
-                action_type: str = Field(..., description="The type of action being taken")
-
-                @model_validator(mode='before')
-                def validate_action(cls, data: dict) -> dict:
-                    action_type = data.get('action_type')
-                    if not action_type:
-                        return data
-
-                    if len(actions) == 1:
-                        data['action'] = actions[0].model_validate(data['action'])
-                    else:
-                        avalabile_actions = [action for action in actions if hasattr(action, "name")]
-
-                        if not avalabile_actions:
-                            raise CompletionRuntimeError(f"No actions found in {actions}")
-
-                        # Find the correct action class based on action_type
-                        action_class = next(
-                            (action for action in avalabile_actions if action.name == action_type),
-                            None
-                        )
-                        if not action_class:
-                            action_names = [action.name for action in avalabile_actions]
-                            raise ValidationError(f"Unknown action type: {action_type}. Available actions: {', '.join(action_names)}")
-
-                        # Validate the action data using the specific action class
-                        data['action'] = action_class.model_validate(data['action'])
-                    return data
-
-            action_type = TakeAction
-        else:
-            action_type = None
-
-        def log_retry(state: tenacity.RetryCallState):
-            if state.attempt_number > 1:
-                logger.warning(state)
-
-        retries = tenacity.Retrying(
-            retry=tenacity.retry_if_not_exception_type((APIError, BadRequestError, NotFoundError, AuthenticationError)),
-            stop=tenacity.stop_after_attempt(3),
-            after=log_retry,
-        )
-        take_action, completion_response = (
-            client.chat.completions.create_with_completion(
-                model=self.model,
-                api_base=self.model_base_url,
-                api_key=self.model_api_key,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                stop=self.stop_words,
-                messages=messages,
-                response_model=action_type,
-                max_retries=retries,  # type: ignore
-            )
-        )
-
-        if take_action.action:
-            return take_action.action, completion_response
-        else:
-            logger.warning(
-                f"No action returned in response: {take_action}. Completion response: {completion_response}"
-            )
-            raise CompletionRejectError(
-                f"No action returned in response: {take_action}.",
-                last_completion=completion_response
-            )
-
-    def function_call_system_prompt(self):
-        return """You are an AI language model tasked with transforming unstructured messages wrapped in the XML tag <message> into structured tool calls. Your guidelines are:
-
-         * Do not change, omit, or add any information from the original message.
-         * Focus solely on converting the existing information into the correct tool call format.
-         * Extract all relevant details necessary for the tool call without altering their meaning.
-         * Ignore planned steps in the tool call
-         * Provide the reasoning in the scratch_pad field
-
-        Your response should be the tool call generated from the provided unstructured message, adhering strictly to these instructions."""
-
-    def function_call_prompt(self, llm_response: str):
-        content = "<message>\n"
-        content += llm_response
-        content += "\n</message>"
-        return content
-
     def _openai_completion(
         self,
         messages: list[dict],
+        system_prompt: str,
         actions: List[type[StructuredOutput]] | None = None,
         response_format: type[StructuredOutput] | None = None,
         is_retry: bool = False,
@@ -507,6 +696,8 @@ class CompletionModel(BaseModel):
             )
         else:
             client = OpenAI()
+
+        messages.insert(0, {"role": "system", "content": system_prompt})
 
         tools = []
         if actions:
@@ -526,7 +717,7 @@ class CompletionModel(BaseModel):
                     temperature=self.temperature,
                     stop=self.stop_words,
                     messages=messages,
-                    #tool_choice="required",
+                    # tool_choice="required",
                     tools=tools,
                     parallel_tool_calls=True,
                 )
@@ -583,18 +774,29 @@ class CompletionModel(BaseModel):
         self,
         messages: list[dict],
         system_prompt: str | None = None,
-        actions: List[type[StructuredOutput]] | None = None,
+        response_model: type[StructuredOutput]
+        | List[type[StructuredOutput]]
+        | None = None,
     ) -> Tuple[StructuredOutput | str, Any]:
+        tools = []
+        tool_choice = {"type": "any"}
 
-        if actions:
-            tools = []
-            tool_choice = {"type": "any"}
+        if not response_model:
+            tools = NOT_GIVEN
+            tool_choice = NOT_GIVEN
+        else:
+            if isinstance(response_model, list):
+                actions = response_model
+            elif response_model:
+                actions = [response_model]
+            else:
+                actions = []
+
             for action in actions:
                 if hasattr(action, "name") and action.name == "str_replace_editor":
-                    tools.append({
-                        "name": "str_replace_editor",
-                        "type": "text_editor_20241022"
-                    })
+                    tools.append(
+                        {"name": "str_replace_editor", "type": "text_editor_20241022"}
+                    )
                 else:
                     schema = action.anthropic_schema
 
@@ -604,14 +806,7 @@ class CompletionModel(BaseModel):
 
                     tools.append(schema)
 
-        else:
-            tools = NOT_GIVEN
-            tool_choice = NOT_GIVEN
-
-        system_message = {
-            "text": system_prompt,
-            "type": "text"
-        }
+        system_message = {"text": system_prompt, "type": "text"}
 
         if "anthropic" in self.model:
             anthropic_client = AnthropicBedrock()
@@ -626,7 +821,9 @@ class CompletionModel(BaseModel):
         retry_message = None
         for i in range(2):
             if i > 0:
-                logger.warning(f"Retrying completion request: {retry_message} (attempt {i})")
+                logger.warning(
+                    f"Retrying completion request: {retry_message} (attempt {i})"
+                )
 
             try:
                 completion_response = anthropic_client.beta.messages.create(
@@ -637,116 +834,106 @@ class CompletionModel(BaseModel):
                     # tool_choice=tool_choice,
                     tools=tools,
                     messages=messages,
-                    betas=betas
+                    betas=betas,
                 )
             except anthropic.BadRequestError as e:
                 logger.error(
                     f"Failed to create completion: {e}. Input messages: {json.dumps(messages, indent=2)}"
                 )
-                raise CompletionRuntimeError(f"Failed to create completion: {e}") from e
+                last_completion = (
+                    completion_response.model_dump() if completion_response else None
+                )
+                raise CompletionRuntimeError(
+                    f"Failed to create completion: {e}",
+                    last_completion=last_completion,
+                    messages=messages,
+                ) from e
 
+            tool_call_id = None
             try:
                 text = None
                 if not actions:
                     return completion_response.content[0].text, completion_response
                 for block in completion_response.content:
-                    if isinstance(block, ToolUseBlock) or isinstance(block, BetaToolUseBlock):
+                    if isinstance(block, ToolUseBlock) or isinstance(
+                        block, BetaToolUseBlock
+                    ):
                         action = None
-                        for check_action in actions:
-                            if check_action.openai_schema["name"] == block.name:
-                                action = check_action
-                                break
+
+                        tool_call_id = block.id
+
+                        if len(actions) == 1:
+                            action = actions[0]
+                        else:
+                            for check_action in actions:
+                                if check_action.openai_schema["name"] == block.name:
+                                    action = check_action
+                                    break
 
                         if not action:
                             raise ValueError(f"Unknown action {block.name}")
 
                         action_args = action.model_validate(block.input)
 
-                        if hasattr(action_args, "scratch_pad") and text and not action_args.scratch_pad:
+                        if (
+                            hasattr(action_args, "scratch_pad")
+                            and text
+                            and not action_args.scratch_pad
+                        ):
                             action_args.scratch_pad = text
 
                         # TODO: We only support one action at the moment
                         return action_args, completion_response
-                    elif isinstance(block, TextBlock) or isinstance(block, BetaTextBlock):
+                    elif isinstance(block, TextBlock) or isinstance(
+                        block, BetaTextBlock
+                    ):
                         text = block.text
+                        # Extract thoughts from <thoughts> tags if present
+                        if "<thoughts>" in text and "</thoughts>" in text:
+                            start = text.index("<thoughts>") + len("<thoughts>")
+                            end = text.index("</thoughts>")
+                            text = text[start:end].strip()
                     else:
                         logger.warning(f"Unexpected block {block}]")
 
                 retry_message = f"You're an autonomous agent that can't communicate with the user. Please provide a tool call."
             except anthropic.APIError as e:
                 if hasattr(e, "status_code"):
-                    raise CompletionRuntimeError(f"Failed to call Anthropic API. Status code: {e.status_code}, Response: {e.body}") from e
+                    raise CompletionRuntimeError(
+                        f"Failed to call Anthropic API. Status code: {e.status_code}, Response: {e.body}"
+                    ) from e
                 else:
-                    raise CompletionRuntimeError(f"Failed to call Anthropic API. {e}") from e
+                    raise CompletionRuntimeError(
+                        f"Failed to call Anthropic API. {e}"
+                    ) from e
             except Exception as e:
                 retry_message = f"The request was invalid. Please try again. Error: {e}"
 
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": completion_response.content
-                }
-            )
-            messages.append(
-                {
-                    "role": "user",
-                    "content": retry_message
-                }
-            )
+            response_content = [
+                block.model_dump() for block in completion_response.content
+            ]
+            messages.append({"role": "assistant", "content": response_content})
+
+            user_message = self._create_user_message(tool_call_id, retry_message)
+            messages.append(user_message)
+
+        raise CompletionRejectError(
+            f"Failed to create completion: {retry_message}",
+            messages=messages,
+            last_completion=completion_response,
+        )
 
     def _map_completion_messages(self, messages: list[Message]) -> list[dict]:
         tool_call_id = None
         completion_messages = []
         for i, message in enumerate(messages):
             if message.role == "user":
-                if tool_call_id and self.use_anthropic_client:
-                    completion_messages.append(
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "tool_use_id": tool_call_id,
-                                    "content": message.content,
-                                    "type": "tool_result",
-                                }
-                            ],
-                        }
-                    )
-                    tool_call_id = None
-                elif tool_call_id and self.response_format in [
-                    LLMResponseFormat.TOOLS
-                ]:
-                    completion_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": message.content,
-                        }
-                    )
-                    tool_call_id = None
-                elif tool_call_id and self.response_format in [
-                    LLMResponseFormat.TOOLS
-                ]:
-                    completion_messages.append(
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "tool_use_id": tool_call_id,
-                                    "content": message.content,
-                                    "type": "tool_result",
-                                }
-                            ],
-                        }
-                    )
-                    tool_call_id = None
-                else:
-                    completion_messages.append(
-                        {"role": "user", "content": message.content}
-                    )
+                user_message = self._create_user_message(tool_call_id, message.content)
+                completion_messages.append(user_message)
+                tool_call_id = None
             elif message.role == "assistant":
                 if message.tool_call:
-                    tool_call_id = f"call_{i}"
+                    tool_call_id = message.tool_call_id
                     content = []
                     if self.use_anthropic_client:
                         tool_input = message.tool_call.input.copy()
@@ -759,7 +946,7 @@ class CompletionModel(BaseModel):
                                 content.append(
                                     {
                                         "type": "text",
-                                        "text": scratch_pad,
+                                        "text": f"<thoughts>\n{scratch_pad}\n</thoughts>",
                                     }
                                 )
 
@@ -772,10 +959,7 @@ class CompletionModel(BaseModel):
                             }
                         )
                         completion_messages.append(
-                            {
-                                "role": "assistant",
-                                "content": content
-                            }
+                            {"role": "assistant", "content": content}
                         )
                     elif self.response_format in [
                         LLMResponseFormat.TOOLS,
@@ -800,7 +984,7 @@ class CompletionModel(BaseModel):
                     else:
                         action_json = {
                             "action": message.tool_call.input,
-                            "action_type": message.tool_call.name
+                            "action_type": message.tool_call.name,
                         }
                         json_content = json.dumps(action_json, indent=2)
 
@@ -820,6 +1004,39 @@ class CompletionModel(BaseModel):
                     )
 
         return completion_messages
+
+    def _create_user_message(self, tool_call_id: str | None, content: str) -> dict:
+        if tool_call_id and self.use_anthropic_client:
+            return {
+                "role": "user",
+                "content": [
+                    {
+                        "tool_use_id": tool_call_id,
+                        "content": f"<observation>\n{content}\n</observation>",
+                        "type": "tool_result",
+                    }
+                ],
+            }
+        elif tool_call_id and self.response_format in [LLMResponseFormat.TOOLS]:
+            return {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": content,
+            }
+        elif tool_call_id and self.response_format in [LLMResponseFormat.TOOLS]:
+            return {
+                "role": "user",
+                "content": [
+                    {
+                        "tool_use_id": tool_call_id,
+                        "content": content,
+                        "type": "tool_result",
+                    }
+                ],
+            }
+
+        else:
+            return {"role": "user", "content": content}
 
     def _get_tool_call(self, completion_response) -> Tuple[str, dict]:
         if (
@@ -871,7 +1088,6 @@ class CompletionModel(BaseModel):
         return self
 
 
-
 def _inject_prompt_caching(
     messages: list[BetaMessageParam],
 ):
@@ -883,9 +1099,7 @@ def _inject_prompt_caching(
     breakpoints_remaining = 3
     for message in reversed(messages):
         # message["role"] == "user" and
-        if isinstance(
-            content := message["content"], list
-        ):
+        if isinstance(content := message["content"], list):
             if breakpoints_remaining:
                 breakpoints_remaining -= 1
                 content[-1]["cache_control"] = BetaCacheControlEphemeralParam(
@@ -895,68 +1109,3 @@ def _inject_prompt_caching(
                 content[-1].pop("cache_control", None)
                 # we'll only every have one extra turn per loop
                 break
-
-def extract_json_from_message(message: str) -> tuple[dict | str, list[dict]]:
-    """
-    Extract JSON from a message, handling both code blocks and raw JSON.
-    Returns a tuple of (selected_json_dict, all_found_json_dicts).
-    
-    Args:
-        message: The message to parse
-        
-    Returns:
-        tuple[dict | str, list[dict]]: (The selected JSON dict to use or original message, List of all JSON dicts found)
-    """
-    all_found_jsons = []
-    
-    # First try to find ```json blocks
-    try:
-        current_pos = 0
-        while True:
-            start = message.find("```json", current_pos)
-            if start == -1:
-                break
-            start += 7  # Move past ```json
-            end = message.find("```", start)
-            if end == -1:
-                break
-            potential_json = message[start:end].strip()
-            try:
-                json_dict = json.loads(potential_json)
-                all_found_jsons.append(json_dict)
-            except json.JSONDecodeError:
-                pass
-            current_pos = end + 3
-
-        if all_found_jsons:
-            return all_found_jsons[0], all_found_jsons
-    except Exception as e:
-        logger.warning(f"Failed to extract JSON from code blocks: {e}")
-
-    # If no ```json blocks found, try to find raw JSON objects
-    try:
-        current_pos = 0
-        while True:
-            start = message.find("{", current_pos)
-            if start == -1:
-                break
-            # Try to parse JSON starting from each { found
-            for end in range(len(message), start, -1):
-                try:
-                    potential_json = message[start:end]
-                    json_dict = json.loads(potential_json)
-                    all_found_jsons.append(json_dict)
-                    break
-                except json.JSONDecodeError:
-                    continue
-            if not all_found_jsons:  # If no valid JSON found, move past this {
-                current_pos = start + 1
-            else:
-                current_pos = end
-
-        if all_found_jsons:
-            return all_found_jsons[0], all_found_jsons
-    except Exception as e:
-        logger.warning(f"Failed to extract raw JSON objects: {e}")
-
-    return message, all_found_jsons

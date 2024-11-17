@@ -2,9 +2,8 @@ import argparse
 import logging
 import os
 from datetime import datetime
-from typing import Optional
 from pathlib import Path
-
+from typing import Optional
 
 from moatless.benchmark.evaluation import (
     create_evaluation_name,
@@ -102,176 +101,156 @@ def ensure_dir(file_path):
 def main():
     try:
         from dotenv import load_dotenv
+
         load_dotenv()
     except Exception as e:
         pass
 
     parser = argparse.ArgumentParser(
         description="Run Moatless evaluation on SWE-Bench instances",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    
+
     # Required arguments
-    required = parser.add_argument_group('required arguments')
+    required = parser.add_argument_group("required arguments")
     required.add_argument(
-        "--model", 
-        type=str, 
+        "--model",
+        type=str,
         required=True,
-        help="Model to use (e.g., gpt-4, claude-3-opus-20240229)"
+        help="Model to use (e.g., gpt-4, claude-3-opus-20240229)",
     )
     required.add_argument(
-        "--eval_dir", 
-        type=str, 
+        "--eval_dir",
+        type=str,
         required=True,
-        help="Directory to store evaluation results"
+        help="Directory to store evaluation results",
     )
 
     # Model settings
-    model_group = parser.add_argument_group('model settings')
+    model_group = parser.add_argument_group("model settings")
     model_group.add_argument(
-        "--temp", 
-        type=float, 
-        default=0.2,
-        help="Temperature for model sampling"
+        "--temp", type=float, default=0.2, help="Temperature for model sampling"
     )
 
     # Search settings
-    search_group = parser.add_argument_group('search settings')
+    search_group = parser.add_argument_group("search settings")
     search_group.add_argument(
-        "--max_expansions", 
-        type=int, 
+        "--max_expansions",
+        type=int,
         default=3,
-        help="Maximum number of expansions per node"
+        help="Maximum number of expansions per node",
     )
     search_group.add_argument(
-        "--min_finished_nodes", 
-        type=int, 
+        "--min_finished_nodes",
+        type=int,
         default=3,
-        help="Minimum number of finished nodes before stopping"
+        help="Minimum number of finished nodes before stopping",
     )
     search_group.add_argument(
-        "--max_finished_nodes", 
-        type=int, 
+        "--max_finished_nodes",
+        type=int,
         default=5,
-        help="Maximum number of finished nodes before stopping"
+        help="Maximum number of finished nodes before stopping",
     )
     search_group.add_argument(
-        "--max_iterations", 
-        type=int, 
-        default=50,
-        help="Maximum number of iterations"
+        "--max_iterations", type=int, default=50, help="Maximum number of iterations"
     )
     search_group.add_argument(
-        "--max_cost", 
-        type=float, 
+        "--max_cost",
+        type=float,
         default=2.0,
-        help="Maximum cost allowed for the search"
+        help="Maximum cost allowed for the search",
     )
     search_group.add_argument(
-        "--reward_threshold", 
-        type=int, 
+        "--reward_threshold",
+        type=int,
         default=None,
-        help="Minimum reward threshold to consider before finishing"
+        help="Minimum reward threshold to consider before finishing",
     )
     search_group.add_argument(
-        "--sample_first", 
+        "--sample_first",
         action="store_true",
-        help="Use sampling instead of best-first search"
+        help="Use sampling instead of best-first search",
     )
 
     # Features
-    features_group = parser.add_argument_group('features')
+    features_group = parser.add_argument_group("features")
     features_group.add_argument(
-        "--debate", 
-        action="store_true",
-        help="Enable agent debate"
+        "--debate", action="store_true", help="Enable agent debate"
     )
     features_group.add_argument(
-        "--feedback", 
-        action="store_true",
-        help="Enable feedback generation"
+        "--feedback", action="store_true", help="Enable feedback generation"
     )
     features_group.add_argument(
         "--feedback_type",
         type=str,
-        choices=['reward', 'agent', None],
+        choices=["reward", "agent", None],
         default=None,
-        help="Type of feedback generator to use"
+        help="Type of feedback generator to use",
     )
     features_group.add_argument(
         "--use_edit_actions",
         action="store_true",
-        help="Use edit actions instead of full file replacements"
+        help="Use edit actions instead of full file replacements",
     )
     features_group.add_argument(
-        "--use_testbed", 
-        action="store_true",
-        help="Enable testbed for running tests"
+        "--use_testbed", action="store_true", help="Enable testbed for running tests"
     )
 
     # Runtime settings
-    runtime_group = parser.add_argument_group('runtime settings')
+    runtime_group = parser.add_argument_group("runtime settings")
     runtime_group.add_argument(
-        "--num_workers", 
-        type=int, 
-        default=8,
-        help="Number of parallel workers"
+        "--num_workers", type=int, default=8, help="Number of parallel workers"
     )
     runtime_group.add_argument(
-        "--repo_base_dir", 
-        type=str, 
+        "--repo_base_dir",
+        type=str,
         default=os.getenv("REPO_DIR", "/tmp/repos"),
-        help="Base directory for repositories"
+        help="Base directory for repositories",
     )
 
     # Instance selection
-    instance_group = parser.add_argument_group('instance selection')
+    instance_group = parser.add_argument_group("instance selection")
     instance_group.add_argument(
-        "--instance_ids", 
-        type=str, 
-        nargs="+", 
+        "--instance_ids",
+        type=str,
+        nargs="+",
         default=None,
-        help="Specific instance IDs to evaluate"
+        help="Specific instance IDs to evaluate",
     )
     instance_group.add_argument(
         "--repos",
         type=str,
         nargs="+",
         default=None,
-        help="Filter instances by repository names"
+        help="Filter instances by repository names",
     )
     instance_group.add_argument(
-        "--resolved_by", 
-        type=int, 
+        "--resolved_by",
+        type=int,
         default=None,
-        help="Filter instances by resolved solutions (e.g., 1, 2, 3, ...)"
+        help="Filter instances by resolved solutions (e.g., 1, 2, 3, ...)",
     )
     instance_group.add_argument(
         "--min_resolved",
         type=int,
         default=None,
-        help="Filter instances by minimum number of resolved solutions"
+        help="Filter instances by minimum number of resolved solutions",
     )
     instance_group.add_argument(
         "--max_resolved",
         type=int,
         default=None,
-        help="Filter instances by maximum number of resolved solutions"
+        help="Filter instances by maximum number of resolved solutions",
     )
 
     # Other settings
-    other_group = parser.add_argument_group('other settings')
+    other_group = parser.add_argument_group("other settings")
     other_group.add_argument(
-        "--eval_name", 
-        type=str, 
-        default=None,
-        help="Custom name for the evaluation"
+        "--eval_name", type=str, default=None, help="Custom name for the evaluation"
     )
     other_group.add_argument(
-        "--date", 
-        type=str, 
-        default=None,
-        help="Custom date for the evaluation name"
+        "--date", type=str, default=None, help="Custom date for the evaluation name"
     )
 
     args = parser.parse_args()
@@ -279,18 +258,24 @@ def main():
     # Verify environment variables
     if args.use_testbed:
         if not os.getenv("TESTBED_API_KEY") or not os.getenv("TESTBED_BASE_URL"):
-            parser.error("--use_testbed requires TESTBED_API_KEY and TESTBED_BASE_URL environment variables")
+            parser.error(
+                "--use_testbed requires TESTBED_API_KEY and TESTBED_BASE_URL environment variables"
+            )
 
     # Verify model-specific requirements
     if args.model.startswith("openai/"):
         if not os.getenv("CUSTOM_LLM_API_BASE") or not os.getenv("CUSTOM_LLM_API_KEY"):
-            parser.error("Custom OpenAI models require CUSTOM_LLM_API_BASE and CUSTOM_LLM_API_KEY environment variables")
+            parser.error(
+                "Custom OpenAI models require CUSTOM_LLM_API_BASE and CUSTOM_LLM_API_KEY environment variables"
+            )
     elif args.model.startswith("gpt"):
         if not os.getenv("OPENAI_API_KEY"):
             parser.error("OpenAI models require OPENAI_API_KEY environment variable")
     elif args.model.startswith("claude"):
         if not os.getenv("ANTHROPIC_API_KEY"):
-            parser.error("Anthropic models require ANTHROPIC_API_KEY environment variable")
+            parser.error(
+                "Anthropic models require ANTHROPIC_API_KEY environment variable"
+            )
 
     # Verify directories exist or can be created
     try:
@@ -362,7 +347,9 @@ def main():
     # logging.getLogger("mcts_tree").setLevel(logging.INFO)
 
     # Create ModelSettings instance
-    model_settings = ModelSettings(model=args.model, temperature=args.temp, max_tokens=3000)
+    model_settings = ModelSettings(
+        model=args.model, temperature=args.temp, max_tokens=3000
+    )
 
     tree_search_settings = TreeSearchSettings(
         max_iterations=args.max_iterations,
@@ -393,6 +380,7 @@ def main():
         min_resolved=args.min_resolved,
         max_resolved=args.max_resolved,
     )
+
 
 if __name__ == "__main__":
     main()

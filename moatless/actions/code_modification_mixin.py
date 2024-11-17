@@ -13,11 +13,13 @@ from moatless.runtime.runtime import RuntimeEnvironment
 
 logger = logging.getLogger(__name__)
 
+
 class CodeModificationMixin:
     """
     A mixin that provides common functionality for actions that modify code files.
     This includes path normalization, file validation, test running, and observation handling.
     """
+
     _runtime: RuntimeEnvironment | None = PrivateAttr(default=None)
     _code_index: CodeIndex | None = PrivateAttr(default=None)
     _repository: Repository | None = PrivateAttr(default=None)
@@ -30,15 +32,17 @@ class CodeModificationMixin:
             file_path = file_path[1:]
         return file_path
 
-    def validate_file_access(self, file_path: str, file_context: FileContext, allow_missing: bool = False) -> Tuple[Optional[Path], Optional[Observation]]:
+    def validate_file_access(
+        self, file_path: str, file_context: FileContext, allow_missing: bool = False
+    ) -> Tuple[Optional[Path], Optional[Observation]]:
         """
         Validate file access and return either a valid Path object or an error Observation.
-        
+
         Args:
             file_path: The path to validate
             file_context: The file context
             allow_missing: Whether to allow missing files (for file creation)
-            
+
         Returns:
             Tuple of (Path object if valid, Error observation if invalid)
         """
@@ -71,7 +75,7 @@ class CodeModificationMixin:
         observation: Observation,
         file_path: str,
         scratch_pad: str,
-        file_context: FileContext
+        file_context: FileContext,
     ) -> Observation:
         """Run tests and update the observation with test results"""
         if not observation.properties or not observation.properties.get("diff"):
@@ -83,9 +87,9 @@ class CodeModificationMixin:
         run_tests = RunTests(
             repository=self._repository,
             runtime=self._runtime,
-            code_index=self._code_index
+            code_index=self._code_index,
         )
-        
+
         test_observation = run_tests.execute(
             RunTestsArgs(
                 scratch_pad=scratch_pad,
@@ -102,6 +106,5 @@ class CodeModificationMixin:
     def format_snippet_with_lines(self, snippet: str, start_line: int) -> str:
         """Format a code snippet with line numbers"""
         return "\n".join(
-            f"{i + start_line:6}\t{line}"
-            for i, line in enumerate(snippet.split("\n"))
-        ) 
+            f"{i + start_line:6}\t{line}" for i, line in enumerate(snippet.split("\n"))
+        )

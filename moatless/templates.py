@@ -1,5 +1,7 @@
 from typing import Optional
 
+from moatless.actions.request_context import RequestMoreContext
+
 from moatless.actions.apply_change_and_test import ApplyCodeChangeAndTest
 from moatless.actions.code_change import RequestCodeChange
 from moatless.actions.edit import ClaudeEditTool
@@ -8,8 +10,6 @@ from moatless.actions.find_code_snippet import FindCodeSnippet
 from moatless.actions.find_function import FindFunction
 from moatless.actions.finish import Finish
 from moatless.actions.reject import Reject
-from moatless.actions.request_context import RequestMoreContext
-from moatless.actions.run_tests import RunTests
 from moatless.actions.semantic_search import SemanticSearch
 from moatless.agent.code_agent import CodingAgent
 from moatless.agent.code_prompts import SIMPLE_CODE_PROMPT
@@ -20,17 +20,26 @@ from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.search_tree import SearchTree
 
+
 def create_basic_coding_actions(
-    repository: Repository,
-    code_index: CodeIndex,
-    completion_model: CompletionModel
+    repository: Repository, code_index: CodeIndex, completion_model: CompletionModel
 ):
-    find_class = FindClass(code_index=code_index, repository=repository, completion_model=completion_model)
-    find_function = FindFunction(code_index=code_index, repository=repository, completion_model=completion_model)
-    find_code_snippet = FindCodeSnippet(code_index=code_index, repository=repository, completion_model=completion_model)
-    semantic_search = SemanticSearch(code_index=code_index, repository=repository, completion_model=completion_model)
+    find_class = FindClass(
+        code_index=code_index, repository=repository, completion_model=completion_model
+    )
+    find_function = FindFunction(
+        code_index=code_index, repository=repository, completion_model=completion_model
+    )
+    find_code_snippet = FindCodeSnippet(
+        code_index=code_index, repository=repository, completion_model=completion_model
+    )
+    semantic_search = SemanticSearch(
+        code_index=code_index, repository=repository, completion_model=completion_model
+    )
     request_context = RequestMoreContext(repository=repository)
-    request_code_change = RequestCodeChange(repository=repository, completion_model=completion_model)
+    request_code_change = RequestCodeChange(
+        repository=repository, completion_model=completion_model
+    )
     finish = Finish()
     reject = Reject()
 
@@ -45,6 +54,7 @@ def create_basic_coding_actions(
         reject,
     ]
 
+
 def create_basic_coding_tree(
     message: str,
     repository: Repository,
@@ -55,10 +65,18 @@ def create_basic_coding_tree(
     max_cost: float | None = None,
     perist_path: str | None = None,
 ):
-    find_class = FindClass(code_index=code_index, repository=repository, completion_model=completion_model)
-    find_function = FindFunction(code_index=code_index, repository=repository, completion_model=completion_model)
-    find_code_snippet = FindCodeSnippet(code_index=code_index, repository=repository, completion_model=completion_model)
-    semantic_search = SemanticSearch(code_index=code_index, repository=repository, completion_model=completion_model)
+    find_class = FindClass(
+        code_index=code_index, repository=repository, completion_model=completion_model
+    )
+    find_function = FindFunction(
+        code_index=code_index, repository=repository, completion_model=completion_model
+    )
+    find_code_snippet = FindCodeSnippet(
+        code_index=code_index, repository=repository, completion_model=completion_model
+    )
+    semantic_search = SemanticSearch(
+        code_index=code_index, repository=repository, completion_model=completion_model
+    )
     request_context = RequestMoreContext(repository=repository)
     request_code_change = RequestCodeChange(
         repository=repository, completion_model=completion_model
@@ -100,10 +118,26 @@ def create_coding_actions(
     identify_completion_model: CompletionModel | None = None,
     edit_completion_model: CompletionModel | None = None,
 ):
-    find_class = FindClass(code_index=code_index, repository=repository, completion_model=identify_completion_model)
-    find_function = FindFunction(code_index=code_index, repository=repository, completion_model=identify_completion_model)
-    find_code_snippet = FindCodeSnippet(code_index=code_index, repository=repository, completion_model=identify_completion_model)
-    semantic_search = SemanticSearch(code_index=code_index, repository=repository, completion_model=identify_completion_model)
+    find_class = FindClass(
+        code_index=code_index,
+        repository=repository,
+        completion_model=identify_completion_model,
+    )
+    find_function = FindFunction(
+        code_index=code_index,
+        repository=repository,
+        completion_model=identify_completion_model,
+    )
+    find_code_snippet = FindCodeSnippet(
+        code_index=code_index,
+        repository=repository,
+        completion_model=identify_completion_model,
+    )
+    semantic_search = SemanticSearch(
+        code_index=code_index,
+        repository=repository,
+        completion_model=identify_completion_model,
+    )
     request_context = RequestMoreContext(repository=repository)
 
     actions = [
@@ -116,11 +150,14 @@ def create_coding_actions(
 
     if runtime:
         request_code_change = ApplyCodeChangeAndTest(
-            code_index=code_index, repository=repository, runtime=runtime, completion_model=edit_completion_model
+            code_index=code_index,
+            repository=repository,
+            runtime=runtime,
+            completion_model=edit_completion_model,
         )
-        #actions.append(
+        # actions.append(
         #    RunTests(code_index=code_index, repository=repository, runtime=runtime)
-        #)
+        # )
     else:
         request_code_change = RequestCodeChange(
             repository=repository, completion_model=edit_completion_model
@@ -139,12 +176,22 @@ def create_claude_coding_actions(
     runtime: RuntimeEnvironment | None = None,
     completion_model: CompletionModel | None = None,
 ):
-    find_class = FindClass(code_index=code_index, repository=repository, completion_model=completion_model)
-    find_function = FindFunction(code_index=code_index, repository=repository, completion_model=completion_model)
-    find_code_snippet = FindCodeSnippet(code_index=code_index, repository=repository, completion_model=completion_model)
-    semantic_search = SemanticSearch(code_index=code_index, repository=repository, completion_model=completion_model)
+    find_class = FindClass(
+        code_index=code_index, repository=repository, completion_model=completion_model
+    )
+    find_function = FindFunction(
+        code_index=code_index, repository=repository, completion_model=completion_model
+    )
+    find_code_snippet = FindCodeSnippet(
+        code_index=code_index, repository=repository, completion_model=completion_model
+    )
+    semantic_search = SemanticSearch(
+        code_index=code_index, repository=repository, completion_model=completion_model
+    )
     request_context = RequestMoreContext(repository=repository)
-    request_code_change = ClaudeEditTool(code_index=code_index, repository=repository, runtime=runtime)
+    request_code_change = ClaudeEditTool(
+        code_index=code_index, repository=repository, runtime=runtime
+    )
 
     actions = [
         semantic_search,
@@ -152,13 +199,14 @@ def create_claude_coding_actions(
         find_function,
         find_code_snippet,
         request_context,
-        request_code_change
+        request_code_change,
     ]
 
     actions.append(Finish())
     actions.append(Reject())
 
     return actions
+
 
 def create_mcts_coding_tree(
     message: str,

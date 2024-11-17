@@ -1,18 +1,20 @@
+import json
 import logging
-from typing import Optional, Dict, Any, List, Callable
-from pydantic import BaseModel, Field, model_validator, ValidationError
-import importlib
+from typing import Optional, Dict, Any, Callable
+
+from pydantic import BaseModel, Field
 
 from moatless.agent.agent import ActionAgent
 from moatless.completion.model import Usage
-from moatless.file_context import FileContext 
+from moatless.exceptions import RuntimeError
+from moatless.file_context import FileContext
+from moatless.index.code_index import CodeIndex
 from moatless.node import Node, generate_ascii_tree
 from moatless.repository.repository import Repository
-from moatless.exceptions import RuntimeError, RejectError
-from moatless.index.code_index import CodeIndex
 from moatless.runtime.runtime import RuntimeEnvironment
 
 logger = logging.getLogger(__name__)
+
 
 class AgenticLoop(BaseModel):
     root: Node = Field(..., description="The root node of the action sequence.")
@@ -23,7 +25,6 @@ class AgenticLoop(BaseModel):
     persist_path: Optional[str] = Field(
         None, description="Path to persist the action sequence."
     )
-    unique_id: int = Field(default=0, description="Unique ID counter for nodes.")
     max_iterations: int = Field(
         10, description="The maximum number of iterations to run."
     )
@@ -68,25 +69,31 @@ class AgenticLoop(BaseModel):
     def run(self) -> Node | None:
         """Run the agentic loop until completion or max iterations."""
         self.assert_runnable()
-        
+
         current_node = self.root
         self.log(logger.info, generate_ascii_tree(self.root))
 
-        while not self.is_finished(current_node):
+        while not self.is_finished():
             total_cost = self.total_usage().completion_cost
 
-            self.log(logger.info, f"Run iteration {len(self.root.get_all_nodes())}", cost=total_cost)
+            self.log(
+                logger.info,
+                f"Run iteration {len(self.root.get_all_nodes())}",
+                cost=total_cost,
+            )
 
             if self.max_cost and total_cost and total_cost >= self.max_cost:
-                self.log(logger.warning, f"Search cost ${total_cost} exceeded max cost of ${self.max_cost}. Finishing search.")
+                self.log(
+                    logger.warning,
+                    f"Search cost ${total_cost} exceeded max cost of ${self.max_cost}. Finishing search.",
+                )
                 break
 
             try:
-                new_node = self._create_next_node(current_node)
-                self.agent.run(new_node)
-                current_node = new_node
+                current_node = self._create_next_node(current_node)
+                self.agent.run(current_node)
                 self.maybe_persist()
-                self.log(logger.info, generate_ascii_tree(self.root, new_node))
+                self.log(logger.info, generate_ascii_tree(self.root, current_node))
             except RuntimeError as e:
                 self.log(logger.error, f"Runtime error: {e.message}")
                 break
@@ -103,18 +110,21 @@ class AgenticLoop(BaseModel):
         parent.add_child(child_node)
         return child_node
 
-    def is_finished(self, current_node: Node) -> bool:
+    def is_finished(self) -> bool:
         """Check if the loop should finish."""
-        if len(self.root.get_all_nodes()) >= self.max_iterations:
+        total_cost = self.total_usage().completion_cost
+        if (
+            self.max_cost
+            and self.total_usage().completion_cost
+            and total_cost >= self.max_cost
+        ):
             return True
 
-        if current_node.is_finished():
+        nodes = self.root.get_all_nodes()
+        if len(nodes) >= self.max_iterations:
             return True
 
-        if current_node.is_terminal():
-            return True
-
-        return False
+        return nodes[-1].is_terminal()
 
     def total_usage(self) -> Usage:
         """Calculate total token usage across all nodes."""
@@ -130,15 +140,15 @@ class AgenticLoop(BaseModel):
 
     def persist(self, file_path: str):
         """Persist the loop state to a file."""
-        tree_data = self.model_dump()
+        tree_data = self.model_dump(exclude_none=True)
         with open(file_path, "w") as f:
             import json
+
             json.dump(tree_data, f, indent=2)
 
     def _generate_unique_id(self) -> int:
         """Generate a unique ID for a new node."""
-        self.unique_id += 1
-        return self.unique_id
+        return len(self.root.get_all_nodes())
 
     def assert_runnable(self):
         """Verify that the loop is properly configured to run."""
@@ -156,7 +166,7 @@ class AgenticLoop(BaseModel):
     def log(self, logger_fn: Callable, message: str, **kwargs):
         """Log a message with metadata."""
         metadata = {**self.metadata, **kwargs}
-        metadata_str = ' '.join(f"{k}: {str(v)[:20]}" for k, v in metadata.items())
+        metadata_str = " ".join(f"{k}: {str(v)[:20]}" for k, v in metadata.items())
         log_message = f"[{metadata_str}] {message}" if metadata else message
         logger_fn(log_message)
 
@@ -173,8 +183,11 @@ class AgenticLoop(BaseModel):
             if "agent" in obj and isinstance(obj["agent"], dict):
                 obj["agent"] = ActionAgent.model_validate(obj["agent"])
 
-            if "root" in obj and isinstance(obj["root"], dict):
+            if "root" in obj:
                 obj["root"] = Node.reconstruct(obj["root"], repo=repository)
+            elif "nodes" in obj:
+                obj["root"] = Node.reconstruct(obj["nodes"], repo=repository)
+                del obj["nodes"]
 
         return super().model_validate(obj)
 
@@ -207,12 +220,14 @@ class AgenticLoop(BaseModel):
         cls, file_path: str, persist_path: str | None = None, **kwargs
     ) -> "AgenticLoop":
         """Load an AgenticLoop instance from a file."""
-        with open(file_path, "r") as f:
-            data = json.load(f)
 
-        return cls.from_dict(
-            data, persist_path=persist_path or file_path, **kwargs
-        )
+        try:
+            with open(file_path, "r") as f:
+                data = json.load(f)
+
+            return cls.from_dict(data, persist_path=persist_path or file_path, **kwargs)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load AgenticLoop from {file_path}: {e}")
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         """Generate a dictionary representation of the AgenticLoop."""
@@ -230,6 +245,6 @@ class AgenticLoop(BaseModel):
         data["agent"] = self.agent.model_dump(**kwargs)
 
         # Add root last
-        data["root"] = self.root.model_dump(**kwargs)
+        data["nodes"] = self.root.dump_as_list(**kwargs)
 
         return data
