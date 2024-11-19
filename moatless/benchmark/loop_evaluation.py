@@ -55,6 +55,7 @@ class Evaluation:
         agent: ActionAgent | None = None,
         max_iterations: int = 30,
         max_cost: float = 1.0,
+        evaluate_results: bool = False
     ):
         if not completion_model and not agent:
             raise RuntimeError("Either completion_model or agent must be provided")
@@ -64,6 +65,7 @@ class Evaluation:
         self.report_mode = report_mode
         self.dataset_name = dataset_name
         self.evaluation_name = evaluation_name
+        self.evaluate_results = evaluate_results
 
         self.use_testbed = use_testbed
 
@@ -274,8 +276,6 @@ class Evaluation:
                     os.remove(trajectory_path)
 
             if not loop:
-                self.log_event(instance_id, "workspace_creation_started")
-
                 self.log_event(instance_id, "workspace_created")
 
                 metadata: dict[str, Any] = {
@@ -327,10 +327,6 @@ class Evaluation:
                         metadata=metadata,
                         persist_path=trajectory_path,
                     )
-
-            best_node = None
-            start_time = time.time()
-            try:
                 self.log_event(instance_id, "agent_loop_execution_started")
 
                 if loop and "error" in eval_result:
@@ -338,48 +334,64 @@ class Evaluation:
                     with open(eval_result_path, "w") as f:
                         json.dump(eval_result, f, indent=2)
 
-                finished_node = loop.run()
-
-                patch = None
-                if finished_node:
-                    patch = finished_node.file_context.generate_git_patch()
-
+                loop.run()
                 self.log_event(instance_id, "agent_loop_execution_completed")
-                if patch:
-                    self.save_prediction(instance_id, patch)
+
+            start_time = time.time()
+            try:
+                last_node = loop.get_last_node()
+                if not last_node:
+                    logger.error(f"No last node found for {instance_id}")
+                    eval_result["status"] = "no_last_node"
+                    return eval_result
+                else:
+                    patch = last_node.file_context.generate_git_patch()
+                    if not patch:
+                        logger.error(f"No patch generated for {instance_id} and last node {last_node.node_id}. File context: {last_node.file_context.model_dump()}")
 
                 eval_result["status"] = "completed"
+                if not patch:
+                    logger.warning(f"No patch generated for {instance_id}")
+                    eval_result["status"] = "no_patch"
+                    return eval_result
+                else:
+                    self.save_prediction(instance_id, patch)
 
-                if "node_results" not in eval_result:
-                    eval_result["node_results"] = {}
+                    if not self.evaluate_results:
+                        return eval_result
 
-                if self.use_testbed and patch:
-                    if not runtime:
-                        repository = create_repository(
-                            instance, repo_base_dir=self.repo_base_dir
-                        )
-                        from testbeds.sdk import TestbedSDK
-                        from moatless.runtime.testbed import TestbedEnvironment
+                    if "node_results" not in eval_result:
+                        eval_result["node_results"] = {}
 
-                        runtime = TestbedEnvironment(
-                            testbed_sdk=TestbedSDK(),
-                            repository=repository,
-                            instance=instance,
-                            log_dir=log_dir,
-                            enable_cache=True,
-                        )
+                    if str(last_node.node_id) in eval_result["node_results"]:
+                        return eval_result
 
-                        start_time = time.time()
-                        result = runtime.evaluate(patch=patch)
-                        if not result:
-                            logger.error(f"Error in evaluating patch for {instance_id}")
-                        else:
-                            eval_result["node_results"][finished_node.node_id] = (
-                                result.model_dump()
+                    if self.use_testbed and patch:
+
+                        if not runtime:
+                            repository = create_repository(
+                                instance, repo_base_dir=self.repo_base_dir
+                            )
+                            from testbeds.sdk import TestbedSDK
+                            from moatless.runtime.testbed import TestbedEnvironment
+
+                            runtime = TestbedEnvironment(
+                                testbed_sdk=TestbedSDK(),
+                                repository=repository,
+                                instance=instance,
+                                log_dir=log_dir,
+                                enable_cache=True,
                             )
 
-                        with open(eval_result_path, "w") as f:
-                            json.dump(eval_result, f, indent=2)
+                            start_time = time.time()
+                            result = runtime.evaluate(patch=patch)
+                            if not result:
+                                logger.error(f"Error in evaluating patch for {instance_id}")
+                            else:
+                                eval_result["node_results"][str(last_node.node_id)] = (
+                                    result.model_dump()
+                                )
+                                eval_result["status"] = "resolved" if result.resolved else "failed"
 
             except Exception:
                 eval_result["error"] = traceback.format_exc()
@@ -389,8 +401,10 @@ class Evaluation:
                 eval_result["duration"] = time.time() - start_time
                 loop.persist(trajectory_path)
 
-            self.log_event(instance_id, "evaluation_completed")
-            self.update_status(instance_id, eval_result["status"])
+                with open(eval_result_path, "w") as f:
+                    json.dump(eval_result, f, indent=2)
+                self.log_event(instance_id, "evaluation_completed")
+                self.update_status(instance_id, eval_result["status"])
 
             return eval_result
 

@@ -55,8 +55,8 @@ class Node(BaseModel):
         None, description="Flag to indicate if the node is a duplicate"
     )
     reward: Optional[Reward] = Field(None, description="The reward of the node")
-    visits: Optional[int] = Field(
-        None, description="The number of times the node has been visited"
+    visits: int = Field(
+        0, description="The number of times the node has been visited"
     )
     value: Optional[float] = Field(
         None, description="The total value (reward) of the node"
@@ -219,14 +219,17 @@ class Node(BaseModel):
     def generate_react_summary(
         self,
         previous_nodes: List["Node"],
-        include_file_context: bool = True,
-        include_git_patch: bool = True,
+        include_file_context: bool = False,
+        include_git_patch: bool = False,
+        message_history: bool = True,
     ) -> list[Message]:
         """Generate a sequence of messages in ReAct format."""
         messages = [UserMessage(content=self.get_root().message)]
 
         if len(previous_nodes) <= 1:
             return messages
+
+        content = ""
 
         for previous_node in previous_nodes[1:]:
             if previous_node.action:
@@ -237,11 +240,16 @@ class Node(BaseModel):
                     else ""
                 )
                 action = f"Action: {previous_node.action.name}\nAction Input: {previous_node.action.model_dump_json(exclude={'scratch_pad'})}"
-                messages.append(AssistantMessage(content=f"{thought}\n{action}"))
+
+                if message_history:
+                    messages.append(AssistantMessage(content=f"{thought}\n{action}"))
+                else:
+                    content += f"{thought}\n{action}\n"
 
                 # Create user message with observation
                 if previous_node.observation:
                     if (
+                        include_file_context and
                         hasattr(previous_node.observation, "summary")
                         and previous_node.observation.summary
                     ):
@@ -251,7 +259,14 @@ class Node(BaseModel):
                 else:
                     logger.warning(f"No output found for Node{previous_node.node_id}")
                     observation = "No output found."
-                messages.append(UserMessage(content=f"Observation: {observation}"))
+
+                if message_history:
+                    messages.append(UserMessage(content=f"Observation: {observation}"))
+                else:
+                    content += f"\nObservation: {observation}\n"
+
+        if not message_history:
+            messages.append(UserMessage(content=content))
 
         if include_file_context and not self.file_context.is_empty():
             thought = "Thought: I need to see all the code I have viewed so far"
@@ -277,6 +292,8 @@ class Node(BaseModel):
                 git_patch = self.file_context.generate_git_patch()
                 observation = f"```diff\n{git_patch}\n```"
                 messages.append(UserMessage(content=f"Observation: {observation}"))
+
+
         return messages
 
     def _generate_summary_history(
@@ -690,6 +707,7 @@ class Node(BaseModel):
         """
         # Create nodes without relationships first
         nodes_by_id = {}
+
         for node_data in node_list:
             parent_id = node_data.pop("parent_id", None)
             # Use the core reconstruct method for each node
@@ -717,7 +735,7 @@ class Node(BaseModel):
 
         for node in nodes:
             node_data = node.model_dump(exclude={"parent", "children"}, **kwargs)
-            node_data["parent_id"] = node.parent.node_id if node.parent else None
+            node_data["parent_id"] = node.parent.node_id if node.parent is not None else None
             node_list.append(node_data)
 
         return node_list

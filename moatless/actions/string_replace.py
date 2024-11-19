@@ -63,8 +63,9 @@ class StringReplaceArgs(ActionArguments):
             cleaned_lines = [re.sub(line_number_pattern, "", line) for line in lines]
             return "\n".join(cleaned_lines)
 
-        self.old_str = remove_line_numbers(self.old_str)
-        self.new_str = remove_line_numbers(self.new_str)
+        # Remove trailing newlines and line numbers
+        self.old_str = remove_line_numbers(self.old_str.rstrip('\n'))
+        self.new_str = remove_line_numbers(self.new_str.rstrip('\n'))
 
         return self
 
@@ -102,7 +103,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
 
         context_file = file_context.get_context_file(str(path))
         file_content = context_file.content.expandtabs()
-        logger.info(f"Editing file {path}\n{file_content}")
+
         old_str = args.old_str.expandtabs()
         new_str = args.new_str.expandtabs()
 
@@ -116,11 +117,15 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
         exact_matches = find_exact_matches(old_str, file_content)
 
         if len(exact_matches) == 0:
-            potential_matches = find_potential_matches(old_str, file_content)
+            potential_matches = find_match_when_ignoring_indentation(old_str, file_content)
+            if not potential_matches:
+                potential_matches = find_potential_matches(old_str, file_content)
 
             if len(potential_matches) == 1:
                 match = potential_matches[0]
                 match_content = match["content"]
+                differences = match.get("differences", [])
+                differences_msg = "\n".join(f"- {diff}" for diff in differences)
 
                 message = (
                     f"No changes were made. The provided old_str was not found, but a similar code block was found. "
@@ -140,8 +145,9 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                         f"The actual code has {match_indent} spaces but your old_str has {provided_indent} spaces. "
                         f"Please update old_str to match the exact indentation shown above."
                     )
-                elif match["diff_reason"] == "line_breaks_differs":
-                    message += "The content matches but the line breaks are different. Please update old_str to match the exact line breaks shown above."
+                elif match["diff_reason"] == "line_breaks_differ":
+                    message += f"Differences found:\n{differences_msg}\n\n"
+                    message += "Please update old_str to match the exact line breaks shown above."
 
                 raise RetryException(message, args)
             elif len(potential_matches) > 1:
@@ -283,20 +289,38 @@ def normalize_indentation(s):
     return "\n".join(line.strip() for line in s.splitlines())
 
 
-def normalize_line_breaks(s):
-    # Remove all whitespace and line breaks
-    return "".join(line.strip() for line in s.replace(" ", "").splitlines())
+def normalize_for_comparison(s):
+    """
+    Normalize a string for fuzzy comparison by removing most non-alphanumeric characters.
+    This creates a simplified string that can be used to find potential matches even when
+    formatting, whitespace, and some punctuation differ.
+    """
+    # Define characters to normalize away
+    normalize_chars = r'["\'\s\(\)_{}=+\\,;]'
+    
+    # First, normalize line endings and remove empty lines
+    s = '\n'.join(line.strip() for line in s.splitlines() if line.strip())
+    
+    # Store removed characters for difference checking
+    removed_chars = set(re.findall(normalize_chars, s))
+    
+    # Normalize string by:
+    # 1. Removing all whitespace and specified chars
+    # 2. Converting to lowercase to make comparison case-insensitive
+    # 3. Preserve % operator for string formatting
+    normalized = s.lower()
+    normalized = re.sub(r'\s+', '', normalized)
+    normalized = re.sub(r'["\'\(\)_{}=\\,;]', '', normalized)
+    
+    return normalized, removed_chars
 
 
-def find_potential_matches(old_str, new_content):
-    matches = []
-    content_lines = new_content.splitlines()
+def find_match_when_ignoring_indentation(old_str, new_content):
     old_str_lines = old_str.splitlines()
-    window_size = len(old_str_lines)
-
-    # Pre-compute normalized versions of old_str
-    old_str_no_breaks = normalize_line_breaks(old_str)
+    content_lines = new_content.splitlines()
     old_str_no_indent = normalize_indentation(old_str)
+
+    window_size = len(old_str_lines)
 
     # First pass: find indentation matches using fixed window size
     indentation_matches = []
@@ -318,33 +342,56 @@ def find_potential_matches(old_str, new_content):
     if indentation_matches:
         return indentation_matches
 
-    # Second pass: find line break matches only if no indentation matches were found
+    return []
+
+def find_potential_matches(old_str, new_content):
+    matches = []
+    content_lines = new_content.splitlines()
+    if not content_lines:  # Handle empty content
+        return matches
+    
+    # Pre-compute normalized versions of old_str
+    old_str_normalized, old_str_chars = normalize_for_comparison(old_str)
+    old_str_line_count = len(old_str.splitlines())
+
     start_idx = 0
     while start_idx < len(content_lines):
-        if not content_lines[start_idx].strip():
-            start_idx += 1
-            continue
+        # Try different window sizes for multiline matches
+        # Add extra lines to account for different formatting/indentation patterns
+        max_window = min(len(content_lines) - start_idx, old_str_line_count + 5)
 
-        found_match = False
-        for end_idx in range(start_idx + 1, min(start_idx + 5, len(content_lines) + 1)):
-            window = "\n".join(content_lines[start_idx:end_idx])
-            window_no_breaks = normalize_line_breaks(window)
+        for window_size in range(1, max_window + 1):
+            window = "\n".join(content_lines[start_idx:start_idx + window_size])
+            window_normalized, window_chars = normalize_for_comparison(window)
 
-            if window_no_breaks == old_str_no_breaks:
-                matches.append(
-                    {
+            # Check if this window contains the complete normalized string
+            if old_str_normalized in window_normalized:
+                # Try to find the complete structure by checking for balanced parentheses
+                if window.count('(') == window.count(')'):
+                    differences = []
+                    if window.count('\n') != old_str.count('\n'):
+                        differences.append(
+                            f"Line break count differs: found {window.count('\n') + 1} lines, "
+                            f"expected {old_str.count('\n') + 1} lines"
+                        )
+
+                    # Check for character differences
+                    added = window_chars - old_str_chars
+                    removed = old_str_chars - window_chars
+                    if added:
+                        differences.append(f"Additional characters found: {', '.join(sorted(added))}")
+                    if removed:
+                        differences.append(f"Missing characters: {', '.join(sorted(removed))}")
+
+                    matches.append({
                         "start_line": start_idx + 1,
-                        "end_line": end_idx,
+                        "end_line": start_idx + window_size,
                         "content": window,
                         "diff_reason": "line_breaks_differ",
-                    }
-                )
-                start_idx = end_idx  # Skip to the end of this window
-                found_match = True
-                break
-
-        if not found_match:
-            start_idx += 1  # Only increment by 1 if no match was found
+                        "differences": differences
+                    })
+                    break
+        start_idx += 1
 
     return matches
 

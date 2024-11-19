@@ -200,7 +200,6 @@ class Evaluation:
         litellm_callback: Optional[str] = None,
         num_workers: int = 1,
         use_testbed: bool = False,
-        agent: ActionAgent | None = None,
         selector: Selector | None = None,
     ):
         self.evaluations_dir = evaluations_dir
@@ -214,7 +213,6 @@ class Evaluation:
         self.settings = settings
         self.max_file_context_tokens = max_file_context_tokens
 
-        self.agent = agent
         self.selector = selector
 
         self.evaluation_dir = f"{evaluations_dir}/{evaluation_name}"

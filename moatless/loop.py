@@ -66,7 +66,7 @@ class AgenticLoop(BaseModel):
             max_cost=max_cost,
         )
 
-    def run(self) -> Node | None:
+    def run(self):
         """Run the agentic loop until completion or max iterations."""
         self.assert_runnable()
 
@@ -98,7 +98,6 @@ class AgenticLoop(BaseModel):
                 self.log(logger.error, f"Runtime error: {e.message}")
                 break
 
-        return current_node if current_node.is_finished() else None
 
     def _create_next_node(self, parent: Node) -> Node:
         """Create a new node as a child of the parent node."""
@@ -125,6 +124,10 @@ class AgenticLoop(BaseModel):
             return True
 
         return nodes[-1].is_terminal()
+
+    def get_last_node(self) -> Node:
+        """Get the last node in the action sequence."""
+        return self.root.get_all_nodes()[-1]
 
     def total_usage(self) -> Usage:
         """Calculate total token usage across all nodes."""

@@ -216,7 +216,10 @@ class SearchTree(BaseModel):
         reward = node.reward.value
         while node is not None:
             node.visits += 1
-            node.value += reward
+            if not node.value:
+                node.value = reward
+            else:
+                node.value += reward
             node = node.parent
 
     def get_best_trajectory(self) -> Node | None:
@@ -234,6 +237,10 @@ class SearchTree(BaseModel):
 
         if len(nodes) == 1:
             return nodes[0]
+
+        if self.discriminator is None:
+            self.log(logger.info, "No discriminator provided. Returning the first finished node.")
+            return nodes[-1]
 
         return self.discriminator.select(nodes)
 

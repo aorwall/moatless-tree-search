@@ -21,7 +21,7 @@ class CodingValueFunction(ValueFunction):
             current_node = node.parent
 
             # Check parent nodes for expect_correction
-            while current_node and current_node.expect_correction:
+            while current_node and current_node.observation and current_node.observation.expect_correction:
                 if (
                     current_node.observation
                     and current_node.observation.expect_correction
@@ -155,12 +155,12 @@ class CodingValueFunction(ValueFunction):
                 previous_error_count = None
                 previous_reward = None
                 parent_node = node.parent
-                while (
+                if (
                     parent_node
                     and parent_node.observation
                     and parent_node.observation.properties
                     and parent_node.reward
-                    and parent_node.observation.properties.get("test_results")
+                    and parent_node.observation.properties.get("test_results") is not None
                 ):
                     prev_test_results = parent_node.observation.properties.get(
                         "test_results", []
@@ -174,7 +174,6 @@ class CodingValueFunction(ValueFunction):
                         1 for result in prev_test_results if result["status"] == "ERROR"
                     )
                     previous_reward = parent_node.reward.value
-                    parent_node = parent_node.parent
 
                 if previous_reward is None:
                     # No previous test runs found

@@ -326,7 +326,12 @@ class FileRepository(Repository):
             file_pattern = "."
 
         try:
-            cmd = ["grep", "-n", "-r", search_text, file_pattern]
+            # Remove '**' and everything after it
+            grep_pattern = file_pattern
+            if "**" in grep_pattern:
+                grep_pattern = grep_pattern.split("**")[0]
+
+            cmd = ["grep", "-n", "-r", search_text, grep_pattern]
 
             logger.info(f"Executing grep command: {' '.join(cmd)}")
             logger.info(f"Search directory: {self.repo_path}")
@@ -340,7 +345,7 @@ class FileRepository(Repository):
                     f"Grep returned non-standard exit code: {result.returncode}"
                 )
                 if result.stderr:
-                    logger.info(f"Grep error output: {result.stderr}")
+                    logger.warning(f"Grep error output: {result.stderr}")
                 return []
 
             logger.info(f"Found {len(result.stdout.splitlines())} potential matches")

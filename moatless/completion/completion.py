@@ -335,7 +335,7 @@ Make sure to return an instance of the JSON, not the schema itself.""")
                     messages=messages,
                 )
             except Exception as e:
-                logger.error(f"Completion attempt failed with error: {e}. Will retry.")
+                logger.exception(f"Completion attempt failed with error: {e}. Will retry.")
 
                 raise CompletionRuntimeError(
                     f"Failed to get completion response: {e}",
@@ -464,16 +464,22 @@ Action Input: {
                 action_start = response_text.find("Action:")
                 action_input_start = response_text.find("Action Input:")
 
-                if (
-                    thought_start == -1
-                    or action_start == -1
-                    or action_input_start == -1
-                ):
+                if thought_start == -1 or action_start == -1 or action_input_start == -1:
                     raise ValueError("Missing Thought, Action or Action Input sections")
 
                 thought = response_text[thought_start + 8 : action_start].strip()
                 action = response_text[action_start + 7 : action_input_start].strip()
-                action_input = response_text[action_input_start + 13 :].strip()
+                
+                # Extract action input JSON by finding where it ends
+                action_input_text = response_text[action_input_start + 13:].strip()
+                
+                # Try to find the end of JSON by looking for a blank line or end of string
+                json_end = action_input_text.find('\n\n')
+                if json_end == -1:
+                    # If no blank line, use the entire remaining text
+                    action_input = action_input_text
+                else:
+                    action_input = action_input_text[:json_end]
 
                 if not action or not action_input:
                     raise ValueError("Missing Action or Action Input values")
@@ -521,21 +527,25 @@ Action Input: {
         except tenacity.RetryError as e:
             raise e.reraise()
 
-    def _litellm_text_completion(
-        self, messages: list[dict]
-    ) -> Tuple[str, ModelResponse]:
+    def _litellm_text_completion(self, messages: list[dict]) -> Tuple[str, ModelResponse]:
         litellm.drop_params = True
+        
+        completion_kwargs = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "messages": messages,
+            "metadata": self.metadata or {},  # Always pass at least an empty dict
+        }
+        
+        if self.model_base_url:
+            completion_kwargs["api_base"] = self.model_base_url
+        if self.model_api_key:
+            completion_kwargs["api_key"] = self.model_api_key
+        if self.stop_words:
+            completion_kwargs["stop"] = self.stop_words
 
-        completion_response = litellm.completion(
-            model=self.model,
-            api_base=self.model_base_url,
-            api_key=self.model_api_key,
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-            stop=self.stop_words,
-            messages=messages,
-            metadata=self.metadata,
-        )
+        completion_response = litellm.completion(**completion_kwargs)
         return completion_response.choices[0].message.content, completion_response
 
     def _litellm_tool_completion(

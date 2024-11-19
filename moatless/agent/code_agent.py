@@ -241,6 +241,9 @@ def create_coding_actions(
                 completion_model=edit_completion_model,
             )
         )
+        actions.append(
+            RunTests(repository=repository, runtime=runtime, code_index=code_index)
+        )
     else:
         actions.append(
             RequestCodeChange(
@@ -265,6 +268,7 @@ def create_edit_code_actions(
         StringReplace(repository=repository, runtime=runtime, code_index=code_index),
         # InsertLine(repository=repository, runtime=runtime, code_index=code_index),
         CreateFile(repository=repository, runtime=runtime, code_index=code_index),
+        RunTests(repository=repository, runtime=runtime, code_index=code_index),
     ]
 
     actions.extend(edit_actions)

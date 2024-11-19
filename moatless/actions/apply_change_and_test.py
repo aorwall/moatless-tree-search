@@ -105,6 +105,7 @@ class ApplyCodeChangeAndTest(RequestCodeChange):
             return observation
 
         run_tests = RunTests(
+            fail_on_not_found=False,
             repository=self._repository,
             runtime=self._runtime,
             code_index=self._code_index,

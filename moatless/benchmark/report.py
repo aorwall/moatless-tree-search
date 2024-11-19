@@ -254,9 +254,6 @@ def create_trajectory_stats(
                             and not failed_test["file_path"] in file_paths_in_context
                         ):
                             if not "test_not_in_context" in result.fail_reasons:
-                                logger.warning(
-                                    f"{instance['instance_id']} {node.node_id} Test file not in context: {failed_test['file_path']}. Files in context {file_paths_in_context}"
-                                )
                                 result.fail_reasons.append("test_not_in_context")
 
                     failed_test_count = len(failed_tests)

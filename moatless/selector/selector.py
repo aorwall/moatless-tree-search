@@ -240,8 +240,7 @@ class Selector(BaseModel):
         Purpose: Encourages the exploration of promising leaf nodes, potentially
         leading to valuable new paths in the search tree.
         """
-        exploitation = self.calculate_exploitation(node)
-        if not node.children and exploitation >= self.high_value_threshold:
+        if not node.children and node.reward.value >= self.high_value_threshold:
             return self.high_value_leaf_bonus_constant
         return 0
 

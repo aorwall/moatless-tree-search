@@ -48,6 +48,11 @@ class RunTests(Action):
         description="The maximum number of tokens in the test result output message",
     )
 
+    fail_on_not_found: bool = Field(
+        True,
+        description="Fail if the test files are not found in the file context.",
+    )
+
     _code_index: CodeIndex = PrivateAttr()
     _repository: Repository = PrivateAttr()
     _runtime: RuntimeEnvironment = PrivateAttr()
@@ -80,6 +85,12 @@ class RunTests(Action):
             for test_file in args.test_files
             if file_context.get_file(test_file) is not None and is_test(test_file)
         ]
+
+        if not test_files and self.fail_on_not_found:
+            return Observation(
+                message="The provided test files were not found in the file context.",
+                properties={"test_results": [], "fail_reason": "no_test_files"},
+            )
 
         if not test_files:
             file_paths = args.test_files

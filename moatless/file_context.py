@@ -198,6 +198,10 @@ class ContextFile(BaseModel):
         new_patch = self.generate_patch(base_content, updated_content)
         self.patch = new_patch
 
+        # Invalidate cached content
+        self._cached_content = None
+        self._cached_module = None
+
         if self.module:
             updated_span_ids = self.module.get_all_span_ids()
             new_span_ids = updated_span_ids - existing_span_ids
@@ -205,10 +209,6 @@ class ContextFile(BaseModel):
             new_span_ids = set()
 
         self.add_spans(new_span_ids)
-
-        # Invalidate cached content
-        self._cached_content = None
-        self._cached_module = None
 
         return new_span_ids
 

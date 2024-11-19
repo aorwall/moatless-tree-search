@@ -1,6 +1,5 @@
 from typing import Optional
 
-from moatless.actions.request_context import RequestMoreContext
 
 from moatless.actions.apply_change_and_test import ApplyCodeChangeAndTest
 from moatless.actions.code_change import RequestCodeChange

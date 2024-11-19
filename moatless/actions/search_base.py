@@ -7,7 +7,7 @@ from pydantic import Field, PrivateAttr, BaseModel
 from moatless.actions.action import Action
 from moatless.actions.model import ActionArguments, Observation, RewardScaleEntry
 from moatless.completion import CompletionModel
-from moatless.completion.model import UserMessage, AssistantMessage, Completion
+from moatless.completion.model import UserMessage, AssistantMessage, Completion, StructuredOutput
 from moatless.exceptions import CompletionRejectError
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
@@ -59,7 +59,7 @@ class IdentifiedSpans(BaseModel):
     )
 
 
-class Identify(ActionArguments):
+class Identify(StructuredOutput):
     """Identify if the provided search result is relevant to the reported issue."""
 
     scratch_pad: str = Field(
