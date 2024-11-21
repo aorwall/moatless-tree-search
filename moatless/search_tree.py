@@ -4,10 +4,13 @@ from typing import Optional, Dict, Any, List, Callable
 
 from pydantic import BaseModel, Field, model_validator
 
+from moatless.actions.action import Action
 from moatless.agent.agent import ActionAgent
+from moatless.agent.settings import AgentSettings
 from moatless.completion.model import Usage
 from moatless.discriminator import MeanAwardDiscriminator, Discriminator
 from moatless.exceptions import RuntimeError, RejectError
+from moatless.expander import Expander
 from moatless.feedback import FeedbackGenerator
 from moatless.feedback.reward_feedback import RewardFeedbackGenerator
 from moatless.file_context import FileContext
@@ -26,8 +29,15 @@ class SearchTree(BaseModel):
     root: Node = Field(..., description="The root node of the search tree.")
     selector: Selector = Field(..., description="Selector for node selection.")
     agent: ActionAgent = Field(..., description="Agent for generating actions.")
+    agent_settings: Optional[AgentSettings] = Field(
+        None, description="Agent settings for the search tree."
+    )
+    actions: List[Action] = Field(default_factory=list, description="Actions that can be used by the agent in the search tree.")
     repository: Optional[Repository] = Field(
         None, description="Repository for the search tree."
+    )
+    expander: Optional[Expander] = Field(
+        None, description="Expander for expanding nodes."
     )
     value_function: Optional[ValueFunction] = Field(
         None, description="Value function for reward calculation."
@@ -131,41 +141,14 @@ class SearchTree(BaseModel):
         return self.selector.select(filtered_nodes)
 
     def _expand(self, node: Node) -> Node:
-        """Expand the node by returning an unexecuted child or adding a new child node."""
+        """Expand the node and return a child node."""
 
-        # Check that selected node was executed (except for the root node)
+        # Check that selected node was executed (except for the root node), if not return it
         if node.parent and node.observation is None:
             self.log(logger.info, f"Returning unexecuted Node{node.node_id}")
             return node
 
-        # Check for unexecuted children
-        for child in node.children:
-            if not child.is_duplicate and child.observation is None:
-                self.log(
-                    logger.info,
-                    f"Returning unexecuted child Node{child.node_id} of Node{node.node_id}",
-                )
-                child.file_context = (
-                    node.file_context.clone() if node.file_context else None
-                )
-                return child
-
-        child_node = Node(
-            node_id=self._generate_unique_id(),
-            parent=node,
-            file_context=node.file_context.clone() if node.file_context else None,
-            max_expansions=self.max_expansions,
-        )
-        node.add_child(child_node)
-
-        if self.feedback_generator:
-            child_node.message = self.feedback_generator.generate_feedback(
-                child_node, self.agent.actions
-            )
-            self.log(
-                logger.info,
-                f"Generated feedback for Node{child_node.node_id}: {child_node.message}",
-            )
+        child_node = self.expander.expand(node)
 
         self.log(
             logger.info, f"Expanded Node{node.node_id} to new Node{child_node.node_id}"
@@ -178,6 +161,12 @@ class SearchTree(BaseModel):
         if node.observation:
             logger.info(f"Node{node.node_id}: Action already executed. Skipping.")
         else:
+            if self.agent:
+                agent = self.agent
+            elif node.agent_settings:
+                agent = ActionAgent(agent_settings=node.agent_settings)
+            
+
             self.agent.run(node)
 
         if self.value_function and not node.is_duplicate and node.observation:
@@ -356,6 +345,7 @@ class SearchTree(BaseModel):
         file_context: Optional[FileContext] = None,
         repository: Repository | None = None,
         selector: Optional[Selector] = None,
+        expander: Optional[Expander] = None,
         agent: Optional[ActionAgent] = None,
         value_function: Optional[ValueFunction] = None,
         feedback_generator: Optional[FeedbackGenerator] = None,
@@ -388,9 +378,12 @@ class SearchTree(BaseModel):
 
         selector = selector or BestFirstSelector()
 
+        expander = expander or Expander(max_expansions=max_expansions)
+
         return cls(
             root=root,
             selector=selector,
+            expander=expander,
             agent=agent,
             repository=repository,
             value_function=value_function,
@@ -423,6 +416,17 @@ class SearchTree(BaseModel):
 
             if "agent" in obj and isinstance(obj["agent"], dict):
                 obj["agent"] = ActionAgent.model_validate(obj["agent"])
+
+            if "agent_settings" in obj and isinstance(obj["agent_settings"], dict):
+                obj["agent_settings"] = AgentSettings.model_validate(obj["agent_settings"])
+
+            if "actions" in obj and isinstance(obj["actions"], list):
+                obj["actions"] = [Action.from_name(action_name) for action_name in obj["actions"]]
+
+            if "expander" in obj and isinstance(obj["expander"], dict):
+                obj["expander"] = Expander.model_validate(obj["expander"])
+            else:
+                obj["expander"] = Expander(max_expansions=obj.get("max_expansions", 1))
 
             if "value_function" in obj and isinstance(obj["value_function"], dict):
                 obj["value_function"] = ValueFunction.model_validate(
@@ -526,12 +530,12 @@ class SearchTree(BaseModel):
             ]
         }
 
-        # Remove persist_path if it exists
         data.pop("persist_path", None)
 
-        # Add selector, agent, value_function, feedback_generator, and discriminator
         data["selector"] = self.selector.model_dump(**kwargs)
+        data["expander"] = self.expander.model_dump(**kwargs)
         data["agent"] = self.agent.model_dump(**kwargs)
+        data["agent_settings"] = self.agent_settings.model_dump(**kwargs) if self.agent_settings else None
         data["repository"] = (
             self.repository.model_dump(**kwargs) if self.repository else None
         )
@@ -543,7 +547,6 @@ class SearchTree(BaseModel):
         if self.discriminator:
             data["discriminator"] = self.discriminator.model_dump(**kwargs)
 
-        # Add root last
         data["root"] = self.root.model_dump(**kwargs)
 
         return data

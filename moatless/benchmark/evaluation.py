@@ -1,5 +1,6 @@
 import concurrent.futures
 import gc
+import hashlib
 import json
 import logging
 import os
@@ -437,11 +438,14 @@ class Evaluation:
                 if self.use_testbed:
                     from moatless.runtime.testbed import TestbedEnvironment
 
+                    run_id = hashlib.sha256(self.evaluation_name.encode()).hexdigest()[:8]
+
                     runtime = TestbedEnvironment(
                         repository=repository,
                         instance=instance,
                         log_dir=log_dir,
                         dataset_name=self.dataset_name,
+                        run_id=run_id,
                     )
                 else:
                     runtime = None

@@ -112,7 +112,7 @@ class RequestCodeChangeArgs(ActionArguments):
     )
 
     class Config:
-        title = "RequestCodeChange"
+        title = "ApplyChange"
 
     @model_validator(mode="before")
     @classmethod

@@ -25,7 +25,6 @@ from moatless.agent.code_prompts import (
     REACT_SYSTEM_PROMPT,
     SYSTEM_PROMPT,
     SIMPLE_CODE_PROMPT,
-    EDIT_SYSTEM_PROMPT,
 )
 from moatless.completion.completion import (
     LLMResponseFormat,
@@ -45,8 +44,6 @@ class CodingAgent(ActionAgent):
             prompt = self.system_prompt
         elif self.message_history_type == MessageHistoryType.REACT:
             prompt = REACT_SYSTEM_PROMPT
-        elif any(action.name == "StringReplace" for action in possible_actions):
-            prompt = EDIT_SYSTEM_PROMPT
         else:
             prompt = SYSTEM_PROMPT
 
@@ -63,12 +60,34 @@ class CodingAgent(ActionAgent):
                     prompt += f"\n**Example {i+1}**"
                     action_data = example.action.model_dump()
                     scratch_pad = action_data.pop("scratch_pad", "")
-                    prompt += (
-                        f"\nTask: {example.user_input}"
-                        f"Thought: {scratch_pad}\n"
-                        f"Action: {example.action.name}\n"
-                        f"Action Input: {json.dumps(action_data, indent=2)}\n\n"
-                    )
+                    
+                    # Special handling for StringReplace and CreateFile action
+                    if example.action.__class__.__name__ in ["StringReplaceArgs", "CreateFileArgs", "InsertLineArgs"]:
+                        prompt += f"\nTask: {example.user_input}"
+                        prompt += f"\nThought: {scratch_pad}\n"
+                        prompt += f"Action: {example.action.name}\n"
+                        prompt += "Action Input:\n"
+                        
+                        if example.action.__class__.__name__ == "StringReplaceArgs":
+                            prompt += f"<path>{action_data['path']}</path>\n"
+                            prompt += f"<old_str>\n{action_data['old_str']}\n</old_str>\n"
+                            prompt += f"<new_str>\n{action_data['new_str']}\n</new_str>\n"
+                        elif example.action.__class__.__name__ == "InsertLineArgs":
+                            prompt += f"<path>{action_data['path']}</path>\n"
+                            prompt += f"<insert_line>{action_data['insert_line']}</insert_line>\n"
+                            prompt += f"<new_str>\n{action_data['new_str']}\n</new_str>\n"
+                        else:  # CreateFile
+                            prompt += f"<path>{action_data['path']}</path>\n"
+                            prompt += f"<file_text>\n{action_data['file_text']}\n</file_text>\n"
+                    else:
+                        # Original JSON format for other actions
+                        prompt += (
+                            f"\nTask: {example.user_input}"
+                            f"Thought: {scratch_pad}\n"
+                            f"Action: {example.action.name}\n"
+                            f"Action Input: {json.dumps(action_data)}\n\n"
+                        )
+                    
                 elif self.completion.response_format == LLMResponseFormat.JSON:
                     action_json = {
                         "action": example.action.model_dump(),
@@ -80,30 +99,6 @@ class CodingAgent(ActionAgent):
 
     def determine_possible_actions(self, node: Node) -> List[Action]:
         possible_actions = self.actions.copy()
-
-        # Remove RequestCodeChange and RunTests if there's no file context
-        if node.file_context.is_empty():
-            possible_actions = [
-                action
-                for action in possible_actions
-                if action.__class__
-                not in [
-                    ApplyCodeChangeAndTest,
-                    RequestCodeChange,
-                    StringReplace,
-                    CreateFile,
-                    InsertLine,
-                    RunTests,
-                ]
-            ]
-
-        # Remove Finish and Reject if there's no file context or no code changes
-        if not node.file_context.has_patch():
-            possible_actions = [
-                action
-                for action in possible_actions
-                if action.__class__ not in [Finish, Reject]
-            ]
 
         # Remove Finish if a sibling has already finished
         # possible_actions = self.filter_finished(node, possible_actions)
@@ -168,7 +163,7 @@ class CodingAgent(ActionAgent):
                 completion_model=completion_model,
             )
 
-            system_prompt = EDIT_SYSTEM_PROMPT
+            system_prompt = SYSTEM_PROMPT
         else:
             actions = create_coding_actions(
                 repository=repository,
@@ -287,4 +282,11 @@ def create_claude_coding_actions(
         ClaudeEditTool(code_index=code_index, repository=repository, runtime=runtime)
     )
     actions.extend([Finish(), Reject()])
+    return actions
+
+
+def create_all_actions(repository: Repository, code_index: CodeIndex | None = None, runtime: RuntimeEnvironment | None = None, completion_model: CompletionModel | None = None) -> List[Action]:
+    actions = create_base_actions(repository, code_index, completion_model)
+    actions.extend(create_edit_code_actions(repository, code_index, runtime, completion_model))
+    actions.append(ClaudeEditTool(code_index=code_index, repository=repository, runtime=runtime))
     return actions

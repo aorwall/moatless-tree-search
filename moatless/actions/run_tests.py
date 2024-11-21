@@ -92,7 +92,7 @@ class RunTests(Action):
                 properties={"test_results": [], "fail_reason": "no_test_files"},
             )
 
-        if not test_files:
+        elif not test_files:
             file_paths = args.test_files
             if not file_paths:
                 file_paths = [file.file_path for file in file_context.files]
@@ -105,14 +105,14 @@ class RunTests(Action):
                 for search_result in search_results:
                     test_files.append(search_result.file_path)
 
-        for test_file in test_files:
-            if not file_context.has_file(test_file):
-                logger.info(f"Adding test file: {test_file} to context")
-                file_context.add_file(test_file, add_extra=False)
+            for test_file in test_files:
+                if not file_context.has_file(test_file):
+                    logger.info(f"Adding test file: {test_file} to context")
+                    file_context.add_file(test_file, add_extra=False)
 
-        test_files = [
-            file.file_path for file in file_context.files if is_test(file.file_path)
-        ]
+            test_files = [
+                file.file_path for file in file_context.files if is_test(file.file_path)
+            ]
 
         logger.info(f"Running tests: {test_files}")
         patch = file_context.generate_git_patch()

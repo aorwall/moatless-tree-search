@@ -7,6 +7,7 @@ from moatless.actions.view_code import ViewCodeArgs, CodeSpan
 from pydantic import BaseModel, Field
 
 from moatless.actions.model import ActionArguments, Observation
+from moatless.agent.settings import AgentSettings, MessageHistoryType
 from moatless.completion.model import (
     Usage,
     Completion,
@@ -20,11 +21,6 @@ from moatless.value_function.model import Reward
 
 logger = logging.getLogger(__name__)
 
-
-class MessageHistoryType(Enum):
-    MESSAGES = "messages"  # Provides all messages in sequence
-    SUMMARY = "summary"  # Generates one message with summarized history
-    REACT = "react"
 
 
 class Node(BaseModel):
@@ -63,6 +59,9 @@ class Node(BaseModel):
     )
     max_expansions: Optional[int] = Field(
         None, description="The maximum number of expansions"
+    )
+    agent_settings: Optional[AgentSettings] = Field(
+        None, description="The agent settings associated with the node"
     )
 
     @classmethod
@@ -239,12 +238,32 @@ class Node(BaseModel):
                     if hasattr(previous_node.action, "scratch_pad")
                     else ""
                 )
-                action = f"Action: {previous_node.action.name}\nAction Input: {previous_node.action.model_dump_json(exclude={'scratch_pad'})}"
+                action = f"Action: {previous_node.action.name}"
+                
+                # Special handling for ApplyChange, CreateFile, and InsertLines actions
+                if previous_node.action.name in ["ApplyChange", "CreateFile", "InsertLines"]:
+                    action_data = previous_node.action.model_dump(exclude={'scratch_pad'})
+                    action_input = "Action Input:\n"
+                    
+                    if previous_node.action.name == "ApplyChange":
+                        action_input += f"<path>{action_data['path']}</path>\n"
+                        action_input += f"<old_str>\n{action_data['old_str']}\n</old_str>\n"
+                        action_input += f"<new_str>\n{action_data['new_str']}\n</new_str>"
+                    elif previous_node.action.name == "CreateFile":
+                        action_input += f"<path>{action_data['path']}</path>\n"
+                        action_input += f"<file_text>\n{action_data['file_text']}\n</file_text>"
+                    else:  # InsertLines
+                        action_input += f"<path>{action_data['path']}</path>\n"
+                        action_input += f"<insert_line>{action_data['insert_line']}</insert_line>\n"
+                        action_input += f"<new_str>\n{action_data['new_str']}\n</new_str>"
+                else:
+                    # Regular JSON format for other actions
+                    action_input = f"Action Input: {previous_node.action.model_dump_json(exclude={'scratch_pad'})}"
 
                 if message_history:
-                    messages.append(AssistantMessage(content=f"{thought}\n{action}"))
+                    messages.append(AssistantMessage(content=f"{thought}\n{action}\n{action_input}"))
                 else:
-                    content += f"{thought}\n{action}\n"
+                    content += f"{thought}\n{action}\n{action_input}\n"
 
                 # Create user message with observation
                 if previous_node.observation:
@@ -651,6 +670,9 @@ class Node(BaseModel):
             node_data["file_context"] = FileContext.from_dict(
                 repo=repo, data=node_data["file_context"]
             )
+
+        node_data["visits"] = node_data.get("visits", 0)
+        node_data["value"] = node_data.get("value", 0.0)
 
         if "children" in node_data:
             children = node_data.get("children", [])

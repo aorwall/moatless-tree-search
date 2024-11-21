@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 
@@ -6,6 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from moatless.benchmark.report import read_reports, to_dataframe
+from moatless.utils.tokenizer import count_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +113,13 @@ def trajectory_table(report_path: str):
         if result.fail_reasons:  # Check if fail_reasons exists and is not empty
             all_fail_reasons.update(result.fail_reasons)
 
+    # Extract all unique actions from the results
+    all_actions = set()
+    for result in results:
+        # Debug print to see the result structure
+        if hasattr(result, 'actions') and result.actions:  # Check if actions exists
+            all_actions.update(result.actions.keys())
+
     df["success_status"] = df.apply(
         lambda row: "Resolved"
         if row["resolved"] is not None and row["resolved"]
@@ -162,6 +171,10 @@ def trajectory_table(report_path: str):
                 (int(df["resolved_by"].min()), int(df["resolved_by"].max())),
                 key=f"resolved_by_slider",
             )
+    with col5:
+        action_filter = st.multiselect(
+            "Actions", sorted(list(all_actions)), key="action_filter"
+        )
 
     # Apply filters
     mask = pd.Series(True, index=df.index)
@@ -173,10 +186,17 @@ def trajectory_table(report_path: str):
         if "No" in has_resolved_solutions:
             mask &= df["resolved_solutions"] == 0
     if fail_reason_filter:
-        # Filter based on selected fail reasons
         mask &= df.apply(
             lambda row: any(
                 reason in row.get("fail_reasons", []) for reason in fail_reason_filter
+            ),
+            axis=1,
+        )
+    if action_filter:
+        mask &= df.apply(
+            lambda row: row.get('actions', {}) and any(
+                action in row['actions'] and row['actions'][action] > 0
+                for action in action_filter
             ),
             axis=1,
         )
@@ -193,10 +213,39 @@ def trajectory_table(report_path: str):
         axis=1,
     )
 
-    # Remove trajectory_path from the columns to be displayed
+    # Create a new column for fail issues that combines icons for different issues
+    def create_fail_issues_column(row):
+        issues = []
+        tooltips = []
+        
+        # Check for fail reasons
+        if isinstance(row.get('fail_reasons'), (list, set)) and row['fail_reasons']:
+            issues.append("⚠️")
+            tooltips.append(f"Fail reasons: {', '.join(row['fail_reasons'])}")
+            
+        # Check for missing edits
+        if row.get('edits', 0) == 0:
+            issues.append("📝")
+            tooltips.append("No code edits made")
+            
+        # Check for missing test edits
+        if row.get('test_edits', 0) == 0:
+            issues.append("🧪")
+            tooltips.append("No test edits made")
+
+        if not issues:
+            return ""
+            
+        return f'<span title="{" | ".join(tooltips)}">{" ".join(issues)}</span>'
+
+    # Apply the function to create the Issues column
+    filtered_df["Issues"] = filtered_df.apply(create_fail_issues_column, axis=1)
+
+    # Update display columns to include max_build_tokens
     display_columns = [
         "Select",
         "instance_id",
+        "Issues",
         "resolved_by",
         "llmonkeys_rate",
         "success_status",
@@ -211,6 +260,7 @@ def trajectory_table(report_path: str):
         "total_cost",
         "prompt_tokens",
         "completion_tokens",
+        "max_build_tokens",  # Add max_build_tokens to display columns
     ]
 
     filtered_df = filtered_df.sort_values(by="instance_id")
@@ -266,7 +316,67 @@ def trajectory_table(report_path: str):
     a:hover {{
         text-decoration: underline;
     }}
+    span[title] {{
+        position: relative;
+    }}
+    span[title]:hover::after {{
+        content: attr(title);
+        position: absolute;
+        left: 0;
+        top: 100%;
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 14px;
+        white-space: nowrap;
+        z-index: 1000;
+    }}
     </style>
     """,
         unsafe_allow_html=True,
     )
+
+
+
+def show_completion(completion):
+    if completion:
+        st.json(
+            {
+                "model": completion.model,
+                "usage": completion.usage.model_dump() if completion.usage else None,
+            }
+        )
+        if completion.input:
+            st.subheader("Input prompts")
+            for input_idx, input_msg in enumerate(completion.input):
+                if "content" in input_msg:
+                    if isinstance(input_msg["content"], str):
+                        content = input_msg["content"]
+                    elif (
+                        isinstance(input_msg["content"], list)
+                        and input_msg["role"] == "user"
+                    ):
+                        content_list = [c.get("content") for c in input_msg["content"]]
+
+                        content = "\n\n".join(content_list)
+                    else:
+                        content = json.dumps(input_msg["content"], indent=2)
+
+                    tokens = count_tokens(content)
+                    with st.expander(
+                        f"Message {input_idx + 1} by {input_msg['role']} ({tokens} tokens)",
+                        expanded=(input_idx == len(completion.input) - 1),
+                    ):
+                        st.code(content, language="")
+                else:
+                    with st.expander(
+                        f"Message {input_idx + 1} by {input_msg['role']}",
+                        expanded=(input_idx == len(completion.input) - 1),
+                    ):
+                        st.json(input_msg)
+
+        if completion.response:
+            st.subheader("Completion response")
+            st.json(completion.response)
+

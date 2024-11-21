@@ -932,6 +932,7 @@ def is_test(file_path: str) -> bool:
     test_file_patterns = [
         "unittest_*.py",
         "test_*.py",
+        "tests_*.py",
         "*_test.py",
         "test.py",
         "tests.py",

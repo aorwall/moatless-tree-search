@@ -86,11 +86,13 @@ class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
             repository=self._repository,
             runtime=self._runtime,
             code_index=self._code_index,
+            fail_on_not_found=False
         )
         test_observation = run_tests.execute(
             RunTestsArgs(
                 scratch_pad=args.scratch_pad,
-                test_files=[args.path],
+                test_files=[context_file.file_path],
+
             ),
             file_context,
         )

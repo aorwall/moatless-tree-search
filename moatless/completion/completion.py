@@ -42,6 +42,7 @@ class LLMResponseFormat(str, Enum):
 
 
 class CompletionModel(BaseModel):
+
     model: str = Field(..., description="The model to use for completion")
     temperature: float = Field(0.0, description="The temperature to use for completion")
     max_tokens: int = Field(
@@ -225,7 +226,7 @@ class CompletionModel(BaseModel):
         structured_output: type[StructuredOutput] | list[type[StructuredOutput]],
     ) -> Tuple[StructuredOutput, ModelResponse]:
         if not structured_output:
-            raise CompletionRuntimeError(f"Response model are required for completion")
+            raise CompletionRuntimeError(f"Response model is required for completion")
 
         if isinstance(structured_output, list) and len(structured_output) > 1:
             avalabile_actions = [
@@ -242,6 +243,9 @@ class CompletionModel(BaseModel):
 
                 @model_validator(mode="before")
                 def validate_action(cls, data: dict) -> dict:
+                    if not isinstance(data, dict):
+                        raise ValidationError("Expected dictionary input")
+                        
                     action_type = data.get("action_type")
                     if not action_type:
                         return data
@@ -262,7 +266,11 @@ class CompletionModel(BaseModel):
                         )
 
                     # Validate the action data using the specific action class
-                    data["action"] = action_class.model_validate(data["action"])
+                    action_data = data.get("action")
+                    if not action_data:
+                        raise ValidationError("Action data is required")
+                        
+                    data["action"] = action_class.model_validate(action_data)
                     return data
 
             response_model = TakeAction
@@ -286,6 +294,7 @@ Make sure to return an instance of the JSON, not the schema itself.""")
         )
 
         def _do_completion():
+            completion_response = None
             try:
                 completion_response = litellm.completion(
                     model=self.model,
@@ -296,8 +305,11 @@ Make sure to return an instance of the JSON, not the schema itself.""")
                     stop=self.stop_words,
                     messages=messages,
                     response_format={"type": "json_object"},
-                    metadata=self.metadata,
+                    metadata=self.metadata or {},
                 )
+
+                if not completion_response or not completion_response.choices:
+                    raise CompletionRuntimeError("No completion response or choices returned")
 
                 if isinstance(
                     completion_response.choices[0].message.content, BaseModel
@@ -307,6 +319,9 @@ Make sure to return an instance of the JSON, not the schema itself.""")
                     ].message.content.model_dump()
                 else:
                     assistant_message = completion_response.choices[0].message.content
+
+                if not assistant_message:
+                    raise CompletionRuntimeError("Empty response from model")
 
                 messages.append({"role": "assistant", "content": assistant_message})
 
@@ -330,13 +345,12 @@ Make sure to return an instance of the JSON, not the schema itself.""")
                     }
                 )
                 raise CompletionRejectError(
-                    message=e.message,
+                    message=str(e),
                     last_completion=completion_response,
                     messages=messages,
                 )
             except Exception as e:
                 logger.exception(f"Completion attempt failed with error: {e}. Will retry.")
-
                 raise CompletionRuntimeError(
                     f"Failed to get completion response: {e}",
                 )
@@ -359,14 +373,13 @@ Make sure to return an instance of the JSON, not the schema itself.""")
 
         # Check for multiple action blocks
         if thought_count > 1 or action_count > 1 or action_input_count > 1:
-            raise ValueError(
-                "You can only specify one action at a time. If you need to perform multiple actions, describe your next steps in the Thought section and execute them one at a time."
-            )
+            logger.warning(f"Multiple Thought, Action, or Action Input sections found in response: {response_text}")
+            # TODO: Make it possible to confure to raise an error instead or handle multiple blocks?
 
         # Check if all sections exist
-        if thought_count != 1 or action_count != 1 or action_input_count != 1:
+        if thought_count < 1 or action_count < 1 or action_input_count < 1:
             raise ValueError(
-                "Response must have exactly one 'Thought:', 'Action:', and 'Action Input:' section"
+                "Response must have one 'Thought:', 'Action:', and 'Action Input:' section"
             )
 
         # Find the starting lines for each section
@@ -397,7 +410,32 @@ Make sure to return an instance of the JSON, not the schema itself.""")
             if "scratch_pad" in schema["properties"]:
                 del schema["properties"]["scratch_pad"]
 
-            action_input_schemas_str += f"\n * {action.name}: {json.dumps(schema)}"
+            # Special handling for ApplyChange, CreateFile and InsertLines
+            if action.name in ["ApplyChange", "CreateFile", "InsertLines"]:
+                if action.name == "ApplyChange":
+                    action_input_schemas_str += f"\n * {action.name}: Requires the following XML format:\n"
+                    action_input_schemas_str += """<path>file/path.py</path>
+<old_str>
+exact code to replace
+</old_str>
+<new_str>
+replacement code
+</new_str>"""
+                elif action.name == "CreateFile":
+                    action_input_schemas_str += f"\n * {action.name}: Requires the following XML format:\n"
+                    action_input_schemas_str += """<path>new/file/path.py</path>
+<file_text>
+complete file content
+</file_text>"""
+                else:  # InsertLines
+                    action_input_schemas_str += f"\n * {action.name}: Requires the following XML format:\n"
+                    action_input_schemas_str += """<path>file/path.py</path>
+<insert_line>line_number</insert_line>
+<new_str>
+code to insert
+</new_str>"""
+            else:
+                action_input_schemas_str += f"\n * {action.name}: {json.dumps(schema)}"
 
         system_prompt += dedent(f"""\n# Response format
 
@@ -405,45 +443,13 @@ Use the following format:
 
 Thought: You should always think about what to do
 Action: The action to take
-Action Input: The input to the action. Always use valid JSON format with double quotes for strings and 'null' for null values. For example: 'Action Input: {{"file_pattern": "path/to/file", "optional_field": null}}'
+Action Input: The input to the action. For most actions use valid JSON format with double quotes for strings and 'null' for null values. 
+For ApplyChange and CreateFile actions, use XML format as shown in the tools section.
 
 You have access to the following tools: {action_input_schemas_str}
 
 Important: Do not include multiple Thought-Action-Observation blocks. Do not include code blocks or additional text outside of this format.
 """)
-
-        system_prompt += """\n
-**Examples of How to Use the Response Format:**
-
-**Correct Usage:**
-
-Thought: I need to update the error message in the authentication function to be more descriptive.
-Action: StringReplace
-Action Input: {
-  "path": "auth/validator.py",
-  "old_str": "    if not user.is_active:\n        raise ValueError(\"Invalid user\")\n    return user",
-  "new_str": "    if not user.is_active:\n        raise ValueError(f\"Invalid user: {username} is not active\")\n    return user"
-}
-
-**Incorrect Usage (Multiple Actions in One Response):**
-Thought: I need to view the current implementation of the logger configuration and then update it to include a file handler.
-Action: ViewCode
-Action Input: {
-  "files": [
-    {
-      "file_path": "utils/logger.py",
-      "start_line": null,
-      "end_line": null,
-      "span_ids": ["configure_logger"]
-    }
-  ]
-}
-Action: StringReplace
-Action Input: {
-  "path": "utils/logger.py",
-  "old_str": "logging.basicConfig(level=logging.INFO, format=\"%(levelname)s - %(message)s\")",
-  "new_str": "logging.basicConfig(level=logging.INFO, format=\"%(asctime)s - %(levelname)s - %(message)s\", handlers=[logging.FileHandler(\"app.log\"), logging.StreamHandler()])"
-}"""
 
         messages.insert(0, {"role": "system", "content": system_prompt})
 
@@ -469,17 +475,7 @@ Action Input: {
 
                 thought = response_text[thought_start + 8 : action_start].strip()
                 action = response_text[action_start + 7 : action_input_start].strip()
-                
-                # Extract action input JSON by finding where it ends
-                action_input_text = response_text[action_input_start + 13:].strip()
-                
-                # Try to find the end of JSON by looking for a blank line or end of string
-                json_end = action_input_text.find('\n\n')
-                if json_end == -1:
-                    # If no blank line, use the entire remaining text
-                    action_input = action_input_text
-                else:
-                    action_input = action_input_text[:json_end]
+                action_input = response_text[action_input_start + 13:].strip()
 
                 if not action or not action_input:
                     raise ValueError("Missing Action or Action Input values")
@@ -492,7 +488,43 @@ Action Input: {
                         f"Unknown action: {action}. Available actions: {', '.join(action_names)}"
                     )
 
-                action_request = action_class.model_validate_json(action_input)
+                # Parse action input based on action type
+                if action in ["ApplyChange", "CreateFile", "InsertLines"]:
+                    # Check if input appears to be XML format
+                    if action_input.strip().startswith("<"):
+                        # Parse XML format
+                        parsed_input = {}
+                        for field in ["path", "old_str", "new_str", "file_text", "insert_line"]:
+                            start_tag = f"<{field}>"
+                            end_tag = f"</{field}>"
+                            if start_tag in action_input and end_tag in action_input:
+                                start_idx = action_input.index(start_tag) + len(start_tag)
+                                end_idx = action_input.index(end_tag)
+                                content = action_input[start_idx:end_idx]
+                                logger.debug(f"Field {field}:")
+                                logger.debug(f"Content before strip: {repr(content)}")
+                                if content.startswith('\n'):
+                                    content = content[1:]
+                                if content.endswith('\n'):
+                                    content = content[:-1]
+                                logger.debug(f"Content after strip: {repr(content)}")
+                                if content is not None:
+                                    parsed_input[field] = content
+                                else:
+                                    logger.debug(f"Content was empty after processing")
+
+                        logger.debug(f"Final parsed input: {parsed_input}")
+                        action_request = action_class.model_validate(parsed_input)
+                    else:
+                        # Try JSON format as fallback
+                        try:
+                            action_request = action_class.model_validate_json(action_input)
+                        except Exception as e:
+                            raise ValueError(f"Invalid format for {action}. Expected XML or JSON format. Error: {e}")
+                else:
+                    # Parse JSON format for other actions
+                    action_request = action_class.model_validate_json(action_input)
+
                 action_request.scratch_pad = thought
                 return action_request, completion_response
 
@@ -505,14 +537,29 @@ Action Input: {
                     messages.append(
                         {
                             "role": "user",
-                            "content": f"The action input JSON is invalid. Please fix the following validation errors:\n{e}",
+                            "content": f"The action input is invalid. Please fix the following validation errors:\n{e}",
                         }
                     )
                 else:
+                    format_example = ""
+                    if action in ["ApplyChange", "CreateFile", "InsertLines"]:
+                        format_example = "\nFor this action, use XML format like:\n"
+                        format_example += "<path>file/path.py</path>\n"
+                        if action == "ApplyChange":
+                            format_example += "<old_str>\ncode to replace\n</old_str>\n"
+                            format_example += "<new_str>\nreplacement code\n</new_str>"
+                        elif action == "CreateFile":
+                            format_example += "<file_text>\nfile content\n</file_text>"
+                        else:  # InsertLines
+                            format_example += "<insert_line>line_number</insert_line>\n"
+                            format_example += "<new_str>\ncode to insert\n</new_str>"
+
                     messages.append(
                         {
                             "role": "user",
-                            "content": f"The response was invalid. Please follow the exact format:\n\nThought: your reasoning\nAction: the action name\nAction Input: the JSON input\n\nError: {e}",
+                            "content": f"The response was invalid. Please follow the exact format:\n\n"
+                            f"Thought: your reasoning\nAction: the action name\n"
+                            f"Action Input: the input in correct format{format_example}\n\nError: {e}",
                         }
                     )
 

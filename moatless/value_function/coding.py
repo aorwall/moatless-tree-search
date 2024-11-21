@@ -9,8 +9,36 @@ from moatless.value_function.model import Reward
 
 logger = logging.getLogger(__name__)
 
+FAILURE_REWARDS = {
+    'MAJOR': {
+        'file_not_found': 'Requested file does not exist in repository',
+        'is_directory': 'Requested path is a directory, not a file',
+        'invalid_file': 'File exists but could not be parsed or is empty',
+        'no_spans_found': 'No code spans found matching the request',
+        'string_not_found': 'String to replace was not found in file',
+        'string_already_exists': 'New string already exists in file',
+        'no_changes': 'Old and new strings are identical - no changes needed',
+    },
+
+    'MINOR': {
+        'too_many_tokens': 'Requested context exceeds token limit, needs to be more specific',
+        'no_spans_added': 'Requested spans were already in context',
+        'no_search_hits': 'Search returned no results',
+        'file_exists': 'Cannot create file - it already exists',
+        'multiple_occurrences': 'Multiple occurrences of string found - need more context',
+        'indentation_differs': 'Content matches but indentation is incorrect',
+        'line_breaks_differs': 'Content matches but line breaks are incorrect',
+        'multiple_format_matches': 'Multiple potential matches with different formatting found',
+    }
+}
+
+FAILURE_VALUES = {
+    'MAJOR': -50,
+    'MINOR': -25
+}
 
 class CodingValueFunction(ValueFunction):
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -44,98 +72,27 @@ class CodingValueFunction(ValueFunction):
             fail_reason = node.observation.properties.get("fail_reason")
             if fail_reason:
                 logger.info(f"Action failed with reason: {fail_reason}")
-                if fail_reason == "no_search_hits":
-                    return Reward(
-                        value=-100, explanation="Search returned no results"
-                    ), None
-                elif fail_reason == "file_not_found":
-                    return Reward(
-                        value=-25,
-                        explanation="Requested file does not exist in repository",
-                    ), None
-                elif fail_reason == "is_directory":
-                    return Reward(
-                        value=-50,
-                        explanation="Requested path is a directory, not a file",
-                    ), None
-                elif fail_reason == "invalid_file":
-                    return Reward(
-                        value=-50,
-                        explanation="File exists but could not be parsed or is empty",
-                    ), None
-                elif fail_reason == "too_many_tokens":
-                    return Reward(
-                        value=-25,
-                        explanation="Requested context exceeds token limit, needs to be more specific",
-                    ), None
-                elif fail_reason == "no_spans_found":
-                    return Reward(
-                        value=-50,
-                        explanation="No code spans found matching the request",
-                    ), None
-                elif fail_reason == "no_spans_added":
-                    return Reward(
-                        value=-25, explanation="Requested spans were already in context"
-                    ), None
-
-                # File creation failures
-                elif fail_reason == "file_exists":
-                    return Reward(
-                        value=-25, explanation="Cannot create file - it already exists"
-                    ), None
-                elif fail_reason == "file_not_found":
-                    return Reward(
-                        value=-100, explanation="Cannot modify file - it doesn't exist"
-                    ), None
-
-                # String replacement failures
-                elif fail_reason == "string_not_found":
-                    return Reward(
-                        value=-50, explanation="String to replace was not found in file"
-                    ), None
-                elif fail_reason == "multiple_occurrences":
-                    return Reward(
-                        value=-25,
-                        explanation="Multiple occurrences of string found - need more context",
-                    ), None
-                elif fail_reason == "string_already_exists":
-                    return Reward(
-                        value=-50, explanation="New string already exists in file"
-                    ), None
-                elif fail_reason == "no_changes":
-                    return Reward(
-                        value=-50,
-                        explanation="Old and new strings are identical - no changes needed",
-                    ), None
-                elif fail_reason == "indentation_differs":
-                    return Reward(
-                        value=-25,
-                        explanation="Content matches but indentation is incorrect",
-                    ), None
-                elif fail_reason == "line_breaks_differs":
-                    return Reward(
-                        value=-25,
-                        explanation="Content matches but line breaks are incorrect",
-                    ), None
-                elif fail_reason == "multiple_format_matches":
-                    return Reward(
-                        value=-25,
-                        explanation="Multiple potential matches with different formatting found",
-                    ), None
-
-                # Generic failure
-                else:
-                    return Reward(value=-100, explanation="Action failed"), None
+                
+                # Find the severity and explanation for the failure
+                for severity, failures in FAILURE_REWARDS.items():
+                    if fail_reason in failures:
+                        return Reward(
+                            value=FAILURE_VALUES[severity],
+                            explanation=failures[fail_reason]
+                        ), None
+                
+                # Default case for unknown failures
+                return Reward(value=-100, explanation="Action failed"), None
 
             if isinstance(node.action, SearchBaseArgs):
-                if not node.observation.properties.get("new_span_ids"):
+                if not node.observation.properties.get("new_span_ids"):  # TODO Use fail reason?
                     return Reward(
-                        value=-50,
+                        value=-25,
                         explanation="Search returned results but did not add any new spans to the context",
                     ), None
 
                 return Reward(
-                    value=100,
+                    value=50,
                     explanation="Search returned results and added new spans to the context",
                 ), None
 
@@ -221,12 +178,12 @@ class CodingValueFunction(ValueFunction):
 
             if len(files_with_new_spans) == len(files_info) and files_with_new_spans:
                 return Reward(
-                    value=100,
+                    value=50,
                     explanation="Successfully added relevant code context for all requested files",
                 ), None
             elif files_with_new_spans:
                 return Reward(
-                    value=50,
+                    value=25,
                     explanation="Successfully added some new code context, but not for all requested files",
                 ), None
 

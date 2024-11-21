@@ -212,44 +212,6 @@ class ContextFile(BaseModel):
 
         return new_span_ids
 
-    def add_patch(self, new_patch: Optional[str]):
-        """
-        Accumulates a new patch into the initial_patch and updates the 'patch' field.
-
-        Args:
-            new_patch (Optional[str]): The new Git-formatted patch to add.
-        """
-        if new_patch is None:
-            return  # Nothing to add
-
-        if self._initial_patch is None:
-            self._initial_patch = new_patch
-        else:
-            # Combine the existing initial_patch with the new_patch to form a new initial_patch
-            base_content = self.get_base_content()
-            try:
-                # Apply the existing initial_patch to get intermediate content
-                intermediate_content = self.apply_patch_to_content(
-                    self._repo.get_file_content(self.file_path), self._initial_patch
-                )
-                # Apply the new_patch to the intermediate content
-                updated_content = self.apply_patch_to_content(
-                    intermediate_content, new_patch
-                )
-                # Generate a new initial_patch from original to updated_content
-                self._initial_patch = self.generate_patch(
-                    self._repo.get_file_content(self.file_path), updated_content
-                )
-            except Exception as e:
-                raise Exception(f"Failed to accumulate patch: {e}")
-
-        # Update the 'patch' field with the latest patch (which could be None or new_patch)
-        self.patch = new_patch
-
-        # Invalidate cached content
-        self._cached_content = None
-        self._cached_module = None
-        self._cached_base_content = None
 
     def apply_patch_to_content(self, content: str, patch: str) -> str:
         """
@@ -599,6 +561,11 @@ class ContextFile(BaseModel):
 
         return contents
 
+    def set_patch(self, patch: str):
+        self.patch = patch
+        self._cached_content = None
+        self._cached_module = None
+
     def context_size(self):
         if self.module:
             if self.span_ids is None:
@@ -787,30 +754,6 @@ class ContextFile(BaseModel):
         Get all patches associated with this ContextFile.
         """
         return self.patches
-
-    def apply(self, other: "ContextFile"):
-        """
-        Apply another ContextFile onto this one.
-        Combines spans and patches, and applies patches to the file content.
-        """
-        # Combine spans
-        existing_span_ids = {span.span_id for span in self.spans}
-        for span in other.spans:
-            if span.span_id not in existing_span_ids:
-                self.spans.append(span)
-
-        # Combine patches
-        self._patches.extend(other.get_patches())
-
-        # Apply patches to the file content
-        self.apply_patches()
-
-    def apply_patches(self):
-        """
-        Apply all patches to the file content.
-        """
-        for patch in self._patches:
-            self._apply_patch(patch)
 
 
 class FileContext(BaseModel):
@@ -1070,7 +1013,9 @@ class FileContext(BaseModel):
     def get_context_file(
         self, file_path: str, add_extra: bool = False
     ) -> Optional[ContextFile]:
-        file_path = self._repo.get_relative_path(file_path)
+        if self._repo and hasattr(self._repo, "get_relative_path"):
+            file_path = self._repo.get_relative_path(file_path)
+
         context_file = self._files.get(file_path)
 
         if not context_file:
@@ -1244,11 +1189,14 @@ class FileContext(BaseModel):
             if not context_file.spans:
                 continue
 
+            spans = []
             for span in context_file.spans:
                 if span.start_line and span.end_line:
-                    summary += f"- Lines {span.start_line}-{span.end_line}\n"
+                    spans.append(f"{span.start_line}-{span.end_line}")
                 else:
-                    summary += f"- {span.span_id}\n"
+                    spans.append(span.span_id)
+            
+            summary += f"- {', '.join(spans)}\n"
 
         return summary
 

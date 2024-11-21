@@ -130,11 +130,11 @@ class ViewCode(Action):
         view_context = FileContext(repo=self._repository)
 
         for file_path, file_span in grouped_files.items():
+
             file = file_context.get_file(file_path)
 
             if file_span.span_ids:
                 missing_span_ids = set()
-                suggested_span_ids = set()
                 found_span_ids = set()
                 if file_span.span_ids and not file.module:
                     logger.warning(
@@ -144,10 +144,13 @@ class ViewCode(Action):
                         file, f"No span ids found. Is it empty?"
                     )
                     properties["fail_reason"] = "invalid_file"
-                    raise RetryException(message=message, action_args=args)
+                    return Observation(
+                        message=message,
+                        properties=properties,
+                        expect_correction=True,
+                    )
 
                 for span_id in file_span.span_ids:
-                    span_ids = set()
                     block_span = file.module.find_span_by_id(span_id)
                     if not block_span:
                         # Try to find the relevant code block by code block identifier
@@ -158,32 +161,22 @@ class ViewCode(Action):
 
                         if not blocks:
                             missing_span_ids.add(span_id)
-                        elif len(blocks) > 1:
-                            for block in blocks:
-                                if (
-                                    block.belongs_to_span.span_id
-                                    not in suggested_span_ids
-                                ):
-                                    suggested_span_ids.add(
-                                        block.belongs_to_span.span_id
-                                    )
-                        else:
-                            block_span = blocks[0].belongs_to_span
 
-                    if block_span:
-                        if block_span.initiating_block.type == CodeBlockType.CLASS:
-                            class_block = block_span.initiating_block
-                            found_span_ids.add(block_span.span_id)
-                            class_tokens = class_block.sum_tokens()
-
-                            view_context.add_spans_to_context(
-                                file_path, class_block.get_all_span_ids()
-                            )
-
-                        else:
+                        for block in blocks:
                             view_context.add_span_to_context(
-                                file_path, block_span.span_id, add_extra=False
+                                file_path, block.belongs_to_span.span_id, add_extra=False
                             )
+
+                    elif block_span.initiating_block.type == CodeBlockType.CLASS:
+                        class_block = block_span.initiating_block
+                        found_span_ids.add(block_span.span_id)
+                        view_context.add_spans_to_context(
+                            file_path, class_block.get_all_span_ids()
+                        )
+                    else:
+                        view_context.add_span_to_context(
+                            file_path, block_span.span_id, add_extra=False
+                        )
 
             elif file_span.start_line:
                 view_context.add_line_span_to_context(
@@ -191,6 +184,11 @@ class ViewCode(Action):
                 )
             else:
                 view_context.add_file(file_path, show_all_spans=True)
+
+            if file.patch:
+                view_file = view_context.get_file(file_path)
+                if view_file:
+                    view_file.set_patch(file.patch)
 
             if view_context.context_size() > self.max_tokens:
                 content = view_context.create_prompt(
@@ -200,24 +198,25 @@ class ViewCode(Action):
                     outcomment_code_comment="...",
                     only_signatures=True,
                 )
-                raise RetryException(
+                return Observation(
                     message=f"The request code is too large ({view_context.context_size()} tokens) to view in its entirety. Maximum allowed is {self.max_tokens} tokens. "
                     f"Please specify the functions or classes to view.\n"
                     f"Here's a structure of the requested code spans\n: {content}",
-                    action_args=args,
+                    properties=properties,
+                    expect_correction=True,
                 )
 
             if view_context.is_empty():
                 message += f"\nThe specified code spans wasn't found."
                 properties["fail_reason"] = "no_spans_found"
             else:
-                message += "Here's the contents of the requested code spans:\n"
+                message += "Here's the contents of the file where the not requested code spans have been commented out:\n"
                 message += view_context.create_prompt(
                     show_span_ids=False,
                     show_line_numbers=True,
                     exclude_comments=False,
                     show_outcommented_code=True,
-                    outcomment_code_comment="...",
+                    outcomment_code_comment="Rest of the code...",
                 )
 
             new_span_ids = file_context.add_file_context(view_context)

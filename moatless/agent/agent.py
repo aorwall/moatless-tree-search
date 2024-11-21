@@ -11,6 +11,7 @@ from moatless.actions.model import (
     RetryException,
     ActionError,
 )
+from moatless.agent.settings import AgentSettings
 from moatless.completion.completion import CompletionModel
 from moatless.completion.model import AssistantMessage, UserMessage, Completion
 from moatless.exceptions import RuntimeError, CompletionRejectError
@@ -57,6 +58,17 @@ class ActionAgent(BaseModel):
         super().__init__(actions=actions, system_prompt=system_prompt, **data)
         self.set_actions(actions)
         self._completion = completion
+
+    @classmethod
+    def from_agent_settings(cls, agent_settings: AgentSettings, actions: List[Action] | None = None):
+        if agent_settings.actions:
+            actions = [action for action in actions if action.__class__.__name__ in agent_settings.actions]
+
+        return cls(
+            completion=agent_settings.completion_model,
+            system_prompt=agent_settings.system_prompt,
+            actions=actions,
+        )
 
     def set_actions(self, actions: List[Action]):
         self.actions = actions
@@ -126,9 +138,10 @@ class ActionAgent(BaseModel):
 
                 node.observation = Observation(
                     message=e.message,
-                    is_terminal=True,
+                    terminal=True,
                     properties={"error": str(e), "retries": attempt},
                 )
+
                 return
 
             duplicate_node = node.find_duplicate()
@@ -212,11 +225,7 @@ class ActionAgent(BaseModel):
         dump["agent_class"] = f"{self.__class__.__module__}.{self.__class__.__name__}"
         dump["message_history_type"] = self.message_history_type.value
         for action in self.actions:
-            action_dump = action.model_dump(**kwargs)
-            action_dump["action_class"] = (
-                f"{action.__class__.__module__}.{action.__class__.__name__}"
-            )
-            dump["actions"].append(action_dump)
+            dump["actions"].append(action.model_dump(**kwargs))
         return dump
 
     @classmethod
@@ -244,7 +253,7 @@ class ActionAgent(BaseModel):
 
             if repository:
                 obj["actions"] = [
-                    Action.from_dict(
+                    Action.model_validate(
                         action_data,
                         repository=repository,
                         runtime=runtime,

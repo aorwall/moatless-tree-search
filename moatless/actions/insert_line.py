@@ -85,6 +85,13 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
                 properties={"fail_reason": "context_error"},
             )
 
+        if not context_file.lines_is_in_context(args.insert_line - 1, args.insert_line):
+            return Observation(
+                message=f"Line {args.insert_line} is not in the visible portion of file {path}. Please provide a line number within the visible code, use ViewCode to see the code.",
+                properties={"fail_reason": "lines_not_in_context"},
+                expect_correction=True,
+            )
+
         file_text = context_file.content.expandtabs()
         new_str = args.new_str.expandtabs()
         file_text_lines = file_text.split("\n")

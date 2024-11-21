@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import sys
@@ -5,10 +6,14 @@ import sys
 import streamlit as st
 from dotenv import load_dotenv
 
+from moatless.agent.code_agent import create_all_actions
 from moatless.benchmark.report import generate_report
+from moatless.benchmark.swebench.utils import create_index, create_repository
+from moatless.benchmark.utils import get_moatless_instance
 from moatless.search_tree import SearchTree
 from moatless.streamlit.shared import trajectory_table
 from moatless.streamlit.tree_vizualization import update_visualization
+from moatless.streamlit.investigate_node import investigate_node
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -67,12 +72,52 @@ def main():
                             st.rerun()
 
             else:
-                with st.spinner("Loading search tree from trajectory file"):
-                    st.session_state.search_tree = SearchTree.from_file(file_path)
-                    # directory path
+                instance = None
+                if not "search_tree" in st.session_state or st.session_state.search_tree.persist_path != file_path:
+                    with st.spinner("Loading search tree from trajectory file"):
+                        # Need to load twice to get the instance id...
+                        with open(file_path, "r") as f:
+                            search_tree = json.load(f)
+                            if "metadata" in search_tree and "instance_id" in search_tree["metadata"]:
+                                instance_id = search_tree["metadata"]["instance_id"]
+                            else:
+                                instance_id = None
+
+                        if instance_id:
+                            instance = get_moatless_instance(instance_id)
+                        else:
+                            instance = None
+
+                        #repository = create_repository(instance)
+                        #code_index = create_index(instance, repository=repository)
+
+                        #try:
+                        #    from moatless.runtime.testbed import TestbedEnvironment    
+
+                        #    runtime = TestbedEnvironment(
+                        #        repository=repository,
+                        #        instance=instance
+                        #    )
+                        #except:
+                        #    runtime = None
+
+                        st.session_state.search_tree = SearchTree.from_file(
+                            file_path,
+                            #repository=repository,
+                            #runtime=runtime,
+                            #code_index=code_index,
+                        )
+                        #st.session_state.search_tree.agent.set_actions(create_all_actions(repository, code_index, runtime=runtime, completion_model=st.session_state.search_tree.agent.completion))
+
+                if "node_id" in st.query_params:
+                    node_id = int(st.query_params["node_id"])
+                    investigate_node(st.session_state.search_tree, node_id)
+                else:
+
                     update_visualization(
-                        container, st.session_state.search_tree, file_path
+                        container, st.session_state.search_tree, file_path, instance
                     )
+                    
         else:
             st.error(
                 "The specified file does not exist. Please check the path and try again."

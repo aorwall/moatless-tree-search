@@ -2,7 +2,7 @@ from typing import Optional, List, Type, ClassVar
 
 from pydantic import Field, model_validator
 
-from moatless.actions.model import ActionArguments, FewShotExample
+from moatless.actions.model import ActionArguments, FewShotExample, Observation
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs, logger
 from moatless.codeblocks import CodeBlockType
 from moatless.index.types import SearchCodeResponse, SearchCodeHit, SpanHit

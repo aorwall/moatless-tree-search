@@ -27,6 +27,7 @@ class TestbedEnvironment(RuntimeEnvironment):
         dataset_name="princeton-nlp/SWE-bench_Lite",
         log_dir: str | None = None,
         enable_cache: bool = False,
+        run_id: str = "default",
     ):
         self.testbed_sdk = testbed_sdk or TestbedSDK(enable_cache=enable_cache)
         self.repository = repository
@@ -35,7 +36,7 @@ class TestbedEnvironment(RuntimeEnvironment):
         self.tests_to_ignore = []
         self.log_dir = log_dir
         self._test_cache = {} if enable_cache else None
-
+        self.run_id = run_id
     @classmethod
     def from_instance(cls, instance: dict, repository: GitRepository, **kwargs):
         return cls(
@@ -80,6 +81,7 @@ class TestbedEnvironment(RuntimeEnvironment):
                 instance_id=self.instance["instance_id"],
                 dataset_name=self.dataset_name,
                 log_dir=self.log_dir,
+                #run_id=self.run_id,
             ) as testbed:
                 response = testbed.run_tests(
                     test_files=test_files, patch=patch, timeout=600
@@ -285,7 +287,7 @@ class TestbedEnvironment(RuntimeEnvironment):
                 last_line = [
                     line
                     for line in test_result.failure_output.split("\n")
-                    if line.strip()
+                    if line.strip() and not line.startswith("_____")
                 ][-1]
                 if any(error in last_line for error in ignored_errors):
                     logger.info(
