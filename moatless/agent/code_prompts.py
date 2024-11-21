@@ -24,7 +24,7 @@ WORKFLOW_PROMPT = """
 3. **Apply Code Changes**
  * **One Step at a Time:** You can only plan and implement one code change at a time.
  * **Choose the Appropriate Action:**
-    * Use ApplyChange to edit existing files (format: <path>, <old_str>, <new_str>)
+    * Use StringReplace to edit existing files (format: <path>, <old_str>, <new_str>)
     * Use CreateFile to create new files (format: <path>, <file_text>)
  * **Tests Run Automatically:** Tests will run automatically after each code change.
 

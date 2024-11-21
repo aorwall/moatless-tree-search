@@ -7,7 +7,8 @@ from moatless.actions.action import Action
 from moatless.completion.completion import CompletionModel
 from moatless.completion.model import Message, UserMessage, StructuredOutput
 from moatless.feedback.feedback import FeedbackGenerator
-from moatless.node import Node, MessageHistoryType
+from moatless.node import Node
+from moatless.schema import MessageHistoryType
 
 logger = logging.getLogger(__name__)
 

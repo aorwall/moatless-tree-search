@@ -8,6 +8,7 @@ from instructor.utils import classproperty
 from pydantic import Field, BaseModel, model_validator
 
 from moatless.completion.model import ToolCall, Completion, StructuredOutput
+from moatless.file_context import FileContext
 
 logger = logging.getLogger(__name__)
 

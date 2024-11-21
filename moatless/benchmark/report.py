@@ -126,6 +126,8 @@ class TrajectoryStats(BaseModel):
     fail_to_pass_count: int = 0
     pass_to_pass_count: int = 0
 
+    duplicated_actions: int = 0
+
 
 class BenchmarkResult(BaseModel):
     instance_id: str
@@ -166,7 +168,6 @@ class BenchmarkResult(BaseModel):
     failed_actions: int = 0
     expect_corrections: int = 0
     max_repeated_actions: int = 0
-    fail_reasons: list[str] = []
     flags: list[str] = []
 
     context_stats: FileContextStats | None = None
@@ -180,6 +181,8 @@ class BenchmarkResult(BaseModel):
     alternative_solutions: int = 0
     reward: Optional[float] = None
     error: str = ""
+
+    duplicated_actions: int = 0
 
 
 def create_sha256_hash(input_string):
@@ -215,6 +218,7 @@ def create_trajectory_stats(
     last_action = None
     current_repeated = 1
     test_files = []
+    last_action_dump = None
     for node in nodes:
         if node.action:
             action_name = node.action.name
@@ -309,6 +313,13 @@ def create_trajectory_stats(
                     + node.completions["build_action"].usage.completion_tokens
                     + node.completions["build_action"].usage.cached_tokens,
                 )
+
+            current_action_dump = node.action.model_dump(exclude={"scratch_pad"})
+            
+            if last_action_dump and last_action_dump == current_action_dump:
+                result.duplicated_actions += 1
+            
+            last_action_dump = current_action_dump
 
         missing_test_files = get_missing_files(instance["test_file_spans"], test_files)
 
@@ -443,6 +454,8 @@ def to_result(
             actions=actions_counter,
             error=best_stats.message if best_stats and best_stats.message else "",
             max_build_tokens=0,
+            duplicated_actions=0,
+            flags=[],
         )
 
         for leaf_node in search_tree.get_leaf_nodes():
@@ -504,21 +517,28 @@ def to_result(
             result.failed_actions += traj.failed_actions
             result.expect_corrections += traj.expect_corrections
 
-            for fail_reason in traj.fail_reasons:
-                if fail_reason not in result.fail_reasons:
-                    result.fail_reasons.append(fail_reason)
-
             for flag in traj.flags:
                 if flag not in result.flags:
                     result.flags.append(flag)
 
             result.max_build_tokens = max(result.max_build_tokens, traj.max_build_tokens)
 
+            result.duplicated_actions += traj.duplicated_actions
+
         if eval_report.get("error"):
             result.error = eval_report["error"]
             result.status = "error"
         else:
             result.error = ""
+
+        if result.duplicated_actions > 0 and "has_duplicated_actions" not in result.flags:
+            result.flags.append("has_duplicated_actions")
+        if result.edits == 0 and "no_edits" not in result.flags:
+            result.flags.append("no_edits")
+        if result.test_edits == 0 and "no_test_edits" not in result.flags:
+            result.flags.append("no_test_edits")
+        if result.failed_actions > 0 and "has_failed_actions" not in result.flags:
+            result.flags.append("has_failed_actions")
 
     except Exception as e:
         raise e
@@ -709,7 +729,8 @@ def to_dataframe(
             "duplicated_search_actions",
             "trajectory_path",
             "actions",
-            "fail_reasons",
+            "flags",
+            "duplicated_actions",
         ]
 
         if previous_report:
@@ -744,7 +765,7 @@ def to_dataframe(
             "coding_edit_retries",
             "coding_plan_retries",
             "failed_actions",
-            "fail_reasons",
+            "flags",
             "actions",
         ]
         df = df[summary_cols]
@@ -768,7 +789,7 @@ def to_dataframe(
         "alternative_solutions",
         "expected_spans_details",
         "error",
-        "fail_reasons",
+        "flags",
         "actions",
     ]
 

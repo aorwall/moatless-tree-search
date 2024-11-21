@@ -7,7 +7,8 @@ from pydantic import BaseModel, PrivateAttr, Field
 from moatless.actions.action import Action, RewardScaleEntry
 from moatless.completion.completion import CompletionModel
 from moatless.completion.model import UserMessage, Completion
-from moatless.node import Node, MessageHistoryType
+from moatless.node import Node
+from moatless.schema import MessageHistoryType
 from moatless.value_function.model import Reward
 
 logger = logging.getLogger(__name__)

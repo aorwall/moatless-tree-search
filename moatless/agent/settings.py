@@ -4,12 +4,8 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 
 from moatless.completion import CompletionModel
+from moatless.schema import MessageHistoryType
 
-
-class MessageHistoryType(Enum):
-    MESSAGES = "messages"  # Provides all messages in sequence
-    SUMMARY = "summary"  # Generates one message with summarized history
-    REACT = "react"
 
 
 class AgentSettings(BaseModel):

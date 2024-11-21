@@ -156,6 +156,12 @@ class RequestCodeChange(Action):
         completion_model: CompletionModel | None = None,
         **data,
     ):
+        import warnings
+        warnings.warn(
+            "RequestCodeChange is deprecated. Use StringReplace from moatless/actions/string_replace.py instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         super().__init__(**data)
         self._repository = repository
         self._completion_model = completion_model

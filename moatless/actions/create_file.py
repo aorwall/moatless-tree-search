@@ -135,30 +135,5 @@ class UserAuth:
         logger.info(f"User {username} registered successfully")
         return True""",
                 ),
-            ),
-            FewShotExample.create(
-                user_input="Create a new configuration file",
-                action=CreateFileArgs(
-                    scratch_pad="Creating a configuration file with basic settings",
-                    path="config/settings.py",
-                    file_text="""from pathlib import Path
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-
-DEBUG = True
-
-DATABASE = {
-    'host': 'localhost',
-    'port': 5432,
-    'name': 'myapp_db',
-    'user': 'admin'
-}
-
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'level': 'INFO'
-}""",
-                ),
-            ),
+            )
         ]

@@ -157,4 +157,6 @@ def test_invalid_insert_line(edit_action, file_context, test_file):
     
     result = edit_action.execute(args, file_context)
     assert isinstance(result, Observation)
-    assert result.expect_correction 
+    assert result.expect_correction
+
+

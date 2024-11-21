@@ -410,9 +410,9 @@ Make sure to return an instance of the JSON, not the schema itself.""")
             if "scratch_pad" in schema["properties"]:
                 del schema["properties"]["scratch_pad"]
 
-            # Special handling for ApplyChange, CreateFile and InsertLines
-            if action.name in ["ApplyChange", "CreateFile", "InsertLines"]:
-                if action.name == "ApplyChange":
+            # Special handling for StringReplace, CreateFile and InsertLines
+            if action.name in ["StringReplace", "CreateFile", "InsertLines"]:
+                if action.name == "StringReplace":
                     action_input_schemas_str += f"\n * {action.name}: Requires the following XML format:\n"
                     action_input_schemas_str += """<path>file/path.py</path>
 <old_str>
@@ -444,7 +444,7 @@ Use the following format:
 Thought: You should always think about what to do
 Action: The action to take
 Action Input: The input to the action. For most actions use valid JSON format with double quotes for strings and 'null' for null values. 
-For ApplyChange and CreateFile actions, use XML format as shown in the tools section.
+For StringReplace and CreateFile actions, use XML format as shown in the tools section.
 
 You have access to the following tools: {action_input_schemas_str}
 
@@ -489,7 +489,7 @@ Important: Do not include multiple Thought-Action-Observation blocks. Do not inc
                     )
 
                 # Parse action input based on action type
-                if action in ["ApplyChange", "CreateFile", "InsertLines"]:
+                if action in ["StringReplace", "CreateFile", "InsertLines"]:
                     # Check if input appears to be XML format
                     if action_input.strip().startswith("<"):
                         # Parse XML format
@@ -542,10 +542,10 @@ Important: Do not include multiple Thought-Action-Observation blocks. Do not inc
                     )
                 else:
                     format_example = ""
-                    if action in ["ApplyChange", "CreateFile", "InsertLines"]:
+                    if action in ["StringReplace", "CreateFile", "InsertLines"]:
                         format_example = "\nFor this action, use XML format like:\n"
                         format_example += "<path>file/path.py</path>\n"
-                        if action == "ApplyChange":
+                        if action == "StringReplace":
                             format_example += "<old_str>\ncode to replace\n</old_str>\n"
                             format_example += "<new_str>\nreplacement code\n</new_str>"
                         elif action == "CreateFile":

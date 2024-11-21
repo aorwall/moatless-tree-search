@@ -17,7 +17,6 @@ import litellm
 from pydantic import BaseModel, Field
 from tqdm.auto import tqdm
 
-from moatless.agent.agent import ActionAgent, MessageHistoryType
 from moatless.agent.code_agent import CodingAgent
 from moatless.benchmark.report import (
     BenchmarkResult,
@@ -34,6 +33,7 @@ from moatless.completion.log_handler import LogHandler
 from moatless.discriminator import AgentDiscriminator
 from moatless.feedback.feedback_agent import FeedbackAgent
 from moatless.feedback.reward_feedback import RewardFeedbackGenerator
+from moatless.schema import MessageHistoryType
 from moatless.search_tree import SearchTree
 from moatless.selector import BestFirstSelector, SoftmaxSelector, Selector
 from moatless.value_function.coding import CodingValueFunction

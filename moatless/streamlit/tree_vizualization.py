@@ -460,46 +460,60 @@ def create_linear_table(nodes: List[Node], max_node_id: int, eval_result: Option
     st.markdown("---")
 
     st.markdown("### Timeline")
-    timeline_cols = st.columns(min(8, len(nodes)))
-    for idx, (node, col) in enumerate(zip(nodes[1:], timeline_cols)):
-        if node.node_id > max_node_id:
-            continue
-            
-        with col:
-            # Determine node status/color
-            color = "gray"
-            test_status = ""
-            if node.observation:
-                if node.observation.properties.get("fail_reason"):
-                    color = "red"
-                elif node.observation.properties.get("test_results"):
-                    test_results = node.observation.properties["test_results"]
-                    total_tests = len(test_results)
-                    failed_tests = sum(1 for t in test_results if t["status"] in ["FAILED", "ERROR"])
-                    color = "yellow" if failed_tests > 0 else "green"
-                    test_status = f"{failed_tests}/{total_tests} failed"
-            
-            # Create a styled div for the node
-            if node.observation:
-                fail_reason = node.observation.properties.get("fail_reason", "")
-            else:
-                fail_reason = "no_observation"
-
-            st.markdown(f"""
-                <div style="
-                    padding: 8px;
-                    border: 2px solid {color};
-                    border-radius: 4px;
-                    text-align: center;
-                    font-size: 0.9em;
-                ">
-                    <div style="font-weight: bold;">Node {node.node_id}</div>
-                    <div style="font-size: 0.8em;">{node.action.name if node.action else 'Start'}</div>
-                    <div style="font-size: 0.8em; color: {color};">{test_status}</div>
-                    <div style="font-size: 0.8em; color: red;">{fail_reason}</div>
-                </div>
-                """, unsafe_allow_html=True)
     
+    # Calculate number of nodes to show (excluding root node)
+    visible_nodes = [n for n in nodes[1:] if n.node_id <= max_node_id]
+    nodes_per_row = 8
+    num_rows = (len(visible_nodes) + nodes_per_row - 1) // nodes_per_row  # Ceiling division
+    
+    for row in range(num_rows):
+        start_idx = row * nodes_per_row
+        end_idx = min(start_idx + nodes_per_row, len(visible_nodes))
+        row_nodes = visible_nodes[start_idx:end_idx]
+        
+        timeline_cols = st.columns(nodes_per_row)
+        for idx, (node, col) in enumerate(zip(row_nodes, timeline_cols)):
+            if node.node_id > max_node_id:
+                continue
+                
+            with col:
+                # Determine node status/color
+                color = "gray"
+                test_status = ""
+                if node.observation:
+                    if node.observation.properties.get("fail_reason"):
+                        color = "red"
+                    elif node.observation.properties.get("test_results"):
+                        test_results = node.observation.properties["test_results"]
+                        total_tests = len(test_results)
+                        failed_tests = sum(1 for t in test_results if t["status"] in ["FAILED", "ERROR"])
+                        color = "yellow" if failed_tests > 0 else "green"
+                        test_status = f"{failed_tests}/{total_tests} failed"
+                
+                # Create a styled div for the node
+                if node.observation:
+                    fail_reason = node.observation.properties.get("fail_reason", "")
+                else:
+                    fail_reason = "no_observation"
+
+                st.markdown(f"""
+                    <div style="
+                        padding: 8px;
+                        border: 2px solid {color};
+                        border-radius: 4px;
+                        text-align: center;
+                        font-size: 0.9em;
+                    ">
+                        <div style="font-weight: bold;">Node {node.node_id}</div>
+                        <div style="font-size: 0.8em;">{node.action.name if node.action else 'Start'}</div>
+                        <div style="font-size: 0.8em; color: {color};">{test_status}</div>
+                        <div style="font-size: 0.8em; color: red;">{fail_reason}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+        
+        # Add a small vertical space between rows
+        if row < num_rows - 1:
+            st.markdown("<div style='margin: 10px 0;'></div>", unsafe_allow_html=True)
 
     st.markdown("---")
 
@@ -593,7 +607,7 @@ def create_linear_table(nodes: List[Node], max_node_id: int, eval_result: Option
             
             # Properties tab (shown by default)
             with tabs[0]:        
-                if node.observation and node.observation.properties:
+                if node.observation:
 
                     if "diff" in node.observation.properties:
                         st.markdown("**Diff:**")
@@ -606,11 +620,9 @@ def create_linear_table(nodes: List[Node], max_node_id: int, eval_result: Option
 
                     if "fail_reason" in node.observation.properties:
                         st.error(f"🛑 {node.observation.properties['fail_reason']}")
-                        st.code(node.observation.message)
 
                     if "flags" in node.observation.properties:
                         st.warning(f"⚠️ {', '.join(node.observation.properties['flags'])}")
-                        st.code(node.observation.message)
                     
                     if "test_results" in node.observation.properties:
                         test_results = node.observation.properties["test_results"]
@@ -624,7 +636,9 @@ def create_linear_table(nodes: List[Node], max_node_id: int, eval_result: Option
                         else:
                             st.success(f"✅ All {total_tests} tests passed")
                         
-               
+                    if node.observation.summary:
+                        st.code(node.observation.summary)
+
             # Message tab
             with tabs[1]:
                 st.code(node.observation.message)

@@ -31,9 +31,11 @@ from moatless.completion.completion import (
     CompletionModel,
 )
 from moatless.index import CodeIndex
-from moatless.node import Node, MessageHistoryType
+from moatless.message_history import MessageHistoryGenerator
+from moatless.node import Node
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.schema import MessageHistoryType
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +146,7 @@ class CodingAgent(ActionAgent):
         runtime: RuntimeEnvironment | None = None,
         edit_completion_model: CompletionModel | None = None,
         use_edit_actions: bool = False,
+        message_history_type: MessageHistoryType = MessageHistoryType.REACT,
         **kwargs,
     ):
         system_prompt = None
@@ -176,13 +179,16 @@ class CodingAgent(ActionAgent):
             if not runtime:
                 system_prompt = SIMPLE_CODE_PROMPT
 
+        message_generator = MessageHistoryGenerator(
+            message_history_type=message_history_type,
+            include_file_context=True
+        )
+
         return cls(
             completion=completion_model,
             actions=actions,
             system_prompt=system_prompt,
-            include_extra_history=True,
-            include_file_context=False,
-            include_git_patch=False,
+            message_generator=message_generator,
             **kwargs,
         )
 

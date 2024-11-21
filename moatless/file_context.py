@@ -23,6 +23,7 @@ from moatless.repository import FileRepository
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.schema import FileWithSpans
+from moatless.utils.tokenizer import count_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -187,28 +188,42 @@ class ContextFile(BaseModel):
 
         Args:
             updated_content (str): The new content to apply to the file.
+        
+        Returns:
+            set[str]: Set of new span IDs added to context
         """
-
-        if self.module:
-            existing_span_ids = self.module.get_all_span_ids()
-        else:
-            existing_span_ids = set()
 
         base_content = self.get_base_content()
         new_patch = self.generate_patch(base_content, updated_content)
         self.patch = new_patch
 
+        new_span_ids = set()
+
+        # Track modified lines from patch
+        patch_set = PatchSet(io.StringIO(new_patch))
+        for patched_file in patch_set:
+            for hunk in patched_file:
+                # Get the line range for this hunk's changes
+                modified_start = None
+                modified_end = None
+                
+                for line in hunk:
+                    if line.is_added or line.is_removed:
+                        # Convert to 0-based line numbers
+                        current_line = line.target_line_no if line.is_added else line.source_line_no
+                        if current_line is not None:
+                            if modified_start is None:
+                                modified_start = current_line
+                            modified_end = current_line
+                
+                if modified_start is not None:
+                    # Add the modified line span to context
+                    span_ids = self.add_line_span(modified_start, modified_end)
+                    new_span_ids.update(span_ids)
+
         # Invalidate cached content
         self._cached_content = None
         self._cached_module = None
-
-        if self.module:
-            updated_span_ids = self.module.get_all_span_ids()
-            new_span_ids = updated_span_ids - existing_span_ids
-        else:
-            new_span_ids = set()
-
-        self.add_spans(new_span_ids)
 
         return new_span_ids
 
@@ -1038,7 +1053,18 @@ class FileContext(BaseModel):
             yield self.get_context_file(file_path)
 
     def context_size(self):
-        return sum(file.context_size() for file in self._files.values())
+        # TODO: This doesnt give accure results. Will count tokens in the generated prompt instead
+        # sum(file.context_size() for file in self._files.values())
+
+        content = self.create_prompt(
+            show_span_ids=False,
+            show_line_numbers=True,
+            show_outcommented_code=True,
+            outcomment_code_comment="...",
+            only_signatures=True,
+        )
+        return count_tokens(content)
+
 
     def available_context_size(self):
         return self._max_tokens - self.context_size()
@@ -1105,7 +1131,7 @@ class FileContext(BaseModel):
         return "\n".join(full_patch)
 
     def get_updated_files(
-        self, old_context: "FileContext", include_patches: bool = False
+        self, old_context: "FileContext", include_patches: bool = True
     ) -> set[str]:
         """
         Compares this FileContext with an older one and returns a set of files that have been updated.

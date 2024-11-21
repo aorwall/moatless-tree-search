@@ -1,8 +1,30 @@
 import logging
+from enum import Enum
 
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+
+class MessageHistoryType(Enum):
+    MESSAGES = "messages"  # Provides all messages in sequence
+    SUMMARY = "summary"  # Generates one message with summarized history
+    REACT = "react"
+
+    @classmethod
+    def _missing_(cls, value: str):
+        """Handle case-insensitive enum lookup"""
+        for member in cls:
+            if member.value.lower() == value.lower():
+                return member
+        return None
+
+    def __str__(self):
+        return self.value
+
+    def json(self):
+        """Custom JSON serialization"""
+        return self.value
 
 
 class FileWithSpans(BaseModel):

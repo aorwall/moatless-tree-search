@@ -1,0 +1,147 @@
+{
+  "metadata": {},
+  "unique_id": 0,
+  "max_expansions": 1,
+  "max_iterations": 15,
+  "max_cost": 1.0,
+  "min_finished_nodes": null,
+  "max_finished_nodes": null,
+  "reward_threshold": null,
+  "max_depth": 15,
+  "selector": {
+    "type": "BestFirstSelector",
+    "exploration_weight": 1.0,
+    "depth_weight": 0.8,
+    "depth_bonus_factor": 200.0,
+    "high_value_threshold": 55.0,
+    "low_value_threshold": 50.0,
+    "very_high_value_threshold": 75.0,
+    "high_value_leaf_bonus_constant": 20.0,
+    "high_value_bad_children_bonus_constant": 20.0,
+    "high_value_child_penalty_constant": 5.0,
+    "finished_trajectory_penalty": 50.0,
+    "expect_correction_bonus": 0.0,
+    "check_for_bad_child_actions": [
+      "RequestCodeChange"
+    ],
+    "diversity_weight": 0.0
+  },
+  "agent": {
+    "system_prompt": "You are an autonomous AI assistant with superior programming skills. \nYour role is to guide the implementation process by providing detailed instructions for each step needed to solve the assigned task. \nThis includes searching for relevant code, analyzing requirements, planning changes, and providing implementation details.\nYou will interact with an AI agent with limited programming capabilities, so it's crucial to include all necessary information for successful implementation.\n\n## Workflow Overview\n\n1. **Understand the Task**\n   * Review the task provided in <task>\n   * Identify which code needs to change\n   * Determine what additional context is needed to implement changes\n\n2. **Locate Relevant Code**\n   * Use available search functions:\n     * FindClass\n     * FindFunction\n     * FindCodeSnippet\n     * SemanticSearch\n   * Use RequestMoreContext to add necessary code spans\n\n3. **Plan and Execute Changes**\n   * Focus on one change at a time\n   * Provide detailed instructions and pseudo code\n   * Use RequestCodeChange to specify modifications\n   * Document reasoning in scratch_pad\n\n4. **Finish the Task**\n   * When confident changes are correct and task is resolved\n   * Use Finish command\n\n## Important Guidelines\n\n### Focus and Scope\n* Implement requirements exactly as specified\n* Do not modify unrelated code\n* Stay within the bounds of the reported task\n\n### Communication\n* Provide detailed yet concise instructions\n* Include all necessary context for implementation\n* Use scratch_pad to document reasoning\n\n### Code Modifications\n* Only modify files in current context\n* Request additional context explicitly when needed\n* Provide specific locations for changes\n* Make incremental, focused modifications\n\n### Best Practices\n* Never guess at line numbers or code content\n* Document reasoning for each change\n* Focus on one modification at a time\n* Provide clear implementation guidance\n* Ensure changes directly address the task\n\n### Error Handling\n* If implementation fails, analyze output\n* Plan necessary corrections\n* Document reasoning for adjustments\n\nRemember: The AI agent relies on your clear, detailed instructions for successful implementation. Maintain focus on the specific task and provide comprehensive guidance for each change.\n",
+    "actions": [
+      {
+        "max_search_tokens": 1000,
+        "max_hits": 5,
+        "completion_model": {
+          "model": "claude-3-5-haiku-20241022",
+          "temperature": 0.0,
+          "max_tokens": 2000,
+          "model_base_url": null,
+          "model_api_key": null,
+          "response_format": "anthropic_tools",
+          "stop_words": null
+        },
+        "action_class": "moatless.actions.find_class.FindClass"
+      },
+      {
+        "max_search_tokens": 1000,
+        "max_hits": 5,
+        "completion_model": {
+          "model": "claude-3-5-haiku-20241022",
+          "temperature": 0.0,
+          "max_tokens": 2000,
+          "model_base_url": null,
+          "model_api_key": null,
+          "response_format": "anthropic_tools",
+          "stop_words": null
+        },
+        "action_class": "moatless.actions.find_function.FindFunction"
+      },
+      {
+        "max_search_tokens": 1000,
+        "max_hits": 5,
+        "completion_model": {
+          "model": "claude-3-5-haiku-20241022",
+          "temperature": 0.0,
+          "max_tokens": 2000,
+          "model_base_url": null,
+          "model_api_key": null,
+          "response_format": "anthropic_tools",
+          "stop_words": null
+        },
+        "action_class": "moatless.actions.find_code_snippet.FindCodeSnippet"
+      },
+      {
+        "action_class": "moatless.actions.request_context.RequestMoreContext"
+      },
+      {
+        "max_tokens_in_edit_prompt": 750,
+        "show_file_context": true,
+        "completion_model": {
+          "model": "claude-3-5-haiku-20241022",
+          "temperature": 0.0,
+          "max_tokens": 2000,
+          "model_base_url": null,
+          "model_api_key": null,
+          "response_format": "anthropic_tools",
+          "stop_words": null
+        },
+        "action_class": "moatless.actions.code_change.RequestCodeChange"
+      },
+      {
+        "max_search_tokens": 1000,
+        "max_hits": 5,
+        "completion_model": {
+          "model": "claude-3-5-haiku-20241022",
+          "temperature": 0.0,
+          "max_tokens": 2000,
+          "model_base_url": null,
+          "model_api_key": null,
+          "response_format": "anthropic_tools",
+          "stop_words": null
+        },
+        "action_class": "moatless.actions.semantic_search.SemanticSearch"
+      },
+      {
+        "action_class": "moatless.actions.finish.Finish"
+      },
+      {
+        "action_class": "moatless.actions.reject.Reject"
+      }
+    ],
+    "message_history_type": "messages",
+    "include_extra_history": true,
+    "include_file_context": false,
+    "include_git_patch": false,
+    "completion": {
+      "model": "claude-3-5-haiku-20241022",
+      "temperature": 0.0,
+      "max_tokens": 2000,
+      "model_base_url": null,
+      "model_api_key": null,
+      "response_format": "anthropic_tools",
+      "stop_words": null
+    },
+    "agent_class": "moatless.agent.code_agent.CodingAgent"
+  },
+  "discriminator": {},
+  "root": {
+    "node_id": 0,
+    "is_duplicate": false,
+    "action": null,
+    "observation": null,
+    "reward": null,
+    "visits": 0,
+    "value": 0.0,
+    "max_expansions": 1,
+    "file_context": {
+      "max_tokens": 8000,
+      "files": []
+    },
+    "message": "FileBasedCache has_key is susceptible to race conditions\nDescription\n\t \n\t\t(last modified by Marti Raudsepp)\n\t \nI received the exception from Django's cache framework:\nFileNotFoundError: [Errno 2] No such file or directory: '/app/var/cache/d729e4cf4ba88cba5a0f48e0396ec48a.djcache'\n[...]\n File \"django/core/cache/backends/base.py\", line 229, in get_or_set\n\tself.add(key, default, timeout=timeout, version=version)\n File \"django/core/cache/backends/filebased.py\", line 26, in add\n\tif self.has_key(key, version):\n File \"django/core/cache/backends/filebased.py\", line 94, in has_key\n\twith open(fname, \"rb\") as f:\nThe code is:\n\tdef has_key(self, key, version=None):\n\t\tfname = self._key_to_file(key, version)\n\t\tif os.path.exists(fname):\n\t\t\twith open(fname, \"rb\") as f:\n\t\t\t\treturn not self._is_expired(f)\n\t\treturn False\nBetween the exists() check and open(), it's possible for the file to be deleted. In fact, the _is_expired() method itself deletes the file if it finds it to be expired. So if many threads race to read an expired cache at once, it's not that unlikely to hit this window.\n",
+    "feedback": null,
+    "completions": {},
+    "possible_actions": [],
+    "children": []
+  }
+}

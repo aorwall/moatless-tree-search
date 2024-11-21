@@ -79,7 +79,7 @@ class StringReplaceArgs(ActionArguments):
         return self
 
     class Config:
-        title = "ApplyChange"
+        title = "StringReplace"
 
 
 class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
@@ -170,6 +170,10 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                 
                 # Use the matched content as old_str
                 old_str = exact_matches[0]["content"]
+
+                # Fix argument for correct message history
+                args.old_str = old_str
+                args.new_str = new_str
                 
                 properties["flags"] = ["auto_corrected_indentation"]
             else:
@@ -267,16 +271,19 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
 
         snippet_with_lines = self.format_snippet_with_lines(snippet, start_line + 1)
 
-        success_msg = (
+        message = (
             f"The file {path} has been edited. Here's the result of running `cat -n` "
             f"on a snippet of {path}:\n{snippet_with_lines}\n"
             "Review the changes and make sure they are as expected. Edit the file again if necessary."
         )
 
+        summary = f"The file {path} has been edited. Review the changes and make sure they are as expected. Edit the file again if necessary."
+
         properties["diff"] = diff
 
         observation = Observation(
-            message=success_msg,
+            message=message,
+            summary=summary,
             properties=properties,
         )
 
@@ -301,25 +308,6 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                     new_str="""    if not user.is_active:
         raise ValueError(f"Invalid user: {username} does not meet the required criteria")
     return user""",
-                ),
-            ),
-            FewShotExample.create(
-                user_input="Update the logging configuration",
-                action=StringReplaceArgs(
-                    scratch_pad="Enhancing the logging configuration with more detailed format and file handler",
-                    path="utils/logger.py",
-                    old_str="""logging.basicConfig(
-    level=logging.INFO,
-    format="%(levelname)s - %(message)s"
-)""",
-                    new_str="""logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-    handlers=[
-        logging.FileHandler("app.log"),
-        logging.StreamHandler()
-    ]
-)""",
                 ),
             ),
             FewShotExample.create(

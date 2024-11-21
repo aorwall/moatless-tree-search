@@ -163,18 +163,15 @@ class SearchBaseAction(Action):
             summary = "Didn't find any relevant code sections in the search results."
             message = search_result_str
         else:
-            summary = "Found relevant code sections in the search results."
-            search_result_str += "\n\nViewed relevant code:"
-            message = (
-                search_result_str
-                + "\n"
-                + view_context.create_prompt(
+            summary = "Found the following relevant code spans:\n" + view_context.create_summary()
+            message = "Found the following relevant code:\n"
+            message += view_context.create_prompt(
                     show_span_ids=False,
                     show_line_numbers=True,
                     exclude_comments=False,
                     show_outcommented_code=True,
                 )
-            )
+
 
         new_span_ids = file_context.add_file_context(view_context)
         properties["new_span_ids"] = new_span_ids

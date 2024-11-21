@@ -16,7 +16,7 @@ import litellm
 from pydantic import BaseModel, Field
 from tqdm.auto import tqdm
 
-from moatless.agent.agent import ActionAgent, MessageHistoryType
+from moatless.agent.agent import ActionAgent
 from moatless.agent.code_agent import CodingAgent
 from moatless.benchmark.report import (
     BenchmarkResult,

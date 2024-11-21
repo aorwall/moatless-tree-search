@@ -101,7 +101,7 @@ class CodeModificationMixin:
 
         observation.properties.update(test_observation.properties)
         observation.message += "\n\n" + test_observation.message
-
+        observation.summary += "\n\n" + test_observation.message
         return observation
 
     def format_snippet_with_lines(self, snippet: str, start_line: int) -> str:

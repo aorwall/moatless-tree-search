@@ -286,15 +286,4 @@ class RunTests(Action):
 
     @classmethod
     def get_few_shot_examples(cls) -> List[FewShotExample]:
-        return [
-            FewShotExample.create(
-                user_input="Run the tests for our authentication module to verify the recent changes to the login flow",
-                action=RunTestsArgs(
-                    scratch_pad="We need to run the authentication tests to ensure the login flow changes haven't introduced any regressions.",
-                    test_files=[
-                        "tests/auth/test_authentication.py",
-                        "tests/auth/test_login.py",
-                    ],
-                ),
-            )
-        ]
+        return []
