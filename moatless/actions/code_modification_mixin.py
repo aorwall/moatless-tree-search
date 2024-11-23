@@ -8,6 +8,7 @@ from moatless.actions.model import Observation
 from moatless.actions.run_tests import RunTests, RunTestsArgs
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
+from moatless.index.code_index import is_test
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 
@@ -81,27 +82,19 @@ class CodeModificationMixin:
         if not observation.properties or not observation.properties.get("diff"):
             return observation
 
-        if not self._runtime:
-            return observation
+        if file_context.file_exists(file_path) and is_test(file_path):
+            file_context.add_test_file(file_path)
+        else:
+            # If the file is not a test file, find test files that might be related to the file
+            search_results = self._code_index.find_test_files(
+                file_path, query=file_path, max_results=2, max_spans=2
+            )
 
-        run_tests = RunTests(
-            fail_on_not_found=False,
-            repository=self._repository,
-            runtime=self._runtime,
-            code_index=self._code_index,
-        )
+            for search_result in search_results:
+                 file_context.add_test_file(search_result.file_path)
 
-        test_observation = run_tests.execute(
-            RunTestsArgs(
-                scratch_pad=scratch_pad,
-                test_files=[file_path],
-            ),
-            file_context,
-        )
+        file_context.run_tests()
 
-        observation.properties.update(test_observation.properties)
-        observation.message += "\n\n" + test_observation.message
-        observation.summary += "\n\n" + test_observation.message
         return observation
 
     def format_snippet_with_lines(self, snippet: str, start_line: int) -> str:

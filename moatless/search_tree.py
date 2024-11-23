@@ -344,6 +344,7 @@ class SearchTree(BaseModel):
         root: Optional[Node] = None,
         file_context: Optional[FileContext] = None,
         repository: Repository | None = None,
+        runtime: RuntimeEnvironment | None = None,
         selector: Optional[Selector] = None,
         expander: Optional[Expander] = None,
         agent: Optional[ActionAgent] = None,
@@ -365,7 +366,7 @@ class SearchTree(BaseModel):
             raise ValueError("Either a root node or a message must be provided.")
 
         if not file_context:
-            file_context = FileContext(repo=repository)
+            file_context = FileContext(repo=repository, runtime=runtime)
 
         if not root:
             root = Node(
@@ -401,7 +402,7 @@ class SearchTree(BaseModel):
         )
 
     @classmethod
-    def model_validate(cls, obj: Any, repository: Repository | None = None):
+    def model_validate(cls, obj: Any, repository: Repository | None = None, runtime: RuntimeEnvironment | None = None):
         if isinstance(obj, dict):
             obj = obj.copy()
 
@@ -451,9 +452,9 @@ class SearchTree(BaseModel):
                 obj["repository"] = Repository.model_validate(obj["repository"])
 
             if "root" in obj:
-                obj["root"] = Node.reconstruct(obj["root"], repo=repository)
+                obj["root"] = Node.reconstruct(obj["root"], repo=repository, runtime=runtime)
             elif "nodes" in obj:
-                obj["root"] = Node.reconstruct(obj["nodes"], repo=repository)
+                obj["root"] = Node.reconstruct(obj["nodes"], repo=repository, runtime=runtime)
                 del obj["nodes"]
 
         return super().model_validate(obj)
@@ -487,7 +488,7 @@ class SearchTree(BaseModel):
                 data["feedback_generator"]
             )
 
-        return cls.model_validate(data, repository)
+        return cls.model_validate(data, repository, runtime)
 
     @classmethod
     def from_file(

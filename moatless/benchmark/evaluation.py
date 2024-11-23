@@ -514,6 +514,7 @@ class Evaluation:
                     search_tree = SearchTree.create(
                         message=problem_statement,
                         repository=repository,
+                        runtime=runtime,
                         agent=agent,
                         selector=selector,
                         value_function=value_function,

@@ -37,6 +37,7 @@ class TestbedEnvironment(RuntimeEnvironment):
         self.log_dir = log_dir
         self._test_cache = {} if enable_cache else None
         self.run_id = run_id
+
     @classmethod
     def from_instance(cls, instance: dict, repository: GitRepository, **kwargs):
         return cls(
@@ -44,7 +45,7 @@ class TestbedEnvironment(RuntimeEnvironment):
         )
 
     def _generate_cache_key(
-        self, test_files: List[str] | None, patch: str | None
+        self, test_files: List[str] | None
     ) -> str:
         """Generate a unique cache key based on test files and patch content"""
         key_parts = []
@@ -59,13 +60,13 @@ class TestbedEnvironment(RuntimeEnvironment):
         return hashlib.sha256(combined.encode()).hexdigest()
 
     def run_tests(
-        self, patch: str, test_files: List[str] | None = None
+        self, patch: str | None = None, test_files: List[str] | None = None
     ) -> List[TestResult]:
         if patch and not patch.endswith("\n"):
             patch += "\n"
 
         # Check cache if enabled
-        if self._test_cache is not None:
+        if self._test_cache is not None and patch:
             cache_key = self._generate_cache_key(test_files, patch)
             cached_results = self._test_cache.get(cache_key)
             if cached_results:
@@ -74,7 +75,8 @@ class TestbedEnvironment(RuntimeEnvironment):
 
         log_content = "# Test Run\n\n"
         log_content += f"Files: {test_files}"
-        log_content += f"\n\n# Patch:\n```diff\n{patch}\n```"
+        if patch:
+            log_content += f"\n\n# Patch:\n```diff\n{patch}\n```"
 
         try:
             with self.testbed_sdk.create_client(

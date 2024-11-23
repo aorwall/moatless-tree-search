@@ -154,7 +154,6 @@ class CodingAgent(ActionAgent):
             actions = create_claude_coding_actions(
                 repository=repository,
                 code_index=code_index,
-                runtime=runtime,
                 completion_model=completion_model,
             )
             system_prompt = CLAUDE_REACT_PROMPT
@@ -162,7 +161,6 @@ class CodingAgent(ActionAgent):
             actions = create_edit_code_actions(
                 repository=repository,
                 code_index=code_index,
-                runtime=runtime,
                 completion_model=completion_model,
             )
 
@@ -171,7 +169,6 @@ class CodingAgent(ActionAgent):
             actions = create_coding_actions(
                 repository=repository,
                 code_index=code_index,
-                runtime=runtime,
                 identify_completion_model=completion_model,
                 edit_completion_model=edit_completion_model or completion_model,
             )
@@ -259,17 +256,16 @@ def create_coding_actions(
 def create_edit_code_actions(
     repository: Repository,
     code_index: CodeIndex | None = None,
-    runtime: RuntimeEnvironment | None = None,
     completion_model: CompletionModel | None = None,
 ) -> List[Action]:
     """Create a list of simple code modification actions."""
     actions = create_base_actions(repository, code_index, completion_model)
 
     edit_actions = [
-        StringReplace(repository=repository, runtime=runtime, code_index=code_index),
-        # InsertLine(repository=repository, runtime=runtime, code_index=code_index),
-        CreateFile(repository=repository, runtime=runtime, code_index=code_index),
-        RunTests(repository=repository, runtime=runtime, code_index=code_index),
+        StringReplace(repository=repository, code_index=code_index),
+        # InsertLine(repository=repository,  code_index=code_index),
+        CreateFile(repository=repository, code_index=code_index),
+        RunTests(repository=repository, code_index=code_index),
     ]
 
     actions.extend(edit_actions)
@@ -280,19 +276,18 @@ def create_edit_code_actions(
 def create_claude_coding_actions(
     repository: Repository,
     code_index: CodeIndex | None = None,
-    runtime: RuntimeEnvironment | None = None,
     completion_model: CompletionModel | None = None,
 ) -> List[Action]:
     actions = create_base_actions(repository, code_index, completion_model)
     actions.append(
-        ClaudeEditTool(code_index=code_index, repository=repository, runtime=runtime)
+        ClaudeEditTool(code_index=code_index, repository=repository)
     )
     actions.extend([Finish(), Reject()])
     return actions
 
 
-def create_all_actions(repository: Repository, code_index: CodeIndex | None = None, runtime: RuntimeEnvironment | None = None, completion_model: CompletionModel | None = None) -> List[Action]:
+def create_all_actions(repository: Repository, code_index: CodeIndex | None = None, completion_model: CompletionModel | None = None) -> List[Action]:
     actions = create_base_actions(repository, code_index, completion_model)
-    actions.extend(create_edit_code_actions(repository, code_index, runtime, completion_model))
-    actions.append(ClaudeEditTool(code_index=code_index, repository=repository, runtime=runtime))
+    actions.extend(create_edit_code_actions(repository, code_index, completion_model))
+    actions.append(ClaudeEditTool(code_index=code_index, repository=repository))
     return actions

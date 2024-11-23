@@ -3,13 +3,16 @@ from enum import Enum
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field, field_serializer
 
+from moatless.actions.run_tests import RunTestsArgs
 from moatless.actions.view_code import ViewCodeArgs, CodeSpan
+from moatless.actions.view_diff import ViewDiffArgs
 from moatless.completion.model import Message, UserMessage, AssistantMessage
 from moatless.actions.model import ActionArguments
 from moatless.file_context import FileContext
 from moatless.node import Node
 from moatless.schema import MessageHistoryType
 from moatless.utils.tokenizer import count_tokens
+from testbeds.schema import TestStatus
 
 logger = logging.getLogger(__name__)
 
@@ -115,9 +118,6 @@ class MessageHistoryGenerator(BaseModel):
             
             # Add observation message
             messages.append(UserMessage(content=f"Observation: {observation}"))
-
-        for message in messages:
-            logger.info(f"{count_tokens(message.content)} Generated message: {message.content[:100]}")
 
         tokens = count_tokens("".join([m.content for m in messages if m.content is not None]))
         logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
@@ -284,21 +284,37 @@ class MessageHistoryGenerator(BaseModel):
         if not previous_nodes:
             return []
 
-        context_content = node.file_context.create_prompt(
-            show_span_ids=False,
-            show_line_numbers=True,
-            exclude_comments=False,
-            show_outcommented_code=True,
-            outcomment_code_comment="... rest of the code",
-        )
+        # Calculate initial token count
+        total_tokens = node.file_context.context_size()
+        total_tokens += count_tokens(node.get_root().message)
 
-        total_tokens = count_tokens(context_content)
+        # Pre-calculate test output tokens if there's a patch
+        test_output_tokens = 0
+        test_output = None
+        run_tests_args = None
+        if node.file_context.has_patch():
+            run_tests_args = RunTestsArgs(
+                scratch_pad=f"Run the tests to verify the changes.",
+                test_files=list(node.file_context._test_files.keys())
+            )
+            
+            test_output = ""
+            
+            # Add failure details if any
+            failure_details = node.file_context.get_test_failure_details()
+            if failure_details:
+                test_output += failure_details + "\n\n"
+            
+            test_output += node.file_context.get_test_summary()
+            test_output_tokens = count_tokens(test_output) + count_tokens(run_tests_args.model_dump_json())
+            total_tokens += test_output_tokens
 
-        logger.info(f"Generating message history with {total_tokens} tokens")
         node_messages = []
         shown_files = set()
+
+        show_full_test_details = True  # Flag to show full details only for first diff encountered
         
-        for previous_node in reversed(previous_nodes):
+        for i, previous_node in enumerate(reversed(previous_nodes)):
             current_messages = []
             
             if previous_node.action:
@@ -328,7 +344,7 @@ class MessageHistoryGenerator(BaseModel):
                         else previous_node.observation.message if previous_node.observation
                         else "No output found."
                     )
-                    
+
                     # Calculate tokens for this message pair
                     action_tokens = count_tokens(previous_node.action.model_dump_json())
                     observation_tokens = count_tokens(observation_str)
@@ -337,7 +353,7 @@ class MessageHistoryGenerator(BaseModel):
                     # Only add if within token limit
                     if total_tokens + message_tokens <= self.max_tokens:
                         total_tokens += message_tokens
-                        current_messages.append((previous_node.action, observation_str))
+                        current_messages.append((previous_node.action, observation_str))                       
                     else:
                         # Skip remaining non-ViewCode messages if we're over the limit
                         continue
@@ -352,27 +368,71 @@ class MessageHistoryGenerator(BaseModel):
                     files_to_show = updated_files - shown_files
                     shown_files.update(files_to_show)
                     
-                    for file_path in files_to_show:
-                        context_file = previous_node.file_context.get_context_file(file_path)
-                        thought = f"Let's view the content in {file_path}"
-                        if context_file.show_all_spans:
-                            args = ViewCodeArgs(files=[CodeSpan(file_path=file_path)], scratch_pad=thought)
-                        elif context_file.span_ids:
-                            args = ViewCodeArgs(files=[CodeSpan(file_path=file_path, span_ids=context_file.span_ids)], scratch_pad=thought)
-                        else:
-                            continue
+                    if files_to_show:
+                        # Batch all files into a single ViewCode action
+                        code_spans = []
+                        observations = []
+                        
+                        for file_path in files_to_show:
+                            context_file = previous_node.file_context.get_context_file(file_path)
+                            if context_file.show_all_spans:
+                                code_spans.append(CodeSpan(file_path=file_path))
+                            elif context_file.span_ids:
+                                code_spans.append(CodeSpan(file_path=file_path, span_ids=context_file.span_ids))
+                            else:
+                                continue
+                                
+                            observations.append(context_file.to_prompt(
+                                show_span_ids=False,
+                                show_line_numbers=True,
+                                exclude_comments=False,
+                                show_outcommented_code=True,
+                                outcomment_code_comment="... rest of the code",
+                            ))
+                        
+                        if code_spans:
+                            thought = f"Let's view the content in the updated files"
+                            args = ViewCodeArgs(files=code_spans, scratch_pad=thought)
+                            current_messages.append((args, "\n\n".join(observations)))
 
-                        observation = context_file.to_prompt(
-                            show_span_ids=False,
-                            show_line_numbers=True,
-                            exclude_comments=False,
-                            show_outcommented_code=True,
-                            outcomment_code_comment="... rest of the code",
-                        )
-                        current_messages.append((args, observation))
+                # Add test results after each diff
+                if (previous_node.observation and  
+                    previous_node.observation.properties.get("diff")):
+                    
+                    run_tests_args = RunTestsArgs(
+                        scratch_pad=f"Run the tests to verify the changes.",
+                        test_files=list(node.file_context._test_files.keys())
+                    )
+                    
+                    test_output = ""
+                    if show_full_test_details:
+                        # Show full details for first diff encountered
+                        failure_details = node.file_context.get_test_failure_details()
+                        if failure_details:
+                            test_output += failure_details + "\n\n"
+                        show_full_test_details = False
+                    
+                    test_output += node.file_context.get_test_summary()
+                    
+                    # Calculate and check token limits
+                    test_tokens = count_tokens(test_output) + count_tokens(run_tests_args.model_dump_json())
+                    if total_tokens + test_tokens <= self.max_tokens:
+                        total_tokens += test_tokens
+                        current_messages.append((run_tests_args, test_output))
 
             # Add current messages to the beginning of the list
             node_messages = current_messages + node_messages
+
+        patch = node.file_context.generate_git_patch()
+        if patch and self.include_git_patch:
+            view_diff_args = ViewDiffArgs(
+                scratch_pad="Let's review all the changes made to ensure we've properly implemented everything required for the task. I'll check the git diff to verify the modifications."
+            )
+            # Calculate tokens for diff
+            diff_tokens = count_tokens(patch) + count_tokens(view_diff_args.model_dump_json())
+            if total_tokens + diff_tokens <= self.max_tokens:
+                total_tokens += diff_tokens
+                node_messages.append((view_diff_args, f"Current changes in workspace:\n```diff\n{patch}\n```"))
 
         logger.info(f"Generated message history with {total_tokens} tokens")
         return node_messages

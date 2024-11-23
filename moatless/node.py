@@ -17,6 +17,7 @@ from moatless.completion.model import (
 )
 from moatless.file_context import FileContext
 from moatless.repository.repository import Repository
+from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.value_function.model import Reward
 
 logger = logging.getLogger(__name__)
@@ -306,6 +307,7 @@ class Node(BaseModel):
         cls,
         node_data: Dict[str, Any],
         repo: Repository | None = None,
+        runtime: RuntimeEnvironment | None = None
     ) -> "Node":
         if node_data.get("action"):
             node_data["action"] = ActionArguments.model_validate(node_data["action"])
@@ -323,7 +325,7 @@ class Node(BaseModel):
 
         if node_data.get("file_context"):
             node_data["file_context"] = FileContext.from_dict(
-                repo=repo, data=node_data["file_context"]
+                repo=repo, runtime=runtime, data=node_data["file_context"]
             )
 
         node_data["visits"] = node_data.get("visits", 0)
@@ -336,7 +338,7 @@ class Node(BaseModel):
             node = super().model_validate(node_data)
 
             for child_data in children:
-                child = cls._reconstruct_node(child_data, repo=repo)
+                child = cls._reconstruct_node(child_data, repo=repo, runtime=runtime)
                 child.parent = node
                 node.children.append(child)
 
@@ -349,6 +351,7 @@ class Node(BaseModel):
         cls,
         data: Union[Dict[str, Any], List[Dict[str, Any]]],
         repo: Repository | None = None,
+        runtime: RuntimeEnvironment | None = None
     ) -> "Node":
         """
         Reconstruct a node tree from either dict (tree) or list format.
@@ -363,14 +366,15 @@ class Node(BaseModel):
         """
         # Handle list format
         if isinstance(data, list):
-            return cls._reconstruct_from_list(data, repo=repo)
+            return cls._reconstruct_from_list(data, repo=repo, runtime=runtime)
 
         # Handle single node reconstruction (dict format)
-        return cls._reconstruct_node(data, repo=repo)
+        return cls._reconstruct_node(data, repo=repo, runtime=runtime)
 
     @classmethod
     def _reconstruct_from_list(
-        cls, node_list: List[Dict], repo: Repository | None = None
+        cls, node_list: List[Dict], repo: Repository | None = None, runtime: RuntimeEnvironment | None = None
+
     ) -> "Node":
         """
         Reconstruct tree from a flat list of nodes.
@@ -388,7 +392,7 @@ class Node(BaseModel):
         for node_data in node_list:
             parent_id = node_data.pop("parent_id", None)
             # Use the core reconstruct method for each node
-            node = cls._reconstruct_node(node_data, repo=repo)
+            node = cls._reconstruct_node(node_data, repo=repo, runtime=runtime)
             nodes_by_id[node.node_id] = (node, parent_id)
 
         # Connect parent-child relationships

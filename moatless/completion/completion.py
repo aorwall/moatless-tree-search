@@ -488,42 +488,18 @@ Important: Do not include multiple Thought-Action-Observation blocks. Do not inc
                         f"Unknown action: {action}. Available actions: {', '.join(action_names)}"
                     )
 
-                # Parse action input based on action type
-                if action in ["StringReplace", "CreateFile", "InsertLines"]:
-                    # Check if input appears to be XML format
-                    if action_input.strip().startswith("<"):
-                        # Parse XML format
-                        parsed_input = {}
-                        for field in ["path", "old_str", "new_str", "file_text", "insert_line"]:
-                            start_tag = f"<{field}>"
-                            end_tag = f"</{field}>"
-                            if start_tag in action_input and end_tag in action_input:
-                                start_idx = action_input.index(start_tag) + len(start_tag)
-                                end_idx = action_input.index(end_tag)
-                                content = action_input[start_idx:end_idx]
-                                logger.debug(f"Field {field}:")
-                                logger.debug(f"Content before strip: {repr(content)}")
-                                if content.startswith('\n'):
-                                    content = content[1:]
-                                if content.endswith('\n'):
-                                    content = content[:-1]
-                                logger.debug(f"Content after strip: {repr(content)}")
-                                if content is not None:
-                                    parsed_input[field] = content
-                                else:
-                                    logger.debug(f"Content was empty after processing")
-
-                        logger.debug(f"Final parsed input: {parsed_input}")
-                        action_request = action_class.model_validate(parsed_input)
-                    else:
-                        # Try JSON format as fallback
-                        try:
-                            action_request = action_class.model_validate_json(action_input)
-                        except Exception as e:
-                            raise ValueError(f"Invalid format for {action}. Expected XML or JSON format. Error: {e}")
+                # Check if input appears to be XML format
+                if action_input.strip().startswith("<"):
+                    try:
+                        action_request = action_class.model_validate_xml(action_input)
+                    except Exception as e:
+                        raise ValueError(f"Invalid XML format for {action}. Error: {e}")
                 else:
-                    # Parse JSON format for other actions
-                    action_request = action_class.model_validate_json(action_input)
+                    # Otherwise, try to validate as JSON
+                    try:
+                        action_request = action_class.model_validate_json(action_input)
+                    except Exception as e:
+                        raise ValueError(f"Invalid format for {action}. Expected XML or JSON format. Error: {e}")
 
                 action_request.scratch_pad = thought
                 return action_request, completion_response
@@ -599,15 +575,16 @@ Important: Do not include multiple Thought-Action-Observation blocks. Do not inc
         self,
         messages: list[dict],
         system_prompt: str,
-        actions: list[type[StructuredOutput]],
+        response_model: type[StructuredOutput]| List[type[StructuredOutput]],
         is_retry: bool = False,
     ) -> Tuple[StructuredOutput, ModelResponse]:
         litellm.drop_params = True
         messages.insert(0, {"role": "system", "content": system_prompt})
 
-        tools = []
-        for action in actions:
-            tools.append(openai.pydantic_function_tool(action))
+        if isinstance(response_model, list):
+            tools = [r.openai_schema for r in response_model]
+        else:
+            tools = [response_model.openai_schema]
 
         completion_response = litellm.completion(
             model=self.model,
@@ -619,7 +596,7 @@ Important: Do not include multiple Thought-Action-Observation blocks. Do not inc
             tools=tools,
             tool_choice="auto",
             messages=messages,
-            metadata=self.metadata,
+            metadata=self.metadata or {},
         )
 
         tool_args, tool_name, retry_message = None, None, None
@@ -686,12 +663,31 @@ Important: Do not include multiple Thought-Action-Observation blocks. Do not inc
             if not retry_message:
                 retry_message = "You must response with a tool call."
             messages.append({"role": "user", "content": retry_message})
-            return self._litellm_tool_completion(messages, is_retry=True)
+            return self._litellm_tool_completion(messages, system_prompt, response_model, is_retry=True)
 
-        action_request = self.action_type().from_tool_call(
-            tool_args=tool_args, tool_name=tool_name
-        )
-        return action_request, completion_response
+        action = None
+        if isinstance(response_model, list):
+            for r in response_model:
+                if r.model_json_schema()["title"] == tool_name:
+                    action = r
+                    break
+        else:
+            action = response_model
+
+        if not action:
+            available_actions = [r.model_json_schema()["title"] for r in response_model]
+            raise ValueError(f"Unknown action {tool_name}. Available acitons: {available_actions}")
+
+        action_args = action.model_validate(tool_args)
+
+        if (
+                hasattr(action_args, "scratch_pad")
+                and completion_response.choices[0].message.content
+                and not action_args.scratch_pad
+        ):
+            action_args.scratch_pad = completion_response.choices[0].message.content
+
+        return action_args, completion_response
 
     def input_messages(
         self, content: str, completion: Completion | None, feedback: str | None = None

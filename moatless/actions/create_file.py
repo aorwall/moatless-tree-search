@@ -79,28 +79,13 @@ class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
             properties={"diff": diff, "success": True},
         )
 
-        if not self._runtime:
-            return observation
-
-        run_tests = RunTests(
-            repository=self._repository,
-            runtime=self._runtime,
-            code_index=self._code_index,
-            fail_on_not_found=False
-        )
-        test_observation = run_tests.execute(
-            RunTestsArgs(
-                scratch_pad=args.scratch_pad,
-                test_files=[context_file.file_path],
-
-            ),
-            file_context,
+        return self.run_tests_and_update_observation(
+            observation=observation,
+            file_path=str(path),
+            scratch_pad=args.scratch_pad,
+            file_context=file_context,
         )
 
-        observation.properties.update(test_observation.properties)
-        observation.message += "\n\n" + test_observation.message
-
-        return observation
 
     @classmethod
     def get_few_shot_examples(cls) -> List[FewShotExample]:

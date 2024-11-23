@@ -230,7 +230,7 @@ def trajectory_table(report_path: str):
     # Apply the function to create the Issues column
     filtered_df["Issues"] = filtered_df.apply(create_fail_issues_column, axis=1)
 
-    # Update display columns to include max_build_tokens
+    # Update display columns to include duplicated_actions
     display_columns = [
         "Select",
         "instance_id",
@@ -246,10 +246,11 @@ def trajectory_table(report_path: str):
         "status",
         "all_transitions",
         "failed_actions",
+        "duplicated_actions",  # Add duplicated_actions column
         "total_cost",
         "prompt_tokens",
         "completion_tokens",
-        "max_build_tokens",  # Add max_build_tokens to display columns
+        "max_build_tokens",
     ]
 
     filtered_df = filtered_df.sort_values(by="instance_id")

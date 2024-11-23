@@ -92,6 +92,10 @@ class SearchBaseAction(Action):
         8000,
         description="The maximum number of tokens allowed in the identified code sections.",
     )
+    max_identify_prompt_tokens: int = Field(
+        16000,
+        description="The maximum number of tokens allowed in the identify prompt.",
+    )
     max_hits: int = Field(
         10,
         description="The maximum number of search hits to display.",
@@ -172,7 +176,6 @@ class SearchBaseAction(Action):
                     show_outcommented_code=True,
                 )
 
-
         new_span_ids = file_context.add_file_context(view_context)
         properties["new_span_ids"] = new_span_ids
 
@@ -250,6 +253,7 @@ class SearchBaseAction(Action):
             exclude_comments=False,
             show_outcommented_code=True,
             outcomment_code_comment="...",
+            max_tokens=self.max_identify_prompt_tokens,
         )
 
         content = "Search request:"

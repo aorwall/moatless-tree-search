@@ -219,6 +219,8 @@ def create_trajectory_stats(
     current_repeated = 1
     test_files = []
     last_action_dump = None
+    action_dumps = []
+    
     for node in nodes:
         if node.action:
             action_name = node.action.name
@@ -315,11 +317,10 @@ def create_trajectory_stats(
                 )
 
             current_action_dump = node.action.model_dump(exclude={"scratch_pad"})
+            action_dumps.append(current_action_dump)
             
-            if last_action_dump and last_action_dump == current_action_dump:
+            if current_action_dump in action_dumps[:-1]:
                 result.duplicated_actions += 1
-            
-            last_action_dump = current_action_dump
 
         missing_test_files = get_missing_files(instance["test_file_spans"], test_files)
 

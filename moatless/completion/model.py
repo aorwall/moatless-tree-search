@@ -2,9 +2,11 @@ import hashlib
 import json
 import logging
 from typing import Optional, Any, Union, Self
+from docstring_parser import parse
 
 import litellm
 from instructor import OpenAISchema
+from instructor.utils import classproperty
 from litellm import cost_per_token, NotFoundError
 from pydantic import BaseModel, model_validator, Field, ValidationError
 
@@ -180,6 +182,75 @@ class Completion(BaseModel):
 
 
 class StructuredOutput(OpenAISchema):
+
+    @classproperty
+    def openai_schema(cls) -> dict[str, Any]:
+        """
+        Return the schema in the format of OpenAI's schema as jsonschema
+
+        Note:
+            Its important to add a docstring to describe how to best use this class, it will be included in the description attribute and be part of the prompt.
+
+        Returns:
+            model_json_schema (dict): A dictionary in the format of OpenAI's schema as jsonschema
+        """
+        schema = cls.model_json_schema()
+        docstring = parse(cls.__doc__ or "")
+        parameters = {
+            k: v for k, v in schema.items() if k not in ("title", "description")
+        }
+        for param in docstring.params:
+            if (name := param.arg_name) in parameters["properties"] and (
+                description := param.description
+            ):
+                if "description" not in parameters["properties"][name]:
+                    parameters["properties"][name]["description"] = description
+
+        parameters["required"] = sorted(
+            k for k, v in parameters["properties"].items() if "default" not in v
+        )
+
+        if "description" not in schema:
+            if docstring.short_description:
+                schema["description"] = docstring.short_description
+            else:
+                schema["description"] = (
+                    f"Correctly extracted `{cls.__name__}` with all "
+                    f"the required parameters with correct types"
+                )
+
+        return {
+            "type": "function",
+            "function": {
+                "name": schema["title"],
+                "description": schema["description"],
+                "parameters": parameters,
+            }
+        }
+
+    @classmethod
+    def model_validate_xml(cls, xml_text: str) -> Self:
+        """Parse XML format into model fields."""
+        parsed_input = {}
+        # Fields that can be parsed from XML format
+        xml_fields = ["path", "old_str", "new_str", "file_text", "insert_line"]
+        
+        for field in xml_fields:
+            start_tag = f"<{field}>"
+            end_tag = f"</{field}>"
+            if start_tag in xml_text and end_tag in xml_text:
+                start_idx = xml_text.index(start_tag) + len(start_tag)
+                end_idx = xml_text.index(end_tag)
+                content = xml_text[start_idx:end_idx]
+                if content.startswith('\n'):
+                    content = content[1:]
+                if content.endswith('\n'):
+                    content = content[:-1]
+                if content is not None:
+                    parsed_input[field] = content
+                    
+        return cls.model_validate(parsed_input)
+
     @classmethod
     def model_validate_json(
         cls,

@@ -96,8 +96,6 @@ class ActionAgent(BaseModel):
             logger.info(f"Node{node.node_id}: Resetting node")
             node.reset()
 
-        logger.info(node.file_context.model_dump())
-
         possible_actions = self.determine_possible_actions(node)
         if not possible_actions:
             raise RuntimeError(f"No possible actions for Node{node.node_id}")

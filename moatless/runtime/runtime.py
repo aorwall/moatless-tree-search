@@ -26,9 +26,10 @@ class TestResult(BaseModel):
     )
 
 
+
 class RuntimeEnvironment(ABC):
     @abstractmethod
     def run_tests(
-        self, patch: str, test_files: List[str] | None = None
+        self, patch: str | None = None, test_files: List[str] | None = None
     ) -> list[TestResult]:
         pass

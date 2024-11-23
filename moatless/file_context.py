@@ -21,9 +21,10 @@ from moatless.codeblocks.module import Module
 from moatless.index import CodeIndex
 from moatless.repository import FileRepository
 from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.runtime.runtime import RuntimeEnvironment, TestResult
 from moatless.schema import FileWithSpans
 from moatless.utils.tokenizer import count_tokens
+from testbeds.schema import TestStatus
 
 logger = logging.getLogger(__name__)
 
@@ -390,6 +391,7 @@ class ContextFile(BaseModel):
         outcomment_code_comment: str = "...",
         show_all_spans: bool = False,
         only_signatures: bool = False,
+        max_tokens: Optional[int] = None,
     ):
         if self.module:
             if (
@@ -411,11 +413,19 @@ class ContextFile(BaseModel):
                 exclude_comments=exclude_comments,
                 show_all_spans=show_all_spans or self.show_all_spans,
                 only_signatures=only_signatures,
+                max_tokens=max_tokens,
             )
         else:
             code = self._to_prompt_with_line_spans(show_span_id=show_span_ids)
 
-        return f"{self.file_path}\n```\n{code}\n```\n"
+        result = f"{self.file_path}\n```\n{code}\n```\n"
+        
+        # Check if result exceeds max_tokens
+        if max_tokens and count_tokens(result) > max_tokens:
+            logger.warning(f"Content for {self.file_path} exceeded max_tokens ({max_tokens})")
+            return ""
+        
+        return result
 
     def _find_span(self, codeblock: CodeBlock) -> Optional[ContextSpan]:
         if not codeblock.belongs_to_span:
@@ -472,6 +482,8 @@ class ContextFile(BaseModel):
         exclude_comments: bool = False,
         show_all_spans: bool = False,
         only_signatures: bool = False,
+        max_tokens: Optional[int] = None,
+        current_tokens: int = 0,
     ):
         if current_span is None:
             current_span = CurrentPromptSpan()
@@ -484,6 +496,12 @@ class ContextFile(BaseModel):
         for _i, child in enumerate(code_block.children):
             if exclude_comments and child.type.group == CodeBlockTypeGroup.COMMENT:
                 continue
+
+            # Check if adding this block would exceed max_tokens
+            if max_tokens:
+                if current_tokens + child.tokens > max_tokens:
+                    logger.debug(f"Stopping at child block as it would exceed max_tokens")
+                    break
 
             show_new_span_id = False
             show_child = False
@@ -532,18 +550,22 @@ class ContextFile(BaseModel):
 
             if show_child:
                 if outcommented_block:
-                    contents += outcommented_block._to_prompt_string(
+                    block_content = outcommented_block._to_prompt_string(
                         show_line_numbers=show_line_numbers,
                     )
+                    contents += block_content
+                    current_tokens += count_tokens(block_content)
                     outcommented_block = None
 
-                contents += child._to_prompt_string(
+                block_content = child._to_prompt_string(
                     show_span_id=show_new_span_id,
                     show_line_numbers=show_line_numbers,
                     span_marker=SpanMarker.TAG,
                 )
+                contents += block_content
+                current_tokens += count_tokens(block_content)
 
-                contents += self._to_prompt(
+                child_content = self._to_prompt(
                     code_block=child,
                     exclude_comments=exclude_comments,
                     show_outcommented_code=show_outcommented_code,
@@ -553,7 +575,12 @@ class ContextFile(BaseModel):
                     show_line_numbers=show_line_numbers,
                     show_all_spans=show_all_spans,
                     only_signatures=only_signatures,
+                    max_tokens=max_tokens,
+                    current_tokens=current_tokens,
                 )
+                contents += child_content
+                current_tokens += count_tokens(child_content)
+
             elif (
                 show_outcommented_code
                 and not outcommented_block
@@ -570,9 +597,11 @@ class ContextFile(BaseModel):
                 outcommented_block.start_line = child.start_line
 
         if show_outcommented_code and outcommented_block:
-            contents += outcommented_block._to_prompt_string(
+            block_content = outcommented_block._to_prompt_string(
                 show_line_numbers=show_line_numbers,
             )
+            contents += block_content
+            current_tokens += count_tokens(block_content)
 
         return contents
 
@@ -771,13 +800,19 @@ class ContextFile(BaseModel):
         return self.patches
 
 
+class TestFile(BaseModel):
+    file_path: str = Field(..., description="The path to the test file.")
+    test_results: List[TestResult] = Field(
+        default_factory=list, description="List of test results."
+    )
+
+
 class FileContext(BaseModel):
     _repo: Repository | None = PrivateAttr(None)
-    _code_index: CodeIndex = PrivateAttr()
-    _runtime: RuntimeEnvironment = PrivateAttr()
+    _runtime: RuntimeEnvironment = PrivateAttr(None)
 
     _files: Dict[str, ContextFile] = PrivateAttr(default_factory=dict)
-    _test_files: set[str] = PrivateAttr(default_factory=set)
+    _test_files: Dict[str, TestFile] = PrivateAttr(default_factory=dict)  # Changed to Dict
     _max_tokens: int = PrivateAttr(default=8000)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -786,17 +821,18 @@ class FileContext(BaseModel):
         self,
         repo: Repository | None,
         runtime: RuntimeEnvironment | None = None,
-        code_index: CodeIndex | None = None,
         **data,
     ):
         super().__init__(**data)
 
         self._repo = repo
         self._runtime = runtime
-        self._code_index = code_index
 
         if "_files" not in self.__dict__:
             self.__dict__["_files"] = {}
+
+        if "_test_files" not in self.__dict__:
+            self.__dict__["_test_files"] = {}
 
         if "_max_tokens" not in self.__dict__:
             self.__dict__["_max_tokens"] = data.get("max_tokens", 8000)
@@ -823,15 +859,26 @@ class FileContext(BaseModel):
 
     @classmethod
     def from_dict(
-        cls, data: Dict, repo_dir: str | None = None, repo: Repository | None = None
+        cls, data: Dict, repo_dir: str | None = None, repo: Repository | None = None, runtime: RuntimeEnvironment | None = None
     ):
         if not repo and repo_dir:
             repo = FileRepository(repo_path=repo_dir)
-        instance = cls(max_tokens=data.get("max_tokens", 8000), repo=repo)
-        instance.load_files_from_dict(data.get("files", []))
+        instance = cls(max_tokens=data.get("max_tokens", 8000), repo=repo, runtime=runtime)
+        instance.load_files_from_dict(
+            data.get("files", []),
+            test_files=data.get("test_files", [])
+        )
         return instance
 
-    def load_files_from_dict(self, files: list[dict]):
+    def load_files_from_dict(self, files: list[dict], test_files: list[dict] | None = None):
+        """
+        Loads files and test files from a dictionary representation.
+        
+        Args:
+            files (list[dict]): List of file data dictionaries
+            test_files (list[dict] | None): List of test file data dictionaries
+        """
+        # Load regular files
         for file_data in files:
             file_path = file_data["file_path"]
             show_all_spans = file_data.get("show_all_spans", False)
@@ -844,13 +891,28 @@ class FileContext(BaseModel):
                 patch=file_data.get("patch"),
                 repo=self._repo,
             )
+        
+        # Load test files
+        if test_files:
+            for test_file_data in test_files:
+                file_path = test_file_data["file_path"]
+                self._test_files[file_path] = TestFile(**test_file_data)
 
     def model_dump(self, **kwargs):
+        """
+        Dumps the model to a dictionary, including files and test files.
+        """
         if "exclude_none" not in kwargs:
             kwargs["exclude_none"] = True
 
-        files = [file.model_dump(**kwargs) for file in self.__dict__["_files"].values()]
-        return {"max_tokens": self.__dict__["_max_tokens"], "files": files}
+        files = [file.model_dump(**kwargs) for file in self._files.values()]
+        test_files = [test_file.model_dump(**kwargs) for test_file in self._test_files.values()]
+        
+        return {
+            "max_tokens": self.__dict__["_max_tokens"], 
+            "files": files,
+            "test_files": test_files
+        }
 
     def snapshot(self):
         dict = self.model_dump()
@@ -859,6 +921,7 @@ class FileContext(BaseModel):
 
     def restore_from_snapshot(self, snapshot: dict):
         self._files.clear()
+        self._test_files.clear()
         self.load_files_from_dict(snapshot.get("files", []))
 
     def to_files_with_spans(self) -> List[FileWithSpans]:
@@ -907,6 +970,10 @@ class FileContext(BaseModel):
     @property
     def files(self):
         return list(self._files.values())
+
+    @property
+    def test_files(self):
+        return list(self._test_files.values())
 
     def add_spans_to_context(
         self,
@@ -1061,7 +1128,7 @@ class FileContext(BaseModel):
             show_line_numbers=True,
             show_outcommented_code=True,
             outcomment_code_comment="...",
-            only_signatures=True,
+            only_signatures=False,
         )
         return count_tokens(content)
 
@@ -1074,6 +1141,7 @@ class FileContext(BaseModel):
 
     def reset(self):
         self._files = {}
+        self._test_files = {}
 
     def is_empty(self):
         return not self._files
@@ -1090,8 +1158,11 @@ class FileContext(BaseModel):
         outcomment_code_comment: str = "...",
         files: set | None = None,
         only_signatures: bool = False,
+        max_tokens: Optional[int] = None,
     ):
         file_contexts = []
+        current_tokens = 0
+        
         for context_file in self.get_context_files():
             if not files or context_file.file_path in files:
                 content = context_file.to_prompt(
@@ -1101,15 +1172,25 @@ class FileContext(BaseModel):
                     show_outcommented_code,
                     outcomment_code_comment,
                     only_signatures=only_signatures,
+                    max_tokens=max_tokens,
                 )
-                file_contexts.append(content)
+                
+                if max_tokens:
+                    content_tokens = count_tokens(content)
+                    if current_tokens + content_tokens > max_tokens:
+                        logger.warning(f"Skipping {context_file.file_path} as it would exceed max_tokens")
+                        break
+                    current_tokens += content_tokens
+                    
+                if content:  # Only add non-empty content
+                    file_contexts.append(content)
 
         return "\n\n".join(file_contexts)
 
     def clone(self):
         dump = self.model_dump()
-        cloned_context = FileContext(repo=self._repo)
-        cloned_context.load_files_from_dict(dump.get("files", []))
+        cloned_context = FileContext(repo=self._repo, runtime=self._runtime)
+        cloned_context.load_files_from_dict(files=dump.get("files", []), test_files=dump.get("test_files", []))
         return cloned_context
 
     def has_patch(self):
@@ -1270,3 +1351,136 @@ class FileContext(BaseModel):
         for file in self._files.values():
             span_ids.extend(file.span_ids)
         return len(span_ids)
+
+    def run_tests(self, test_files: List[str] | None = None) -> List[TestFile]:
+        """
+        Runs tests using the runtime environment and groups results by file.
+        Preserves all test files in context, even those without results.
+        
+        Args:
+            test_files (List[str] | None): Optional list of test files to run. 
+                                         If provided, adds these files to context before running.
+        
+        Returns:
+            List[TestFile]: List of test results grouped by file
+        """
+
+        if not self._runtime:
+            logger.error("Runtime environment not set for FileContext to run tests")
+            return []
+
+        if test_files:
+            for test_file in test_files:
+                self.add_test_file(test_file)
+                if not self.has_file(test_file):
+                    logger.info(f"Adding test file: {test_file} to context")
+                    self.add_file(test_file, add_extra=False)
+        else:
+            test_files = list(self._test_files.keys())
+
+        patch = self.generate_git_patch()
+        
+        # If specific test files provided, only run those
+        if test_files:
+            test_results = self._runtime.run_tests(patch=patch, test_files=test_files)
+        else:
+            test_results = self._runtime.run_tests(patch=patch)
+        
+        # Group results by file
+        results_by_file = {}
+        for result in test_results:
+            if result.file_path:
+                if result.file_path not in results_by_file:
+                    results_by_file[result.file_path] = []
+                results_by_file[result.file_path].append(result)
+        
+        # Update test results for existing test files
+        for test_file in self._test_files.values():
+            test_file.test_results = results_by_file.get(test_file.file_path, [])
+        
+        return list(self._test_files.values())
+
+    def add_test_file(self, file_path: str) -> TestFile:
+        """
+        Adds a new test file path to the context if it doesn't already exist.
+        
+        Args:
+            file_path (str): Path to the test file
+            
+        Returns:
+            TestFile: The new or existing TestFile object
+        """
+        if file_path in self._test_files:
+            return self._test_files[file_path]
+        
+        # Create new TestFile and add to dict
+        test_file = TestFile(
+            file_path=file_path,
+            test_results=[]
+        )
+        self._test_files[file_path] = test_file
+        
+        return test_file
+
+    def get_updated_test_results(self, previous_context: "FileContext") -> Set[str]:
+        """
+        Gets test files that have different results from the previous context.
+        
+        Args:
+            previous_context: The previous FileContext to compare against
+            
+        Returns:
+            Set[str]: Set of file paths that have updated test results
+        """
+        updated_files = set()
+        
+        for file_path, test_file in self._test_files.items():
+            prev_test_file = previous_context._test_files.get(file_path)
+            if not prev_test_file or test_file.test_results != prev_test_file.test_results:
+                updated_files.add(file_path)
+                
+        return updated_files
+
+    def get_test_summary(self) -> str:
+        """
+        Returns a summary of all test results in the format "X passed. Y failed. Z errors."
+        
+        Returns:
+            str: Summary string of test results
+        """
+        all_results = []
+        for test_file in self._test_files.values():
+            all_results.extend(test_file.test_results)
+            
+        failure_count = sum(1 for r in all_results if r.status == TestStatus.FAILED)
+        error_count = sum(1 for r in all_results if r.status == TestStatus.ERROR)
+        passed_count = len(all_results) - failure_count - error_count
+        
+        return f"{passed_count} passed. {failure_count} failed. {error_count} errors."
+
+    def get_test_failure_details(self) -> str:
+        """
+        Returns detailed output for each failed or errored test result.
+        
+        Returns:
+            str: Formatted string containing details of failed tests
+        """
+        test_result_strings = []
+        for test_file in self._test_files.values():
+            for result in test_file.test_results:
+                if result.status in [TestStatus.FAILED, TestStatus.ERROR] and result.message:
+                    attributes = ""
+                    if result.file_path:
+                        attributes += f"{result.file_path}"
+                        if result.span_id:
+                            attributes += f" {result.span_id}"
+                        if result.line:
+                            attributes += f", line: {result.line}"
+                    
+                    test_result_strings.append(
+                        f"* {result.status.value} {attributes}>\n```\n{result.message}\n```\n"
+                    )
+        
+        return "\n".join(test_result_strings) if test_result_strings else ""
+
+    
