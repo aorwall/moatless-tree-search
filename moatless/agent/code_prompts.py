@@ -39,6 +39,7 @@ WORKFLOW_PROMPT = """
 6. **Finish the Task**
   * **Completion:** When confident that all changes are correct and the task is resolved, use Finish.
 """
+)
 
 GUIDELINE_PROMPT = """
 # Important Guidelines
