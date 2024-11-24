@@ -34,6 +34,19 @@ class CreateFileArgs(ActionArguments):
     class Config:
         title = "CreateFile"
 
+    def format_args_for_llm(self) -> str:
+        return f"""<path>{self.path}</path>
+<file_text>
+{self.file_text}
+</file_text>"""
+
+    @classmethod
+    def format_schema_for_llm(cls) -> str:
+        return cls.format_xml_schema({
+            "path": "file/path.py",
+            "file_text": "\ncomplete file content\n"
+        })
+
 
 class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
     """
@@ -79,12 +92,12 @@ class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
             properties={"diff": diff, "success": True},
         )
 
-        return self.run_tests_and_update_observation(
-            observation=observation,
+        self.run_tests(
             file_path=str(path),
-            scratch_pad=args.scratch_pad,
             file_context=file_context,
         )
+
+        return observation
 
 
     @classmethod

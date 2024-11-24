@@ -26,6 +26,7 @@ WORKFLOW_PROMPT = """
  * **Choose the Appropriate Action:**
     * Use StringReplace to edit existing files (format: <path>, <old_str>, <new_str>)
     * Use CreateFile to create new files (format: <path>, <file_text>)
+    * Use AppendString to append a string to the end of a file (format: <path>, <new_str>)
  * **Tests Run Automatically:** Tests will run automatically after each code change.
 
 4. **Modify or Add Tests**

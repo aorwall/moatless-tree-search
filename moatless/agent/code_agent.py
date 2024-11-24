@@ -10,12 +10,14 @@ from moatless.actions import (
     ViewCode,
 )
 from moatless.actions.action import Action
+from moatless.actions.append_string import AppendString
 from moatless.actions.apply_change_and_test import ApplyCodeChangeAndTest
 from moatless.actions.code_change import RequestCodeChange
 from moatless.actions.create_file import CreateFile
 from moatless.actions.edit import ClaudeEditTool
 from moatless.actions.finish import Finish
 from moatless.actions.insert_line import InsertLine
+from moatless.actions.list_files import ListFiles
 from moatless.actions.reject import Reject
 from moatless.actions.run_tests import RunTests
 from moatless.actions.string_replace import StringReplace
@@ -64,21 +66,19 @@ class CodingAgent(ActionAgent):
                     scratch_pad = action_data.pop("scratch_pad", "")
                     
                     # Special handling for StringReplace and CreateFile action
-                    if example.action.__class__.__name__ in ["StringReplaceArgs", "CreateFileArgs", "InsertLineArgs"]:
+                    if example.action.__class__.__name__ in ["StringReplaceArgs", "CreateFileArgs", "AppendStringArgs"]:
                         prompt += f"\nTask: {example.user_input}"
                         prompt += f"\nThought: {scratch_pad}\n"
                         prompt += f"Action: {example.action.name}\n"
-                        prompt += "Action Input:\n"
                         
                         if example.action.__class__.__name__ == "StringReplaceArgs":
                             prompt += f"<path>{action_data['path']}</path>\n"
                             prompt += f"<old_str>\n{action_data['old_str']}\n</old_str>\n"
                             prompt += f"<new_str>\n{action_data['new_str']}\n</new_str>\n"
-                        elif example.action.__class__.__name__ == "InsertLineArgs":
+                        elif example.action.__class__.__name__ == "AppendStringArgs":
                             prompt += f"<path>{action_data['path']}</path>\n"
-                            prompt += f"<insert_line>{action_data['insert_line']}</insert_line>\n"
                             prompt += f"<new_str>\n{action_data['new_str']}\n</new_str>\n"
-                        else:  # CreateFile
+                        elif example.action.__class__.__name__ == "CreateFileArgs":
                             prompt += f"<path>{action_data['path']}</path>\n"
                             prompt += f"<file_text>\n{action_data['file_text']}\n</file_text>\n"
                     else:
@@ -87,7 +87,7 @@ class CodingAgent(ActionAgent):
                             f"\nTask: {example.user_input}"
                             f"Thought: {scratch_pad}\n"
                             f"Action: {example.action.name}\n"
-                            f"Action Input: {json.dumps(action_data)}\n\n"
+                            f"{json.dumps(action_data)}\n\n"
                         )
                     
                 elif self.completion.response_format == LLMResponseFormat.JSON:
@@ -145,7 +145,6 @@ class CodingAgent(ActionAgent):
         code_index: CodeIndex | None = None,
         runtime: RuntimeEnvironment | None = None,
         edit_completion_model: CompletionModel | None = None,
-        use_edit_actions: bool = False,
         message_history_type: MessageHistoryType = MessageHistoryType.REACT,
         **kwargs,
     ):
@@ -157,7 +156,7 @@ class CodingAgent(ActionAgent):
                 completion_model=completion_model,
             )
             system_prompt = CLAUDE_REACT_PROMPT
-        elif use_edit_actions:
+        else:
             actions = create_edit_code_actions(
                 repository=repository,
                 code_index=code_index,
@@ -165,17 +164,7 @@ class CodingAgent(ActionAgent):
             )
 
             system_prompt = SYSTEM_PROMPT
-        else:
-            actions = create_coding_actions(
-                repository=repository,
-                code_index=code_index,
-                identify_completion_model=completion_model,
-                edit_completion_model=edit_completion_model or completion_model,
-            )
-
-            if not runtime:
-                system_prompt = SIMPLE_CODE_PROMPT
-
+        
         message_generator = MessageHistoryGenerator(
             message_history_type=message_history_type,
             include_file_context=True
@@ -265,6 +254,7 @@ def create_edit_code_actions(
         StringReplace(repository=repository, code_index=code_index),
         # InsertLine(repository=repository,  code_index=code_index),
         CreateFile(repository=repository, code_index=code_index),
+        AppendString(repository=repository, code_index=code_index),
         RunTests(repository=repository, code_index=code_index),
     ]
 

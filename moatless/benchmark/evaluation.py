@@ -137,11 +137,6 @@ class TreeSearchSettings(BaseModel):
         description="The settings for the debate.",
     )
 
-    use_edit_actions: bool = Field(
-        False,
-        description="Whether to use edit actions instead of RequestCodeChange.",
-    )
-
     feedback_type: Optional[str] = Field(
         None,
         description="Type of feedback generator to use ('reward', 'agent', or None).",
@@ -467,7 +462,6 @@ class Evaluation:
                         repository=repository,
                         code_index=code_index,
                         runtime=runtime,
-                        use_edit_actions=self.settings.use_edit_actions,
                         message_history_type=self.settings.agent_message_history_type,
                     )
 

@@ -279,7 +279,7 @@ class ClaudeEditTool(Action):
     def _create(
         self, file_context: FileContext, path: Path, file_text: str
     ) -> Observation:
-        if path.exists():
+        if file_context.file_exists(str(path)):
             return Observation(
                 message=f"File already exists at: {path}",
                 properties={"fail_reason": "file_exists"},
@@ -292,7 +292,7 @@ class ClaudeEditTool(Action):
 
         return Observation(
             message=f"File created successfully at: {path}",
-            properties={"diff": diff, "success": True},
+            properties={"diff": diff},
         )
 
     def _str_replace(
@@ -469,7 +469,7 @@ class ClaudeEditTool(Action):
 
         return Observation(
             message=success_msg,
-            properties={"diff": diff, "success": True},
+            properties={"diff": diff},
         )
 
     def _make_output(

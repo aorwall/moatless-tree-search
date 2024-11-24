@@ -13,6 +13,8 @@ from moatless.file_context import FileContext
 from moatless.repository.repository import InMemRepository
 from moatless.utils.tokenizer import count_tokens
 from moatless.actions.view_code import CodeSpan, ViewCodeArgs
+from moatless.actions.run_tests import RunTestsArgs, TestResult, TestStatus
+from moatless.actions.create_file import CreateFileArgs
 
 
 class TestActionArguments(ActionArguments):
@@ -508,4 +510,160 @@ def test_get_node_messages_with_failed_viewcode(repo):
         "The requested file sklearn/ensemble/_voting.py is not found in the file repository. "
         "Use the search functions to search for the code if you are unsure of the file path."
     )
+    
+
+def test_react_history_with_test_results(repo):
+    """Test that test results are shown correctly after file modifications"""
+    # Create root node with file context
+    root = Node(node_id=0, file_context=FileContext(repo=repo))
+    root.message = "Initial task"
+    
+    print("\n=== Setting up test files and results ===")
+    
+    # Node1: Create the initial file
+    node1 = Node(node_id=10)
+    node1.action = CreateFileArgs(
+        path="src/example.py",
+        file_text="""def add(a, b):
+    return a + b""",
+        scratch_pad="Creating a new example file"
+    )
+    node1.file_context = FileContext(repo=repo)  # Use the repo fixture directly
+    node1.file_context.add_file("src/example.py").apply_changes("""def add(a, b):
+    return a + b""")
+    node1.observation = Observation(message="File created successfully at: src/example.py")
+    root.add_child(node1)
+    
+    # Node2: View the file
+    node2 = Node(node_id=11)
+    node2.action = ViewCodeArgs(
+        scratch_pad="Let's look at the new file",
+        files=[CodeSpan(file_path="src/example.py")]
+    )
+    node2.file_context = node1.file_context.clone()
+    node2.observation = Observation(message="""Here's the content of src/example.py:
+
+def add(a, b):
+    return a + b""")
+    node1.add_child(node2)
+
+    # Node3: Add test files and modify the file
+    node3 = Node(node_id=12)
+    node3.action = CreateFileArgs(
+        path="tests/test_example.py",
+        file_text="""def test_add():
+    assert add(2, 2) == 4""",
+        scratch_pad="Creating test file"
+    )
+    node3.file_context = node2.file_context.clone()
+    node3.file_context.add_test_file("tests/test_file1.py")
+    node3.file_context.add_test_file("tests/test_file2.py")
+    node3.observation = Observation(message="Test file created successfully")
+    node2.add_child(node3)
+
+    # Node4: View the test file
+    node4 = Node(node_id=13)
+    node4.action = ViewCodeArgs(
+        scratch_pad="Let's look at the test file",
+        files=[CodeSpan(file_path="tests/test_example.py")]
+    )
+    node4.file_context = node3.file_context.clone()
+    node4.observation = Observation(message="""Here's the content of tests/test_example.py:
+
+def test_add():
+    assert add(2, 2) == 4""")
+    node3.add_child(node4)
+
+    # Node5: Modify the original file
+    node5 = Node(node_id=14)
+    node5.action = CreateFileArgs(
+        path="src/example.py",
+        file_text="""def add(a, b):
+    return 0  # Bug: always returns 0""",
+        scratch_pad="Modifying the add function (with a bug)"
+    )
+    node5.file_context = node4.file_context.clone()
+    node5.file_context.add_file("src/example.py").apply_changes("""def add(a, b):
+    return 0  # Bug: always returns 0""")
+    
+    # Add test results to test files
+    test_results = [
+        TestResult(
+            status=TestStatus.FAILED,
+            message="AssertionError: Expected add(2, 2) to equal 4, got 0",
+            file_path="tests/test_file1.py",
+            span_id="test_add",
+            line=15
+        ),
+        TestResult(
+            status=TestStatus.PASSED,
+            file_path="tests/test_file1.py",
+            span_id="test_add_negative"
+        ),
+        TestResult(
+            status=TestStatus.ERROR,
+            message="ImportError: Cannot import module 'src.example'",
+            file_path="tests/test_file2.py",
+            line=5
+        )
+    ]
+    
+    print("\nTest files in context:")
+    for file_path in node5.file_context._test_files:
+        print(f"* {file_path}")
+    
+    for test_file in node5.file_context._test_files.values():
+        test_file.test_results = [r for r in test_results if r.file_path == test_file.file_path]
+        print(f"\nResults for {test_file.file_path}:")
+        for result in test_file.test_results:
+            print(f"- {result.status}: {result.message or 'No message'}")
+            
+    node5.observation = Observation(message="File modified successfully")
+    node4.add_child(node5)
+
+    # Node6: Current node
+    node6 = Node(node_id=15)
+    node6.file_context = node5.file_context.clone()
+    node5.add_child(node6)
+
+    generator = MessageHistoryGenerator(
+        message_history_type=MessageHistoryType.REACT,
+        include_file_context=True
+    )
+    
+    print("\n=== Generated Messages ===")
+    messages = list(generator.get_node_messages(node6))
+    for i, (action, observation) in enumerate(messages):
+        print(f"\nMessage {i}:")
+        print(f"Action: {action.__class__.__name__}")
+        print(f"Observation:\n{observation}")
+    
+    # Find all actions
+    viewcode_messages = [m for m in messages if isinstance(m[0], ViewCodeArgs)]
+    createfile_messages = [m for m in messages if isinstance(m[0], CreateFileArgs)]
+    runtests_messages = [m for m in messages if isinstance(m[0], RunTestsArgs)]
+    
+    # Verify we have the expected number of each action type
+    assert len(viewcode_messages) == 2, f"Expected two ViewCode actions, got {len(viewcode_messages)}"
+    assert len(createfile_messages) == 2, f"Expected two CreateFile actions, got {len(createfile_messages)}"
+    assert len(runtests_messages) == 1, f"Expected one RunTests action, got {len(runtests_messages)}"
+    
+    # Get the RunTests message
+    run_tests_message = runtests_messages[0][1]
+    print("\n=== Test Results Message ===")
+    print(run_tests_message)
+    
+    # Verify test file paths are listed
+    assert "Running tests..." in run_tests_message
+    assert "* tests/test_file1.py" in run_tests_message
+    assert "* tests/test_file2.py" in run_tests_message
+    
+    # Verify failure details
+    assert "FAILED tests/test_file1.py test_add, line: 15" in run_tests_message
+    assert "AssertionError: Expected add(2, 2) to equal 4, got 0" in run_tests_message
+    assert "ERROR tests/test_file2.py, line: 5" in run_tests_message
+    assert "ImportError: Cannot import module 'src.example'" in run_tests_message
+    
+    # Verify test summary
+    assert "1 passed. 1 failed. 1 errors." in run_tests_message
     

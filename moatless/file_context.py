@@ -72,6 +72,8 @@ class ContextFile(BaseModel):
     show_all_spans: bool = Field(
         False, description="Flag to indicate whether to display all context spans."
     )
+    was_edited: bool = Field(default=False, exclude=True)
+    was_viewed: bool = Field(default=False, exclude=True)
 
     # Private attributes
     _initial_patch: Optional[str] = PrivateAttr(None)
@@ -127,6 +129,9 @@ class ContextFile(BaseModel):
             FileNotFoundError: If the file does not exist in the repository.
             Exception: If applying the initial_patch fails.
         """
+        if not self._repo:
+            return None
+
         if self._cached_base_content is not None:
             return self._cached_base_content
 
@@ -149,6 +154,9 @@ class ContextFile(BaseModel):
 
     @property
     def module(self) -> Module | None:
+        if not self._repo:
+            return None
+
         if self._cached_module is not None:
             return self._cached_module
 
@@ -193,6 +201,7 @@ class ContextFile(BaseModel):
         Returns:
             set[str]: Set of new span IDs added to context
         """
+        self.was_edited = True
 
         base_content = self.get_base_content()
         new_patch = self.generate_patch(base_content, updated_content)
@@ -334,10 +343,7 @@ class ContextFile(BaseModel):
         original_content = self._repo.get_file_content(self.file_path)
         current_content = self.content
 
-        print(f"original_content: {original_content}")
-        print(f"current_content: {current_content}")
         patch = self.generate_patch(original_content, current_content)
-        print(f"patch: {patch}")
         return patch
 
     def generate_patch(self, old_content: str, new_content: str) -> str:
@@ -373,6 +379,9 @@ class ContextFile(BaseModel):
 
     def model_dump(self, **kwargs):
         data = super().model_dump(**kwargs)
+        # Ensure these fields are excluded even if exclude=True is not in kwargs
+        data.pop('was_edited', None)
+        data.pop('was_viewed', None)
         # Ensure 'patch' is always included, even if it's None
         if "patch" not in data:
             data["patch"] = None
@@ -609,6 +618,7 @@ class ContextFile(BaseModel):
         self.patch = patch
         self._cached_content = None
         self._cached_module = None
+        self.was_edited = True
 
     def context_size(self):
         if self.module:
@@ -644,6 +654,7 @@ class ContextFile(BaseModel):
         pinned: bool = False,
         add_extra: bool = True,
     ) -> bool:
+        self.was_viewed = True
         existing_span = next(
             (span for span in self.spans if span.span_id == span_id), None
         )
@@ -698,6 +709,8 @@ class ContextFile(BaseModel):
     def add_line_span(
         self, start_line: int, end_line: int | None = None, add_extra: bool = True
     ) -> list[str]:
+        self.was_viewed = True
+
         if not self.module:
             logger.warning(f"Could not find module for file {self.file_path}")
             return []
@@ -1091,6 +1104,9 @@ class FileContext(BaseModel):
     def file_exists(self, file_path: str):
         context_file = self._files.get(file_path)
         return context_file or self._repo.file_exists(file_path)
+    
+    def is_directory(self, file_path: str):
+        return self._repo.is_directory(file_path)
 
     def get_context_file(
         self, file_path: str, add_extra: bool = False
@@ -1120,18 +1136,19 @@ class FileContext(BaseModel):
             yield self.get_context_file(file_path)
 
     def context_size(self):
+        if self._repo:
+            content = self.create_prompt(
+                show_span_ids=False,
+                show_line_numbers=True,
+                show_outcommented_code=True,
+                outcomment_code_comment="...",
+                only_signatures=False,
+            )
+            return count_tokens(content)
+
         # TODO: This doesnt give accure results. Will count tokens in the generated prompt instead
         # sum(file.context_size() for file in self._files.values())
-
-        content = self.create_prompt(
-            show_span_ids=False,
-            show_line_numbers=True,
-            show_outcommented_code=True,
-            outcomment_code_comment="...",
-            only_signatures=False,
-        )
-        return count_tokens(content)
-
+        return 0
 
     def available_context_size(self):
         return self._max_tokens - self.context_size()
@@ -1188,7 +1205,7 @@ class FileContext(BaseModel):
         return "\n\n".join(file_contexts)
 
     def clone(self):
-        dump = self.model_dump()
+        dump = self.model_dump(exclude={'files': {'__all__': {'was_edited', 'was_viewed'}}})
         cloned_context = FileContext(repo=self._repo, runtime=self._runtime)
         cloned_context.load_files_from_dict(files=dump.get("files", []), test_files=dump.get("test_files", []))
         return cloned_context
@@ -1285,27 +1302,36 @@ class FileContext(BaseModel):
         if self.is_empty():
             return "No files in context"
 
-        summary = ""
+        summary = []
         for context_file in self.get_context_files():
-            summary += f"\nFile: {context_file.file_path}\n"
+            # Get file stats
+            tokens = context_file.context_size()
+            
+            # Get patch stats if available
+            patch_stats = ""
+            if context_file.patch:
+                patch_lines = context_file.patch.split('\n')
+                additions = sum(1 for line in patch_lines if line.startswith('+') and not line.startswith('+++'))
+                deletions = sum(1 for line in patch_lines if line.startswith('-') and not line.startswith('---'))
+                patch_stats = f" (+{additions}/-{deletions})"
+            
+            summary.append(f"\n### {context_file.file_path}")
+            summary.append(f"- Tokens: {tokens}{patch_stats}")
 
             if context_file.show_all_spans:
-                summary += "- Showing all code in file\n"
+                summary.append("- Showing all code in file")
                 continue
 
-            if not context_file.spans:
-                continue
+            if context_file.spans:
+                spans = []
+                for span in context_file.spans:
+                    if span.start_line and span.end_line:
+                        spans.append(f"{span.start_line}-{span.end_line}")
+                    else:
+                        spans.append(span.span_id)
+                summary.append(f"- Spans: {', '.join(spans)}")
 
-            spans = []
-            for span in context_file.spans:
-                if span.start_line and span.end_line:
-                    spans.append(f"{span.start_line}-{span.end_line}")
-                else:
-                    spans.append(span.span_id)
-            
-            summary += f"- {', '.join(spans)}\n"
-
-        return summary
+        return "\n".join(summary)
 
     def add_file_context(self, other_context: "FileContext") -> List[str]:
         """
@@ -1368,15 +1394,18 @@ class FileContext(BaseModel):
         if not self._runtime:
             logger.error("Runtime environment not set for FileContext to run tests")
             return []
-
+            
         if test_files:
             for test_file in test_files:
                 self.add_test_file(test_file)
                 if not self.has_file(test_file):
                     logger.info(f"Adding test file: {test_file} to context")
                     self.add_file(test_file, add_extra=False)
-        else:
+        elif self._test_files:
             test_files = list(self._test_files.keys())
+        else:
+            logger.warning("No test files in context to run tests")
+            return []
 
         patch = self.generate_git_patch()
         
@@ -1393,15 +1422,29 @@ class FileContext(BaseModel):
                 if result.file_path not in results_by_file:
                     results_by_file[result.file_path] = []
                 results_by_file[result.file_path].append(result)
+            else:
+                logger.warning(f"Test result missing file path: {result}")
         
         # Update test results for existing test files
         for test_file in self._test_files.values():
             test_file.test_results = results_by_file.get(test_file.file_path, [])
+
+        # Add summary log
+        test_summary = []
+        for test_file in self._test_files.values():
+            status_counts = {}
+            for result in test_file.test_results:
+                if result.status not in status_counts:
+                    status_counts[result.status] = 0
+                status_counts[result.status] += 1
+            test_summary.append(f" - {test_file.file_path}: {len(test_file.test_results)} tests. {status_counts}")
+        
+        logger.info(f"Test summary by file:\n{'\n'.join(test_summary)}")
         
         return list(self._test_files.values())
 
     def add_test_file(self, file_path: str) -> TestFile:
-        """
+        """Test summary
         Adds a new test file path to the context if it doesn't already exist.
         
         Args:
@@ -1413,12 +1456,12 @@ class FileContext(BaseModel):
         if file_path in self._test_files:
             return self._test_files[file_path]
         
-        # Create new TestFile and add to dict
         test_file = TestFile(
             file_path=file_path,
             test_results=[]
         )
         self._test_files[file_path] = test_file
+        logger.debug(f"Added test file: {file_path}")
         
         return test_file
 
@@ -1482,5 +1525,30 @@ class FileContext(BaseModel):
                     )
         
         return "\n".join(test_result_strings) if test_result_strings else ""
+
+    def get_test_status(self) -> Optional[TestStatus]:
+        """
+        Returns the overall test status based on all test results.
+        Returns ERROR if any test has error status,
+        FAILED if any test has failed status,
+        PASSED if all tests passed,
+        or None if no test results exist.
+        
+        Returns:
+            Optional[TestStatus]: The overall test status
+        """
+        all_results = []
+        for test_file in self._test_files.values():
+            all_results.extend(test_file.test_results)
+            
+        if not all_results:
+            return None
+            
+        if any(r.status == TestStatus.ERROR for r in all_results):
+            return TestStatus.ERROR
+        elif any(r.status == TestStatus.FAILED for r in all_results):
+            return TestStatus.FAILED
+        else:
+            return TestStatus.PASSED
 
     

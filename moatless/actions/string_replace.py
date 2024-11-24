@@ -81,6 +81,23 @@ class StringReplaceArgs(ActionArguments):
     class Config:
         title = "StringReplace"
 
+    def format_args_for_llm(self) -> str:
+        return f"""<path>{self.path}</path>
+<old_str>
+{self.old_str}
+</old_str>
+<new_str>
+{self.new_str}
+</new_str>"""
+
+    @classmethod
+    def format_schema_for_llm(cls) -> str:
+        return cls.format_xml_schema({
+            "path": "file/path.py",
+            "old_str": "\nexact code to replace\n",
+            "new_str": "\nreplacement code\n"
+        })
+
 
 class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
     """
@@ -287,12 +304,12 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
             properties=properties,
         )
 
-        return self.run_tests_and_update_observation(
-            observation=observation,
+        self.run_tests(
             file_path=str(path),
-            scratch_pad=args.scratch_pad,
             file_context=file_context,
         )
+
+        return observation
 
     @classmethod
     def get_few_shot_examples(cls) -> List[FewShotExample]:

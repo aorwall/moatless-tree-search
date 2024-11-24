@@ -17,32 +17,6 @@ from testbeds.schema import TestStatus
 logger = logging.getLogger(__name__)
 
 
-class ActionFormatter:
-    @staticmethod
-    def format_action(action: ActionArguments) -> str:
-        """Format an action for message history display"""
-        if action.name in ["StringReplace", "CreateFile", "InsertLines"]:
-            return ActionFormatter._format_file_action(action)
-        return f"Action Input: {action.model_dump_json(exclude={'scratch_pad'})}"
-
-    @staticmethod
-    def _format_file_action(action: ActionArguments) -> str:
-        action_data = action.model_dump(exclude={'scratch_pad'})
-        action_input = "Action Input:\n"
-        
-        if action.name == "StringReplace":
-            action_input += f"<path>{action_data['path']}</path>\n"
-            action_input += f"<old_str>\n{action_data['old_str']}\n</old_str>\n"
-            action_input += f"<new_str>\n{action_data['new_str']}\n</new_str>"
-        elif action.name == "CreateFile":
-            action_input += f"<path>{action_data['path']}</path>\n"
-            action_input += f"<file_text>\n{action_data['file_text']}\n</file_text>"
-        elif action.name == "InsertLines":
-            action_input += f"<path>{action_data['path']}</path>\n"
-            action_input += f"<insert_line>{action_data['insert_line']}</insert_line>\n"
-            action_input += f"<new_str>\n{action_data['new_str']}\n</new_str>"
-        return action_input
-
 class MessageHistoryGenerator(BaseModel):
     message_history_type: MessageHistoryType = Field(
         default=MessageHistoryType.MESSAGES,
@@ -96,7 +70,6 @@ class MessageHistoryGenerator(BaseModel):
         if len(previous_nodes) <= 1:
             return messages
 
-        # Get node messages using the new method
         node_messages = self.get_node_messages(node)
         
         # Convert node messages to react format
@@ -108,7 +81,7 @@ class MessageHistoryGenerator(BaseModel):
                 else ""
             )
             action_str = f"Action: {action.name}"
-            action_input = ActionFormatter.format_action(action)
+            action_input = action.format_args_for_llm()
             
             assistant_content = f"{thought}\n{action_str}"
             if action_input:
@@ -311,9 +284,9 @@ class MessageHistoryGenerator(BaseModel):
 
         node_messages = []
         shown_files = set()
+        shown_diff = False  # Track if we've shown the first diff
+        last_test_status = None  # Track the last test status
 
-        show_full_test_details = True  # Flag to show full details only for first diff encountered
-        
         for i, previous_node in enumerate(reversed(previous_nodes)):
             current_messages = []
             
@@ -360,12 +333,14 @@ class MessageHistoryGenerator(BaseModel):
 
                 # Handle file context for non-ViewCode actions
                 if self.include_file_context and previous_node.action.name != "ViewCode":
-                    if not previous_node.parent:
-                        updated_files = set([file.file_path for file in previous_node.file_context.get_context_files()])
-                    else:
-                        updated_files = previous_node.file_context.get_updated_files(previous_node.parent.file_context)
+                    files_to_show = set()
+                    has_edits = False
+                    for context_file in previous_node.file_context.get_context_files():
+                        if (context_file.was_edited or context_file.was_viewed) and context_file.file_path not in shown_files:
+                            files_to_show.add(context_file.file_path)
+                        if context_file.was_edited:
+                            has_edits = True
                     
-                    files_to_show = updated_files - shown_files
                     shown_files.update(files_to_show)
                     
                     if files_to_show:
@@ -395,44 +370,48 @@ class MessageHistoryGenerator(BaseModel):
                             args = ViewCodeArgs(files=code_spans, scratch_pad=thought)
                             current_messages.append((args, "\n\n".join(observations)))
 
-                # Add test results after each diff
-                if (previous_node.observation and  
-                    previous_node.observation.properties.get("diff")):
-                    
-                    run_tests_args = RunTestsArgs(
-                        scratch_pad=f"Run the tests to verify the changes.",
-                        test_files=list(node.file_context._test_files.keys())
-                    )
-                    
-                    test_output = ""
-                    if show_full_test_details:
-                        # Show full details for first diff encountered
-                        failure_details = node.file_context.get_test_failure_details()
-                        if failure_details:
-                            test_output += failure_details + "\n\n"
-                        show_full_test_details = False
-                    
-                    test_output += node.file_context.get_test_summary()
-                    
-                    # Calculate and check token limits
-                    test_tokens = count_tokens(test_output) + count_tokens(run_tests_args.model_dump_json())
-                    if total_tokens + test_tokens <= self.max_tokens:
-                        total_tokens += test_tokens
-                        current_messages.append((run_tests_args, test_output))
+                    # Show ViewDiff on first edit
+                    if has_edits and self.include_git_patch and not shown_diff:
+                        patch = node.file_context.generate_git_patch()
+                        if patch:
+                            view_diff_args = ViewDiffArgs(
+                                scratch_pad="Let's review the changes made to ensure we've properly implemented everything required for the task. I'll check the git diff to verify the modifications."
+                            )
+                            diff_tokens = count_tokens(patch) + count_tokens(view_diff_args.model_dump_json())
+                            if total_tokens + diff_tokens <= self.max_tokens:
+                                total_tokens += diff_tokens
+                                current_messages.append((view_diff_args, f"Current changes in workspace:\n```diff\n{patch}\n```"))
+                                shown_diff = True
+
+                    # Add test results only if status changed or first occurrence
+                    if (previous_node.observation and  
+                        previous_node.observation.properties.get("diff")):
+                        
+                        current_test_status = node.file_context.get_test_status()
+                        if last_test_status is None or current_test_status != last_test_status:
+                            run_tests_args = RunTestsArgs(
+                                scratch_pad=f"Run the tests to verify the changes.",
+                                test_files=list(node.file_context._test_files.keys())
+                            )
+                            
+                            test_output = ""
+                            if last_test_status is None:
+                                # Show full details for first test run
+                                failure_details = node.file_context.get_test_failure_details()
+                                if failure_details:
+                                    test_output += failure_details + "\n\n"
+                            
+                            test_output += node.file_context.get_test_summary()
+                            
+                            # Calculate and check token limits
+                            test_tokens = count_tokens(test_output) + count_tokens(run_tests_args.model_dump_json())
+                            if total_tokens + test_tokens <= self.max_tokens:
+                                total_tokens += test_tokens
+                                current_messages.append((run_tests_args, test_output))
+                                last_test_status = current_test_status
 
             # Add current messages to the beginning of the list
             node_messages = current_messages + node_messages
-
-        patch = node.file_context.generate_git_patch()
-        if patch and self.include_git_patch:
-            view_diff_args = ViewDiffArgs(
-                scratch_pad="Let's review all the changes made to ensure we've properly implemented everything required for the task. I'll check the git diff to verify the modifications."
-            )
-            # Calculate tokens for diff
-            diff_tokens = count_tokens(patch) + count_tokens(view_diff_args.model_dump_json())
-            if total_tokens + diff_tokens <= self.max_tokens:
-                total_tokens += diff_tokens
-                node_messages.append((view_diff_args, f"Current changes in workspace:\n```diff\n{patch}\n```"))
 
         logger.info(f"Generated message history with {total_tokens} tokens")
         return node_messages

@@ -46,10 +46,37 @@ def create_linear_table(nodes: List[Node], max_node_id: int, eval_result: Option
                     elif final_result.get("resolved") is False:
                         st.error("❌ Instance Not Resolved")
                 
-                # Add test summary section
+                # Enhanced summary section
                 if nodes[-1].file_context:
+                    # Files in context summary
+                    st.markdown("#### Files in Context")
+                    #if nodes[-1].file_context:
+                    #    st.markdown(nodes[-1].file_context.create_summary())
+                    
+                    # Test results summary
                     st.markdown("#### Test Results")
                     st.markdown(nodes[-1].file_context.get_test_summary())
+                    
+                    # Test metrics visualization
+                    test_summary = nodes[-1].file_context.get_test_summary()
+                    passed = int(test_summary.split('passed')[0].strip())
+                    failed = int(test_summary.split('failed')[0].split('.')[-1].strip())
+                    errors = int(test_summary.split('errors')[0].split('.')[-1].strip())
+                    
+                    metrics_cols = st.columns(3)
+                    with metrics_cols[0]:
+                        st.metric("✅ Passed", passed)
+                    with metrics_cols[1]:
+                        if failed > 0:
+                            st.metric("❌ Failed", failed, delta=failed, delta_color="inverse")
+                        else:
+                            st.metric("✅ Failed", failed)
+                    with metrics_cols[2]:
+                        if errors > 0:
+                            st.metric("⚠️ Errors", errors, delta=errors, delta_color="inverse")
+                        else:
+                            st.metric("✅ Errors", errors)
+
 
             with summary_tabs[1]:
                 if nodes[-1].file_context and nodes[-1].file_context.has_patch():
@@ -285,6 +312,7 @@ def create_linear_table(nodes: List[Node], max_node_id: int, eval_result: Option
             tab_names = ["Summary", "Tests"]
             if node.file_context.has_patch():
                 tab_names.append("Patch")
+            tab_names.append("JSON")
 
             context_tabs = context_col.tabs(tab_names)
             
@@ -356,6 +384,10 @@ def create_linear_table(nodes: List[Node], max_node_id: int, eval_result: Option
             if node.file_context.has_patch():
                 with context_tabs[2]:
                     st.code(node.file_context.generate_git_patch())
+            
+            # Add new JSON tab at the end
+            with context_tabs[-1]:
+                st.json(node.file_context.model_dump(exclude_none=False), expanded=False)
         
         # Add a separator between rows
         st.markdown("---")

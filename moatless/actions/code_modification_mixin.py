@@ -71,20 +71,14 @@ class CodeModificationMixin:
 
         return path, None
 
-    def run_tests_and_update_observation(
+    def run_tests(
         self,
-        observation: Observation,
         file_path: str,
-        scratch_pad: str,
         file_context: FileContext,
-    ) -> Observation:
-        """Run tests and update the observation with test results"""
-        if not observation.properties or not observation.properties.get("diff"):
-            return observation
-
+    ):
         if file_context.file_exists(file_path) and is_test(file_path):
             file_context.add_test_file(file_path)
-        else:
+        elif self._code_index:
             # If the file is not a test file, find test files that might be related to the file
             search_results = self._code_index.find_test_files(
                 file_path, query=file_path, max_results=2, max_spans=2
@@ -92,10 +86,12 @@ class CodeModificationMixin:
 
             for search_result in search_results:
                  file_context.add_test_file(search_result.file_path)
+        else:
+            logger.warning(f"No code index cannot find test files for {file_path}")
+            return
 
         file_context.run_tests()
 
-        return observation
 
     def format_snippet_with_lines(self, snippet: str, start_line: int) -> str:
         """Format a code snippet with line numbers"""

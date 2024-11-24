@@ -189,11 +189,6 @@ def main():
         help="Type of feedback generator to use",
     )
     features_group.add_argument(
-        "--use_edit_actions",
-        action="store_true",
-        help="Use edit actions instead of full file replacements",
-    )
-    features_group.add_argument(
         "--use_testbed", action="store_true", help="Enable testbed for running tests"
     )
 
@@ -360,7 +355,6 @@ def main():
         reward_threshold=args.reward_threshold,
         provide_feedback=args.feedback,
         feedback_type=args.feedback_type,
-        use_edit_actions=args.use_edit_actions,
         debate=args.debate,
         best_first=True,
         model=model_settings,

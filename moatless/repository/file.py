@@ -385,6 +385,36 @@ class FileRepository(Repository):
         logger.info(f"Returning {len(matches)} matches")
         return matches
 
+    def list_directory(self, directory_path: str = "") -> Dict[str, List[str]]:
+        """
+        Lists files and directories in the specified directory.
+        Returns a dictionary with 'files' and 'directories' lists.
+        """
+        full_path = self.get_full_path(directory_path)
+        
+        if not os.path.exists(full_path):
+            return {"files": [], "directories": []}
+            
+        if not os.path.isdir(full_path):
+            return {"files": [], "directories": []}
+
+        files = []
+        directories = []
+        
+        for entry in os.listdir(full_path):
+            entry_path = os.path.join(full_path, entry)
+            relative_path = os.path.relpath(entry_path, self.repo_path).replace(os.sep, "/")
+            
+            if os.path.isfile(entry_path):
+                files.append(relative_path)
+            elif os.path.isdir(entry_path):
+                directories.append(relative_path)
+                
+        return {
+            "files": sorted(files),
+            "directories": sorted(directories)
+        }
+
 
 def remove_duplicate_lines(replacement_lines, original_lines):
     """

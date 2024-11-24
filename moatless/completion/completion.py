@@ -367,20 +367,14 @@ Make sure to return an instance of the JSON, not the schema itself.""")
         # Count occurrences of each section
         thought_count = sum(1 for line in lines if line.startswith("Thought:"))
         action_count = sum(1 for line in lines if line.startswith("Action:"))
-        action_input_count = sum(
-            1 for line in lines if line.startswith("Action Input:")
-        )
 
         # Check for multiple action blocks
-        if thought_count > 1 or action_count > 1 or action_input_count > 1:
-            logger.warning(f"Multiple Thought, Action, or Action Input sections found in response: {response_text}")
-            # TODO: Make it possible to confure to raise an error instead or handle multiple blocks?
+        if thought_count > 1 or action_count > 1:
+            logger.warning(f"Multiple Thought or Action sections found in response: {response_text}")
 
         # Check if all sections exist
-        if thought_count < 1 or action_count < 1 or action_input_count < 1:
-            raise ValueError(
-                "Response must have one 'Thought:', 'Action:', and 'Action Input:' section"
-            )
+        if thought_count < 1 or action_count < 1:
+            raise ValueError("Response must have one 'Thought:' and 'Action:' section")
 
         # Find the starting lines for each section
         thought_line = next(
@@ -389,13 +383,10 @@ Make sure to return an instance of the JSON, not the schema itself.""")
         action_line = next(
             (i for i, line in enumerate(lines) if line.startswith("Action:")), -1
         )
-        action_input_line = next(
-            (i for i, line in enumerate(lines) if line.startswith("Action Input:")), -1
-        )
 
         # Check if sections are in correct order
-        if not (thought_line < action_line < action_input_line):
-            raise ValueError("Sections must be in order: Thought, Action, Action Input")
+        if not (thought_line < action_line):
+            raise ValueError("Sections must be in order: Thought, Action")
 
     def _litellm_react_completion(
         self,
@@ -403,52 +394,23 @@ Make sure to return an instance of the JSON, not the schema itself.""")
         system_prompt: str,
         actions: list[type[StructuredOutput]],
     ) -> Tuple[StructuredOutput, ModelResponse]:
-        action_input_schemas_str = ""
+        action_input_schemas = []
 
         for action in actions:
-            schema = action.model_json_schema()
-            if "scratch_pad" in schema["properties"]:
-                del schema["properties"]["scratch_pad"]
-
-            # Special handling for StringReplace, CreateFile and InsertLines
-            if action.name in ["StringReplace", "CreateFile", "InsertLines"]:
-                if action.name == "StringReplace":
-                    action_input_schemas_str += f"\n * {action.name}: Requires the following XML format:\n"
-                    action_input_schemas_str += """<path>file/path.py</path>
-<old_str>
-exact code to replace
-</old_str>
-<new_str>
-replacement code
-</new_str>"""
-                elif action.name == "CreateFile":
-                    action_input_schemas_str += f"\n * {action.name}: Requires the following XML format:\n"
-                    action_input_schemas_str += """<path>new/file/path.py</path>
-<file_text>
-complete file content
-</file_text>"""
-                else:  # InsertLines
-                    action_input_schemas_str += f"\n * {action.name}: Requires the following XML format:\n"
-                    action_input_schemas_str += """<path>file/path.py</path>
-<insert_line>line_number</insert_line>
-<new_str>
-code to insert
-</new_str>"""
-            else:
-                action_input_schemas_str += f"\n * {action.name}: {json.dumps(schema)}"
-
+            action_input_schemas.append(f" * {action.name} {action.format_schema_for_llm()}")
+            
         system_prompt += dedent(f"""\n# Response format
 
 Use the following format:
 
 Thought: You should always think about what to do
-Action: The action to take
-Action Input: The input to the action. For most actions use valid JSON format with double quotes for strings and 'null' for null values. 
-For StringReplace and CreateFile actions, use XML format as shown in the tools section.
+Action: The action to take followed by the input arguments based on the schema below
 
-You have access to the following tools: {action_input_schemas_str}
+Use one of the following actions and provide input arguments matching the schema.
+                            
+{'\n\n'.join(action_input_schemas)}
 
-Important: Do not include multiple Thought-Action-Observation blocks. Do not include code blocks or additional text outside of this format.
+Important: Do not include multiple Thought-Action blocks. Do not include code blocks or additional text outside of this format.
 """)
 
         messages.insert(0, {"role": "system", "content": system_prompt})
@@ -468,76 +430,65 @@ Important: Do not include multiple Thought-Action-Observation blocks. Do not inc
 
                 thought_start = response_text.find("Thought:")
                 action_start = response_text.find("Action:")
-                action_input_start = response_text.find("Action Input:")
 
-                if thought_start == -1 or action_start == -1 or action_input_start == -1:
-                    raise ValueError("Missing Thought, Action or Action Input sections")
+                if thought_start == -1 or action_start == -1:
+                    raise ValueError("Missing Thought or Action sections")
 
                 thought = response_text[thought_start + 8 : action_start].strip()
-                action = response_text[action_start + 7 : action_input_start].strip()
-                action_input = response_text[action_input_start + 13:].strip()
+                action_input = response_text[action_start + 7:].strip()
 
-                if not action or not action_input:
-                    raise ValueError("Missing Action or Action Input values")
+                # Extract action name and input
+                action_lines = action_input.split('\n', 1)
+                if len(action_lines) < 2:
+                    raise ValueError("Missing action name and input")
+
+                action_name = action_lines[0].strip()
+                action_input = action_lines[1].strip()
 
                 # Find the matching action class
-                action_class = next((a for a in actions if a.name == action), None)
+                action_class = next((a for a in actions if a.name == action_name), None)
                 if not action_class:
                     action_names = [a.name for a in actions]
                     raise ValueError(
-                        f"Unknown action: {action}. Available actions: {', '.join(action_names)}"
+                        f"Unknown action: {action_name}. Available actions: {', '.join(action_names)}"
                     )
 
                 # Check if input appears to be XML format
-                if action_input.strip().startswith("<"):
+                if action_input.strip().startswith("<") or action_input.strip().startswith("```xml"):
                     try:
                         action_request = action_class.model_validate_xml(action_input)
                     except Exception as e:
-                        raise ValueError(f"Invalid XML format for {action}. Error: {e}")
+                        format_example = action_class.format_schema_for_llm() if hasattr(action_class, 'format_schema_for_llm') else ""
+                        raise ValueError(
+                            f"Invalid XML format for {action_name}. Error: {e}\n\n"
+                            f"Expected format:\n{format_example}"
+                        )
                 else:
                     # Otherwise, try to validate as JSON
                     try:
                         action_request = action_class.model_validate_json(action_input)
                     except Exception as e:
-                        raise ValueError(f"Invalid format for {action}. Expected XML or JSON format. Error: {e}")
+                        schema = action_class.model_json_schema()
+                        if "scratch_pad" in schema["properties"]:
+                            del schema["properties"]["scratch_pad"]
+                        raise ValueError(
+                            f"Invalid format for {action_name}. Error: {e}\n\n"
+                            f"Expected JSON schema:\n{json.dumps(schema, indent=2)}"
+                        )
 
                 action_request.scratch_pad = thought
                 return action_request, completion_response
 
             except Exception as e:
                 logger.warning(f"ReAct parsing failed: {e}. Response: {response_text}")
-
                 messages.append({"role": "assistant", "content": response_text})
 
-                if isinstance(e, ValidationError):
-                    messages.append(
-                        {
-                            "role": "user",
-                            "content": f"The action input is invalid. Please fix the following validation errors:\n{e}",
-                        }
-                    )
-                else:
-                    format_example = ""
-                    if action in ["StringReplace", "CreateFile", "InsertLines"]:
-                        format_example = "\nFor this action, use XML format like:\n"
-                        format_example += "<path>file/path.py</path>\n"
-                        if action == "StringReplace":
-                            format_example += "<old_str>\ncode to replace\n</old_str>\n"
-                            format_example += "<new_str>\nreplacement code\n</new_str>"
-                        elif action == "CreateFile":
-                            format_example += "<file_text>\nfile content\n</file_text>"
-                        else:  # InsertLines
-                            format_example += "<insert_line>line_number</insert_line>\n"
-                            format_example += "<new_str>\ncode to insert\n</new_str>"
-
-                    messages.append(
-                        {
-                            "role": "user",
-                            "content": f"The response was invalid. Please follow the exact format:\n\n"
-                            f"Thought: your reasoning\nAction: the action name\n"
-                            f"Action Input: the input in correct format{format_example}\n\nError: {e}",
-                        }
-                    )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"The response was invalid. {e}",
+                    }
+                )
 
                 raise CompletionRejectError(
                     message=str(e),

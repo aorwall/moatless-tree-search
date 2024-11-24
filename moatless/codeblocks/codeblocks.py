@@ -668,7 +668,7 @@ class CodeBlock:
         # Just to write out the first line number when there are no pre_lines on first block
         if (
             not self.pre_lines
-            and self.parent.type == CodeBlockType.MODULE
+            and self.parent and self.parent.type == CodeBlockType.MODULE
             and self.parent.children[0] == self
         ):
             contents += print_line(self.start_line)

@@ -43,6 +43,13 @@ class InsertLineArgs(ActionArguments):
     class Config:
         title = "InsertLines"
 
+    def format_args_for_llm(self) -> str:
+        return f"""<path>{self.path}</path>
+<insert_line>{self.insert_line}</insert_line>
+<new_str>
+{self.new_str}
+</new_str>"""
+
 
 class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
     """

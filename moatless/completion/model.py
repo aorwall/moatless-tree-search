@@ -242,11 +242,13 @@ class StructuredOutput(OpenAISchema):
                 start_idx = xml_text.index(start_tag) + len(start_tag)
                 end_idx = xml_text.index(end_tag)
                 content = xml_text[start_idx:end_idx]
-                if content.startswith('\n'):
-                    content = content[1:]
-                if content.endswith('\n'):
-                    content = content[:-1]
-                if content is not None:
+                
+                # Handle both single-line and multi-line block content
+                if content:
+                    # If content starts/ends with newlines, preserve the inner content
+                    if content.startswith('\n') and content.endswith('\n'):
+                        # Remove first and last newline but preserve internal formatting
+                        content = content[1:-1].rstrip('\n')
                     parsed_input[field] = content
                     
         return cls.model_validate(parsed_input)
@@ -301,6 +303,39 @@ class StructuredOutput(OpenAISchema):
             return super().model_validate_json(
                 message if isinstance(message, str) else json.dumps(message), **kwarg
             )
+
+    def format_args_for_llm(self) -> str:
+        """
+        Format the input arguments for LLM completion calls. Override in subclasses for custom formats.
+        Default implementation returns JSON format.
+        """
+        return json.dumps(self.model_dump(exclude={"scratch_pad"} if hasattr(self, "scratch_pad") else None), indent=2)
+
+    @classmethod
+    def format_schema_for_llm(cls) -> str:
+        """
+        Format the schema description for LLM completion calls.
+        Default implementation returns JSON schema.
+        """
+        return f"Requires a JSON response with the following schema: {json.dumps(cls.model_json_schema(), ensure_ascii=False)}"
+
+    @classmethod
+    def format_xml_schema(cls, xml_fields: dict[str, str]) -> str:
+        """
+        Format XML schema description.
+        Used by actions that require XML-formatted input.
+        
+        Args:
+            xml_fields: Dictionary mapping field names to their descriptions
+        """
+        schema = [f"Requires the following XML format:"]
+        
+        # Build example XML structure
+        example = []
+        for field_name, field_desc in xml_fields.items():
+            example.append(f"<{field_name}>{field_desc}</{field_name}>")
+            
+        return "\n".join(schema + example)
 
 
 def extract_json_from_message(message: str) -> tuple[dict | str, list[dict]]:

@@ -1,6 +1,6 @@
-from moatless.actions.request_context import (
-    RequestMoreContext,
-    RequestMoreContextArgs,
+from moatless.actions.view_code import (
+    ViewCode,
+    ViewCodeArgs,
     CodeSpan,
 )
 from moatless.benchmark.swebench import create_repository
@@ -14,11 +14,11 @@ def test_request_non_existing_method():
     repository = create_repository(instance)
     file_context = FileContext(repo=repository)
 
-    action = RequestMoreContext(
+    action = ViewCode(
         repository=repository
     )
 
-    args = RequestMoreContextArgs(
+    args = ViewCodeArgs(
         scratch_pad="def non_existing_method():",
         files=[
             CodeSpan(
@@ -38,11 +38,11 @@ def test_request_many_spans():
     repository = create_repository(instance)
     file_context = FileContext(repo=repository)
 
-    action = RequestMoreContext(
+    action = ViewCode(
         repository=repository
     )
 
-    args = RequestMoreContextArgs(
+    args = ViewCodeArgs(
         scratch_pad="Adding relevant code spans for the sqlmigrate logic to modify the output_transaction assignment.",
         files=[
             CodeSpan(

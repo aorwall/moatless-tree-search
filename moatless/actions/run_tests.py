@@ -72,20 +72,32 @@ class RunTests(Action):
                 "File context must be provided to execute the run tests action."
             )
 
-        # Add test files to context
-        test_files = [
-            test_file
-            for test_file in args.test_files
-            if self._repository.file_exists(test_file)
-        ]
+        # Separate non-existent files and directories from valid test files
+        non_existent_files = []
+        directories = []
+        test_files = []
+        
+        for test_file in args.test_files:
+            if not file_context.file_exists(test_file):
+                non_existent_files.append(test_file)
+            elif file_context.is_directory(test_file):
+                directories.append(test_file)
+            else:
+                test_files.append(test_file)
 
         if not test_files:
+            error_details = []
+            if non_existent_files:
+                error_details.append(f"Files not found: {', '.join(non_existent_files)}")
+            if directories:
+                error_details.append(f"Directories provided instead of files: {', '.join(directories)}")
+                
             return Observation(
-                message="The provided test files was not found.",
+                message="Unable to run tests: " + "; ".join(error_details),
                 properties={"test_results": [], "fail_reason": "no_test_files"},
             )
 
-        test_files = file_context.run_tests(args.test_files)
+        test_files = file_context.run_tests(test_files)
         
         response_msg = f"Running tests for the following files:\n"
         for test_file in test_files:
