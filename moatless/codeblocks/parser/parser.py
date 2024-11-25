@@ -106,8 +106,9 @@ class CodeParser:
         # TODO: Move this to CodeGraph
         self._enable_code_graph = enable_code_graph
         self._graph = None
-        
+
         from llama_index.core import get_tokenizer
+
         self.tokenizer = tokenizer or get_tokenizer()
         self._max_tokens_in_span = max_tokens_in_span
         self._min_tokens_for_docs_span = min_tokens_for_docs_span

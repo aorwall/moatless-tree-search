@@ -5,13 +5,17 @@ from typing import Optional, List, Union, Tuple, Any, Type, ClassVar
 from pydantic import Field, PrivateAttr, model_validator
 
 from moatless.actions.action import Action
-from moatless.actions.model import ActionArguments, FewShotExample, Observation, RewardScaleEntry
+from moatless.actions.model import (
+    ActionArguments,
+    FewShotExample,
+    Observation,
+    RewardScaleEntry,
+)
 from moatless.codeblocks import CodeBlock, get_parser_by_path, PythonParser
 from moatless.codeblocks.codeblocks import CodeBlockTypeGroup, CodeBlockType
 from moatless.codeblocks.module import Module
 from moatless.completion.completion import CompletionModel
 from moatless.completion.model import AssistantMessage, UserMessage, Completion
-from moatless.exceptions import RejectError
 from moatless.file_context import FileContext, ContextFile
 from moatless.repository.file import do_diff, remove_duplicate_lines
 from moatless.repository.repository import Repository
@@ -80,30 +84,37 @@ class ChangeType(str, Enum):
 
 class RequestCodeChangeArgs(ActionArguments):
     """
-    Apply a code change through an AI agent. This action instructs an AI assistant to 
-    modify code based on provided instructions and pseudo-code. The AI will analyze the existing code within 
+    Apply a code change through an AI agent. This action instructs an AI assistant to
+    modify code based on provided instructions and pseudo-code. The AI will analyze the existing code within
     the specified line range and apply changes while maintaining proper syntax, indentation, and context.
     """
 
     file_path: str = Field(..., description="The file path of the code to be updated.")
     instructions: str = Field(
-        ..., description="Natural language instructions for the AI assistant describing the required code changes."
+        ...,
+        description="Natural language instructions for the AI assistant describing the required code changes.",
     )
-    pseudo_code: str = Field(..., description="Example code snippet illustrating the desired changes. The AI will use this as a reference for implementing the modifications.")
+    pseudo_code: str = Field(
+        ...,
+        description="Example code snippet illustrating the desired changes. The AI will use this as a reference for implementing the modifications.",
+    )
     change_type: ChangeType = Field(
-        ..., description="Type of change to perform: 'addition' (insert new code), 'modification' (update existing code), or 'deletion' (remove code)."
+        ...,
+        description="Type of change to perform: 'addition' (insert new code), 'modification' (update existing code), or 'deletion' (remove code).",
     )
     start_line: int = Field(
-        ..., description="The line number where the code change should begin. For additions, specifies the insertion point."
+        ...,
+        description="The line number where the code change should begin. For additions, specifies the insertion point.",
     )
     end_line: int = Field(
-        ..., description="The line number where the code change should end. For additions, specifies the insertion point."
+        ...,
+        description="The line number where the code change should end. For additions, specifies the insertion point.",
     )
 
     class Config:
-        title = "RequestCodeChange"
+        title = "ApplyChange"
 
-    @model_validator(mode='before')
+    @model_validator(mode="before")
     @classmethod
     def set_missing_end_line(cls, data: Any) -> Any:
         if isinstance(data, dict):
@@ -145,6 +156,12 @@ class RequestCodeChange(Action):
         completion_model: CompletionModel | None = None,
         **data,
     ):
+        import warnings
+        warnings.warn(
+            "RequestCodeChange is deprecated. Use StringReplace from moatless/actions/string_replace.py instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         super().__init__(**data)
         self._repository = repository
         self._completion_model = completion_model
@@ -177,7 +194,9 @@ class RequestCodeChange(Action):
                 expect_correction=True,
             )
 
-        if args.change_type != ChangeType.addition and not self._repository.file_exists(args.file_path):
+        if args.change_type != ChangeType.addition and not self._repository.file_exists(
+            args.file_path
+        ):
             return Observation(
                 message=f"File {args.file_path} not found.",
                 properties={"fail_reason": "file_not_found"},
@@ -189,7 +208,10 @@ class RequestCodeChange(Action):
                 properties={"fail_reason": "is_directory"},
             )
 
-        if not file_context.has_file(args.file_path) and args.change_type != ChangeType.addition:
+        if (
+            not file_context.has_file(args.file_path)
+            and args.change_type != ChangeType.addition
+        ):
             context_file = file_context.get_file(args.file_path)
             message = f"File {args.file_path} is not in context."
             if context_file.module:
@@ -212,9 +234,7 @@ class RequestCodeChange(Action):
         else:
             # TODO: Verify if the code span is in context
             # TODO: Check for hallucinations
-            retry_message = self.verify_request(
-                context_file, args
-            )
+            retry_message = self.verify_request(context_file, args)
             if retry_message:
                 extra = context_file.to_prompt(
                     show_line_numbers=True,
@@ -223,25 +243,37 @@ class RequestCodeChange(Action):
                     show_outcommented_code=False,
                     outcomment_code_comment="... other code",
                 )
-                return Observation(message=retry_message, extra=extra, expect_correction=True)
+                return Observation(
+                    message=retry_message, extra=extra, expect_correction=True
+                )
 
             completion = None
-            replace_block, args = self._get_replace_block_from_pseudo_code(args, context_file)
+            replace_block, args = self._get_replace_block_from_pseudo_code(
+                args, context_file
+            )
             if not replace_block:
                 if context_file.module:
-                    args.start_line, args.end_line, args.change_type = self.get_line_span(
-                        args.change_type,
-                        context_file,
-                        args.start_line,
-                        args.end_line,
-                        self.max_tokens_in_edit_prompt,
+                    args.start_line, args.end_line, args.change_type = (
+                        self.get_line_span(
+                            args.change_type,
+                            context_file,
+                            args.start_line,
+                            args.end_line,
+                            self.max_tokens_in_edit_prompt,
+                        )
                     )
 
-                response, completion = self._generate_replace_block(context_file, args, args.start_line, args.end_line)
+                response, completion = self._generate_replace_block(
+                    context_file, args, args.start_line, args.end_line
+                )
 
                 if "<reject>" in response:
-                    rejection_message = response.split("<reject>")[1].split("</reject>")[0]
-                    logger.info(f"Rejected the instructions. Reason: {rejection_message}")
+                    rejection_message = response.split("<reject>")[1].split(
+                        "</reject>"
+                    )[0]
+                    logger.info(
+                        f"Rejected the instructions. Reason: {rejection_message}"
+                    )
                     return Observation(
                         message=f"Failed to apply changes using search/replace blocks. {rejection_message}",
                         properties={"fail_reason": "rejected"},
@@ -255,7 +287,7 @@ class RequestCodeChange(Action):
                 replace_block,
                 args.start_line,
                 args.end_line,
-                args.change_type
+                args.change_type,
             )
 
             observation.execution_completion = completion
@@ -283,7 +315,13 @@ class RequestCodeChange(Action):
 
         return system_prompt
 
-    def _generate_replace_block(self, context_file: ContextFile, args: RequestCodeChangeArgs, start_line: int, end_line: int) -> Tuple[str, Completion]:
+    def _generate_replace_block(
+        self,
+        context_file: ContextFile,
+        args: RequestCodeChangeArgs,
+        start_line: int,
+        end_line: int,
+    ) -> Tuple[str, Completion]:
         span_ids = []
         span_to_update = context_file.module.find_spans_by_line_numbers(
             start_line, end_line
@@ -293,9 +331,7 @@ class RequestCodeChange(Action):
             for span in span_to_update:
                 if span.span_id not in span_ids:
                     span_ids.append(span.span_id)
-            context_file.add_spans(
-                span_ids=set(span_ids), pinned=True
-            )
+            context_file.add_spans(span_ids=set(span_ids), pinned=True)
 
         logger.info(
             f"Requesting code change in {args.file_path} from {start_line} to {end_line}"
@@ -307,7 +343,12 @@ class RequestCodeChange(Action):
         )
 
         user_message = self.create_message(
-            context_file, search_block, start_line, end_line, args.instructions, args.pseudo_code
+            context_file,
+            search_block,
+            start_line,
+            end_line,
+            args.instructions,
+            args.pseudo_code,
         )
 
         messages.append(UserMessage(content=user_message))
@@ -372,7 +413,9 @@ class RequestCodeChange(Action):
             parser = PythonParser(apply_gpt_tweaks=True)
             return parser.parse(args.pseudo_code, file_path=args.file_path)
         except Exception as e:
-            logger.warning(f"Failed to parse pseudo code with error {e}. Pseudo code:\n{args.pseudo_code}")
+            logger.warning(
+                f"Failed to parse pseudo code with error {e}. Pseudo code:\n{args.pseudo_code}"
+            )
             return None
 
     def create_message(
@@ -432,11 +475,8 @@ class RequestCodeChange(Action):
         return code_to_replace
 
     def verify_request(
-        self,
-        context_file: ContextFile,
-        args: RequestCodeChangeArgs
+        self, context_file: ContextFile, args: RequestCodeChangeArgs
     ) -> Optional[str]:
-
         if not args.start_line:
             message = "You must specify the start line and end line of the code change in the variables start_line and end_line. If you want to update the first line in the file, set start line to 1. If you believe that the lines you want to edit isn't in the file context, you can request more context by providing the file path and the line numbers or span ids to the RequestMoreContext function."
             return message
@@ -450,18 +490,24 @@ class RequestCodeChange(Action):
 
         pseudo_code_block = self._parse_pseudo_code_block(args)
         existing_hallucinated_spans = self.find_hallucinated_spans(
-           pseudo_code_block, context_file, args.start_line, args.end_line
+            pseudo_code_block, context_file, args.start_line, args.end_line
         )
         if existing_hallucinated_spans:
-           context_file.add_spans(existing_hallucinated_spans)
-           return f"""There where code in the pseudo code that wasn't present in the file context.
+            context_file.add_spans(existing_hallucinated_spans)
+            return f"""There where code in the pseudo code that wasn't present in the file context.
 The following code spans where added to file context: {', '.join(existing_hallucinated_spans)}.
 Please provide instructions for the code change again."""
 
         # Verify that the code that is supposed to be changed is in the context
         if context_file.module and args.change_type != ChangeType.addition:
-            code_block = self.find_smallest_covering_block(context_file.module, args.start_line, args.end_line)
-            if code_block and code_block.belongs_to_span and code_block.belongs_to_span.span_id not in context_file.span_ids:
+            code_block = self.find_smallest_covering_block(
+                context_file.module, args.start_line, args.end_line
+            )
+            if (
+                code_block
+                and code_block.belongs_to_span
+                and code_block.belongs_to_span.span_id not in context_file.span_ids
+            ):
                 return f"The code span {code_block.belongs_to_span.span_id} between lines {args.start_line} - {args.end_line} is not in the context. Please use the RequestMoreContext to add the correct line numbers or span ids to context."
             # TODO: Handle if no code block is found
 
@@ -476,7 +522,6 @@ Please provide instructions for the code change again."""
         if occurrences:
             return f"The pseudo code does already exist in the existing code base indicating that the change has already been implemented. Existing content at lines {args.start_line} : {args.end_line}\n{existing_content}"
 
-
         tokens = count_tokens(code_to_edit)
         if tokens > self.max_tokens_in_edit_prompt:
             clarify_msg = (
@@ -488,51 +533,78 @@ Please provide instructions for the code change again."""
 
         return None
 
-    def _get_replace_block_from_pseudo_code(self, args: RequestCodeChangeArgs, context_file: ContextFile) -> Tuple[Optional[str], RequestCodeChangeArgs]:
+    def _get_replace_block_from_pseudo_code(
+        self, args: RequestCodeChangeArgs, context_file: ContextFile
+    ) -> Tuple[Optional[str], RequestCodeChangeArgs]:
         pseudo_code_block = self._parse_pseudo_code_block(args)
         if not pseudo_code_block:
             return None, args
 
-        if (len(pseudo_code_block.has_placeholders()) > 0 or
-                len(pseudo_code_block.children) > 1 or
-                pseudo_code_block.children[0].type.group != CodeBlockTypeGroup.STRUCTURE):
+        if (
+            len(pseudo_code_block.has_placeholders()) > 0
+            or len(pseudo_code_block.children) > 1
+            or pseudo_code_block.children[0].type.group != CodeBlockTypeGroup.STRUCTURE
+        ):
             return None, args
 
         pseudo_code_block = pseudo_code_block.children[0]
 
         existing_block = None
         if args.change_type == ChangeType.modification:
-            block_to_replace = self._get_block_to_replace(context_file, args.start_line, args.end_line)
-            if block_to_replace and block_to_replace.type == pseudo_code_block.type and block_to_replace.identifier == block_to_replace.identifier:
-                logger.info(f"Found existing block {block_to_replace.path_string()} at start line {args.start_line} to be replaced by the pseudo code.")
+            block_to_replace = self._get_block_to_replace(
+                context_file, args.start_line, args.end_line
+            )
+            if (
+                block_to_replace
+                and block_to_replace.type == pseudo_code_block.type
+                and block_to_replace.identifier == block_to_replace.identifier
+            ):
+                logger.info(
+                    f"Found existing block {block_to_replace.path_string()} at start line {args.start_line} to be replaced by the pseudo code."
+                )
                 existing_block = block_to_replace
         elif args.change_type == ChangeType.addition:
-            block_at_start_line = context_file.module.find_first_by_start_line(args.start_line)
+            block_at_start_line = context_file.module.find_first_by_start_line(
+                args.start_line
+            )
             if block_at_start_line:
                 if block_at_start_line.type.group == CodeBlockTypeGroup.STRUCTURE:
-                    logger.info(f"Found existing block {block_at_start_line.path_string()} at start line {args.start_line}. Add the new block after this block on line {block_at_start_line.end_line}.")
+                    logger.info(
+                        f"Found existing block {block_at_start_line.path_string()} at start line {args.start_line}. Add the new block after this block on line {block_at_start_line.end_line}."
+                    )
                     args.start_line = block_at_start_line.end_line + 1
                     args.end_line = args.start_line
                     existing_block = block_at_start_line
                 else:
-                    logger.warning(f"Existing block {block_at_start_line.path_string()} at start line {args.start_line} has a different type than the pseudo code block {pseudo_code_block.path_string()}.")
+                    logger.warning(
+                        f"Existing block {block_at_start_line.path_string()} at start line {args.start_line} has a different type than the pseudo code block {pseudo_code_block.path_string()}."
+                    )
             else:
                 structure_block = self.find_smallest_covering_block(
                     context_file.module, args.start_line, args.start_line
                 )
 
-                if structure_block and structure_block.type in [CodeBlockType.CLASS, CodeBlockType.MODULE]:
-                    existing_blocks = structure_block.find_blocks_with_type(pseudo_code_block.type)
+                if structure_block and structure_block.type in [
+                    CodeBlockType.CLASS,
+                    CodeBlockType.MODULE,
+                ]:
+                    existing_blocks = structure_block.find_blocks_with_type(
+                        pseudo_code_block.type
+                    )
                     if existing_blocks:
                         # TODO: Pick the closest one
                         existing_block = existing_blocks[0]
                     else:
-                        logger.warning(f"No existing block of type {pseudo_code_block.type.display_name} found in {structure_block.path_string()}.")
+                        logger.warning(
+                            f"No existing block of type {pseudo_code_block.type.display_name} found in {structure_block.path_string()}."
+                        )
 
         if existing_block:
             indentation_diff = existing_block.compare_indentation(pseudo_code_block)
             if indentation_diff:
-                replace_block = self._apply_indentation_fix(args.pseudo_code, indentation_diff)
+                replace_block = self._apply_indentation_fix(
+                    args.pseudo_code, indentation_diff
+                )
             else:
                 replace_block = args.pseudo_code
 
@@ -540,7 +612,6 @@ Please provide instructions for the code change again."""
             return replace_block, args
         else:
             return None, args
-
 
     def _apply_changes(
         self, file: ContextFile, updated_content: str, file_path: str
@@ -770,7 +841,11 @@ Please provide instructions for the code change again."""
             # It's a code block within the line range
             if block.start_line >= start_line and block.end_line <= end_line:
                 lines.extend(range(block.start_line, block.end_line + 1))
-            elif not block.children and block.end_line >= start_line and block.start_line <= end_line:
+            elif (
+                not block.children
+                and block.end_line >= start_line
+                and block.start_line <= end_line
+            ):
                 lines.extend(range(block.start_line, block.end_line + 1))
 
         traverse_blocks(code_block)
@@ -870,7 +945,6 @@ Please provide instructions for the code change again."""
 
         return None
 
-
     def _apply_indentation_fix(self, content: str, indentation_diff: int) -> str:
         lines = content.split("\n")
         if indentation_diff > 0:
@@ -887,14 +961,16 @@ Please provide instructions for the code change again."""
     @classmethod
     def get_evaluation_criteria(cls, trajectory_length) -> List[str]:
         criteria = super().get_evaluation_criteria(trajectory_length)
-        criteria.extend([
-            "Instruction Clarity: Ensure that instructions and pseudocode are clear and actionable.",
-            "Instruction Compliance: The git diff must *exactly* implement the provided pseudo_code. Identify any discrepancies, omissions, or additions. If discrepancies exist, you should lower the reward accordingly.",
-            "Code Modification Accuracy and Quality: Check for correct identification of code spans, accuracy of changes, syntax errors, logical flaws, unintended modifications, and unintended side effects.",
-            "Python-Specific Features Utilization: Assess whether the agent has appropriately utilized Python-specific features that enhance the solution.",
-            "Common Git Diff Issues and Unintended Changes: Check for issues such as incorrect line numbers, unintended additions or deletions, formatting errors, changes to unrelated parts of the code, and heavily penalize unintended changes.",
-            "Addressing Test Failures: Verify if the agent is properly addressing test failures from previous `RunTests` actions.",
-        ])
+        criteria.extend(
+            [
+                "Instruction Clarity: Ensure that instructions and pseudocode are clear and actionable.",
+                "Instruction Compliance: The git diff must *exactly* implement the provided pseudo_code. Identify any discrepancies, omissions, or additions. If discrepancies exist, you should lower the reward accordingly.",
+                "Code Modification Accuracy and Quality: Check for correct identification of code spans, accuracy of changes, syntax errors, logical flaws, unintended modifications, and unintended side effects.",
+                "Python-Specific Features Utilization: Assess whether the agent has appropriately utilized Python-specific features that enhance the solution.",
+                "Common Git Diff Issues and Unintended Changes: Check for issues such as incorrect line numbers, unintended additions or deletions, formatting errors, changes to unrelated parts of the code, and heavily penalize unintended changes.",
+                "Addressing Test Failures: Verify if the agent is properly addressing test failures from previous `RunTests` actions.",
+            ]
+        )
         return criteria
 
     @classmethod
@@ -970,8 +1046,8 @@ except PaymentError as e:
     raise PaymentProcessingError(f"Failed to process payment: {e}")""",
                     change_type=ChangeType.modification,
                     start_line=45,
-                    end_line=47
-                )
+                    end_line=47,
+                ),
             ),
             FewShotExample.create(
                 user_input="Add import for the logging module",
@@ -982,7 +1058,7 @@ except PaymentError as e:
                     pseudo_code="import logging",
                     change_type=ChangeType.addition,
                     start_line=1,
-                    end_line=1
-                )
-            )
+                    end_line=1,
+                ),
+            ),
         ]

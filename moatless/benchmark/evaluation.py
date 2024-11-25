@@ -1,24 +1,24 @@
 import concurrent.futures
 import gc
+import hashlib
 import json
 import logging
 import os
+import random
 import shutil
 import threading
 import time
 import traceback
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Optional, Any, List
+from typing import Optional, Any
 
 import random
 import litellm
 from pydantic import BaseModel, Field
 from tqdm.auto import tqdm
 
-from moatless.agent.agent import MessageHistoryType
 from moatless.agent.code_agent import CodingAgent
-from moatless.agent.code_prompts import SIMPLE_CODE_PROMPT, SYSTEM_PROMPT, CLAUDE_PROMPT
 from moatless.benchmark.report import (
     BenchmarkResult,
     to_dataframe,
@@ -29,46 +29,17 @@ from moatless.benchmark.swebench import (
     create_index,
 )
 from moatless.benchmark.utils import get_moatless_instance
-from moatless.completion.completion import CompletionModel, LLMResponseFormat
+from moatless.completion.completion import CompletionModel
 from moatless.completion.log_handler import LogHandler
-from moatless.discriminator import MeanAwardDiscriminator, AgentDiscriminator
-from moatless.feedback import FeedbackGenerator
+from moatless.discriminator import AgentDiscriminator
 from moatless.feedback.feedback_agent import FeedbackAgent
 from moatless.feedback.reward_feedback import RewardFeedbackGenerator
-from moatless.file_context import FileContext
+from moatless.schema import MessageHistoryType
 from moatless.search_tree import SearchTree
-from moatless.selector import BestFirstSelector, SoftmaxSelector, LLMSelector
-from moatless.templates import create_coding_actions, create_claude_coding_actions
-from moatless.value_function.base import ValueFunction
+from moatless.selector import BestFirstSelector, SoftmaxSelector, Selector
+from moatless.value_function.coding import CodingValueFunction
 
 logger = logging.getLogger(__name__)
-
-
-class ModelSettings(BaseModel):
-    model: str = Field(
-        ...,
-        description="The model to use for completions.",
-    )
-    temperature: float = Field(
-        0.0,
-        description="The temperature to use for completions.",
-    )
-    base_url: Optional[str] = Field(
-        None,
-        description="The base URL for the model API.",
-    )
-    api_key: Optional[str] = Field(
-        None,
-        description="The API key for the model API.",
-    )
-    max_tokens: Optional[int] = Field(
-        4000,
-        description="The maximum number of tokens to generate.",
-    )
-    response_format: Optional[LLMResponseFormat] = Field(
-        LLMResponseFormat.TOOLS,
-        description="The response format for the model API.",
-    )
 
 
 class DebateSettings(BaseModel):
@@ -98,12 +69,12 @@ class TreeSearchSettings(BaseModel):
         description="The maximum cost spent on token before finishing.",
     )
 
-    model: Optional[ModelSettings] = Field(
+    model: Optional[CompletionModel] = Field(
         default=None,
         description="The default model.",
     )
 
-    agent_model: Optional[ModelSettings] = Field(
+    agent_model: Optional[CompletionModel] = Field(
         default=None,
         description="The model the agent will use.",
     )
@@ -114,7 +85,7 @@ class TreeSearchSettings(BaseModel):
         description="The selector to use for the tree search.",
     )
 
-    value_function_model: Optional[ModelSettings] = Field(
+    value_function_model: Optional[CompletionModel] = Field(
         None,
         description="The model to use for building actions.",
     )
@@ -173,6 +144,16 @@ class TreeSearchSettings(BaseModel):
         description="The settings for the debate.",
     )
 
+    feedback_type: Optional[str] = Field(
+        None,
+        description="Type of feedback generator to use ('reward', 'agent', or None).",
+    )
+
+    agent_message_history_type: MessageHistoryType = Field(
+        MessageHistoryType.MESSAGES,
+        description="Determines how message history is generated for the agent.",
+    )
+
     def create_evaluation_name(
         self,
         date: str | None = None,
@@ -181,17 +162,17 @@ class TreeSearchSettings(BaseModel):
             date_str = date
         else:
             date_str = datetime.now(tz=timezone.utc).strftime("%Y%m%d")
-        
+
         # Make model name URL-safe (only alphanumeric and underscores)
         model_name = self.model.model.split("/")[-1]
         # Replace any non-alphanumeric chars with underscore
         model_name = "".join(c if c.isalnum() else "_" for c in model_name)
         # Remove repeated underscores and any leading/trailing underscores
         model_name = "_".join(filter(None, model_name.split("_"))).strip("_")
-        
+
         # Start with date and model
         name = f"{date_str}_{model_name}"
-        
+
         # Add all float and bool fields from the model's schema
         schema = self.model_json_schema()
         for field_name, field in schema["properties"].items():
@@ -205,7 +186,7 @@ class TreeSearchSettings(BaseModel):
                 # For float fields, include the value
                 elif field["type"] == "number":
                     name += f"_{safe_field}_{value}"
-            
+
         return name.lower()  # Convert to lowercase for consistency
 
 
@@ -222,8 +203,7 @@ class Evaluation:
         litellm_callback: Optional[str] = None,
         num_workers: int = 1,
         use_testbed: bool = False,
-        overwrite: bool = False,
-        use_edit_actions: bool = False,
+        selector: Selector | None = None,
     ):
         self.evaluations_dir = evaluations_dir
         self.num_workers = num_workers
@@ -239,6 +219,8 @@ class Evaluation:
 
         self.settings = settings
         self.max_file_context_tokens = max_file_context_tokens
+
+        self.selector = selector
 
         self.evaluation_dir = f"{evaluations_dir}/{evaluation_name}"
         logger.info(f"Evaluation directory: {self.evaluation_dir}")
@@ -292,6 +274,8 @@ class Evaluation:
         self,
         split: str = "lite",
         instance_ids: list[str] | None = None,
+        exclude_instance_ids: list[str] | None = None,
+        repos: list[str] | None = None,
         ignore_repos: list[str] | None = None,
         min_resolved: Optional[int] = None,
         max_resolved: Optional[int] = None,
@@ -315,6 +299,17 @@ class Evaluation:
 
             logger.info(
                 f"Running evaluation for {len(instances)} instances filtered by instance_ids"
+            )
+
+        if exclude_instance_ids:
+            instances = [
+                instance
+                for instance in instances
+                if instance["instance_id"] not in exclude_instance_ids
+            ]
+
+            logger.info(
+                f"Running evaluation for {len(instances)} instances filtered by exclude_instance_ids"
             )
 
         if min_resolved is not None:
@@ -341,6 +336,15 @@ class Evaluation:
 
             logger.info(
                 f"Running evaluation for {len(instances)} instances filtered by max_resolved <= {max_resolved}"
+            )
+
+        if repos:
+            instances = [
+                instance for instance in instances if instance["repo"] in repos
+            ]
+
+            logger.info(
+                f"Running evaluation for {len(instances)} instances filtered by repos"
             )
 
         if ignore_repos:
@@ -396,7 +400,9 @@ class Evaluation:
                 with open(eval_result_path) as f:
                     eval_result = json.load(f)
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse eval result from {eval_result_path}. Will remove file to start over. Error: {e}")
+                logger.error(
+                    f"Failed to parse eval result from {eval_result_path}. Will remove file to start over. Error: {e}"
+                )
                 os.remove(eval_result_path)
                 eval_result = {
                     "node_results": {},
@@ -425,7 +431,9 @@ class Evaluation:
                         logger.info(f"Found completed search tree for {instance_id}")
                         search_tree = persisted_tree
                 except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse search tree from {trajectory_path}. Will remove file to start over. Error: {e}")
+                    logger.error(
+                        f"Failed to parse search tree from {trajectory_path}. Will remove file to start over. Error: {e}"
+                    )
                     os.remove(trajectory_path)
 
             if not search_tree:
@@ -446,11 +454,14 @@ class Evaluation:
                 if self.use_testbed:
                     from moatless.runtime.testbed import TestbedEnvironment
 
+                    run_id = hashlib.sha256(self.evaluation_name.encode()).hexdigest()[:8]
+
                     runtime = TestbedEnvironment(
                         repository=repository,
                         instance=instance,
                         log_dir=log_dir,
                         dataset_name=self.dataset_name,
+                        run_id=run_id,
                     )
                 else:
                     runtime = None
@@ -463,7 +474,6 @@ class Evaluation:
                         code_index=code_index,
                     )
                 else:
-
                     completion_model = self._create_completion_model(
                         self.settings.agent_model
                     )
@@ -473,47 +483,21 @@ class Evaluation:
                         repository=repository,
                         code_index=code_index,
                         runtime=runtime,
-                        use_edit_actions=self.use_edit_actions
+                        message_history_type=self.settings.agent_message_history_type,
                     )
 
-                    if completion_model.model in ["claude-3-5-sonnet-20241022"]:
-                        actions = create_claude_coding_actions(
-                            repository=repository,
-                            code_index=code_index,
-                            runtime=runtime,
-                            completion_model=completion_model
-                        )
-                        system_prompt = CLAUDE_PROMPT
-                    else:
-                        actions = create_coding_actions(
-                            repository=repository,
-                            code_index=code_index,
-                            runtime=runtime,
-                            identify_completion_model=completion_model,
-                            edit_completion_model=completion_model
-                        )
-                        system_prompt = SYSTEM_PROMPT
+                    agent_role = f"""You are an autonomous AI assistant and a core member of the development team for the {instance["repo"]} project. As a senior developer on the team, you have deep knowledge of the codebase and best practices."""
+                    agent.system_prompt = f"{agent_role}\n\n{agent.system_prompt}"
 
-                    agent = CodingAgent(
-                        completion=completion_model,
-                        actions=actions,
-                        system_prompt=system_prompt,
-                        message_history_type=MessageHistoryType.MESSAGES,
-                        include_extra_history=True,
-                        include_file_context=False,
-                        include_git_patch=False,
-                    )
-
-                    if self.settings.selector == "llm_selector":
-                        selector = LLMSelector(completion=self._create_completion_model(),
-                                               max_iterations=self.settings.max_iterations)
+                    if self.selector:
+                        selector = self.selector
                     elif self.settings.best_first:
                         selector = BestFirstSelector()
                     else:
                         selector = SoftmaxSelector()
                     
                     if self.settings.max_expansions > 1:
-                        value_function = ValueFunction(
+                        value_function = CodingValueFunction(
                             completion=self._create_completion_model(
                                 self.settings.value_function_model
                             )
@@ -527,7 +511,14 @@ class Evaluation:
                         )
 
                         if self.settings.provide_feedback:
-                            feedback = RewardFeedbackGenerator(completion_model=self._create_completion_model())
+                            if self.settings.feedback_type == "agent":
+                                feedback = FeedbackAgent(
+                                    completion_model=self._create_completion_model()
+                                )
+                            elif self.settings.feedback_type == "reward":
+                                feedback = RewardFeedbackGenerator()
+                            else:
+                                feedback = None
                         else:
                             feedback = None
                     else:
@@ -538,6 +529,7 @@ class Evaluation:
                     search_tree = SearchTree.create(
                         message=problem_statement,
                         repository=repository,
+                        runtime=runtime,
                         agent=agent,
                         selector=selector,
                         value_function=value_function,
@@ -558,12 +550,130 @@ class Evaluation:
             start_time = time.time()
             try:
                 self.log_event(instance_id, "search_tree_execution_started")
+
+                if search_tree and "error" in eval_result:
+                    del eval_result["error"]
+                    with open(eval_result_path, "w") as f:
+                        json.dump(eval_result, f, indent=2)
+
                 search_tree.run_search()
                 best_node = search_tree.get_best_trajectory()
                 self.log_event(instance_id, "search_tree_execution_completed")
                 if best_node:
-                    self.save_prediction(instance_id, best_node.file_context.generate_git_patch())
+                    self.save_prediction(
+                        instance_id, best_node.file_context.generate_git_patch()
+                    )
                 eval_result["status"] = "completed"
+
+                leaf_nodes = search_tree.get_leaf_nodes()
+                patch_results = {}
+                logger.info(
+                    f"Will evaluate {len(leaf_nodes)} leaf nodes for instance {instance_id}"
+                )
+
+                if "node_results" not in eval_result:
+                    eval_result["node_results"] = {}
+
+                if self.use_testbed:
+                    # Filter out already evaluated nodes
+                    unevaluated_nodes = [
+                        node
+                        for node in leaf_nodes
+                        if str(node.node_id) not in eval_result.get("node_results", {})
+                    ]
+
+                    if not unevaluated_nodes:
+                        logger.info(
+                            f"All {len(leaf_nodes)} nodes for instance {instance_id} have already been evaluated"
+                        )
+                    else:
+                        logger.info(
+                            f"Found {len(leaf_nodes) - len(unevaluated_nodes)} already evaluated nodes, "
+                            f"will evaluate remaining {len(unevaluated_nodes)} nodes for instance {instance_id}"
+                        )
+
+                        if not runtime:
+                            repository = create_repository(
+                                instance, repo_base_dir=self.repo_base_dir
+                            )
+                            from testbeds.sdk import TestbedSDK
+                            from moatless.runtime.testbed import TestbedEnvironment
+
+                            runtime = TestbedEnvironment(
+                                testbed_sdk=TestbedSDK(),
+                                repository=repository,
+                                instance=instance,
+                                log_dir=log_dir,
+                                enable_cache=True,
+                            )
+
+                        for i, leaf_node in enumerate(unevaluated_nodes):
+                            logger.info(
+                                f"Evaluate Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id}"
+                            )
+
+                            if str(leaf_node.node_id) in eval_result["node_results"]:
+                                logger.info(
+                                    f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} that has already been evaluated "
+                                )
+                                continue
+
+                            patch = leaf_node.file_context.generate_git_patch()
+                            if patch and patch.strip():
+                                patch_hash = create_sha256_hash(patch)
+
+                                if patch_hash in patch_results:
+                                    logger.info(
+                                        f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} as patch has already been evaluated."
+                                    )
+                                    eval_result["node_results"][leaf_node.node_id] = (
+                                        patch_results[patch_hash]
+                                    )
+                                else:
+                                    start_time = time.time()
+                                    result = runtime.evaluate(patch=patch)
+                                    if not result:
+                                        logger.error(
+                                            f"Error in evaluating patch for {instance_id}"
+                                        )
+                                        continue
+
+                                    eval_result["node_results"][leaf_node.node_id] = (
+                                        result.model_dump()
+                                    )
+                                    patch_results[patch_hash] = result.model_dump()
+                                    logger.info(
+                                        f"Evaluated patch in {time.time() - start_time} seconds (resolved: {result.resolved})"
+                                    )
+                            else:
+                                logger.info(
+                                    f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} with no patch."
+                                )
+
+                            if best_node and leaf_node.node_id == best_node.node_id:
+                                self.save_prediction(instance_id, patch)
+                                eval_result["selected_node"] = leaf_node.node_id
+
+                                if eval_result["node_results"].get(leaf_node.node_id):
+                                    eval_result["resolved"] = eval_result[
+                                        "node_results"
+                                    ][leaf_node.node_id]["resolved"]
+
+                                    if eval_result.get("resolved"):
+                                        logger.info(
+                                            f"Resolved {instance['instance_id']}"
+                                        )
+                                    else:
+                                        logger.info(
+                                            f"Could not resolve {instance['instance_id']}"
+                                        )
+
+                            with open(eval_result_path, "w") as f:
+                                json.dump(eval_result, f, indent=2)
+
+                if "error" in eval_result:
+                    del eval_result["error"]
+
             except Exception:
                 eval_result["error"] = traceback.format_exc()
                 eval_result["status"] = "error"
@@ -571,109 +681,6 @@ class Evaluation:
             finally:
                 eval_result["duration"] = time.time() - start_time
                 search_tree.persist(trajectory_path)
-
-            leaf_nodes = search_tree.get_leaf_nodes()
-            patch_results = {}
-            logger.info(
-                f"Will evaluate {len(leaf_nodes)} leaf nodes for instance {instance_id}"
-            )
-
-            if "node_results" not in eval_result:
-                eval_result["node_results"] = {}
-
-            if self.use_testbed:
-                # Filter out already evaluated nodes
-                unevaluated_nodes = [
-                    node for node in leaf_nodes 
-                    if str(node.node_id) not in eval_result.get("node_results", {})
-                ]
-                
-                if not unevaluated_nodes:
-                    logger.info(
-                        f"All {len(leaf_nodes)} nodes for instance {instance_id} have already been evaluated"
-                    )
-                else:
-                    logger.info(
-                        f"Found {len(leaf_nodes) - len(unevaluated_nodes)} already evaluated nodes, "
-                        f"will evaluate remaining {len(unevaluated_nodes)} nodes for instance {instance_id}"
-                    )
-
-                    if not runtime:
-                        repository = create_repository(
-                            instance, repo_base_dir=self.repo_base_dir
-                        )
-                        from testbeds.sdk import TestbedSDK
-                        from moatless.runtime.testbed import TestbedEnvironment
-
-                        runtime = TestbedEnvironment(
-                            testbed_sdk=TestbedSDK(),
-                            repository=repository,
-                            instance=instance,
-                            log_dir=log_dir,
-                            enable_cache=True,
-                        )
-
-                    for i, leaf_node in enumerate(unevaluated_nodes):
-                        logger.info(
-                            f"Evaluate Node{leaf_node.node_id} {i+1}/{len(unevaluated_nodes)} for instance {instance_id}"
-                        )
-
-                        if str(leaf_node.node_id) in eval_result["node_results"]:
-                            logger.info(
-                                f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} that has already been evaluated "
-                            )
-                            continue
-
-                        patch = leaf_node.file_context.generate_git_patch()
-                        if patch and patch.strip():
-                            patch_hash = create_sha256_hash(patch)
-
-                            if patch_hash in patch_results:
-                                logger.info(
-                                    f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} as patch has already been evaluated."
-                                )
-                                eval_result["node_results"][leaf_node.node_id] = (
-                                    patch_results[patch_hash]
-                                )
-                            else:
-                                start_time = time.time()
-                                result = runtime.evaluate(patch=patch)
-                                if not result:
-                                    logger.error(
-                                        f"Error in evaluating patch for {instance_id}"
-                                    )
-                                    continue
-
-                                eval_result["node_results"][leaf_node.node_id] = (
-                                    result.model_dump()
-                                )
-                                patch_results[patch_hash] = result.model_dump()
-                                logger.info(
-                                    f"Evaluated patch in {time.time() - start_time} seconds (resolved: {result.resolved})"
-                                )
-                        else:
-                            logger.info(
-                                f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} with no patch."
-                            )
-
-                        if best_node and leaf_node.node_id == best_node.node_id:
-                            self.save_prediction(instance_id, patch)
-                            eval_result["selected_node"] = leaf_node.node_id
-
-                            if eval_result["node_results"].get(leaf_node.node_id):
-                                eval_result["resolved"] = eval_result["node_results"][
-                                    leaf_node.node_id
-                                ]["resolved"]
-
-                                if eval_result.get("resolved"):
-                                    logger.info(f"Resolved {instance['instance_id']}")
-                                else:
-                                    logger.info(
-                                        f"Could not resolve {instance['instance_id']}"
-                                    )
-
-                        with open(eval_result_path, "w") as f:
-                            json.dump(eval_result, f, indent=2)
 
             self.log_event(instance_id, "evaluation_completed")
             self.update_status(instance_id, eval_result["status"])
@@ -711,17 +718,9 @@ class Evaluation:
                 file.write(json_string + "\n")
 
     def _create_completion_model(
-        self, model_settings: ModelSettings | None = None
+        self, model_settings: CompletionModel | None = None
     ) -> CompletionModel:
-        model_settings = model_settings or self.settings.model
-        return CompletionModel(
-            model=model_settings.model,
-            temperature=model_settings.temperature,
-            model_base_url=model_settings.base_url,
-            model_api_key=model_settings.api_key,
-            max_tokens=model_settings.max_tokens,
-            response_format=model_settings.response_format,
-        )
+        return model_settings or self.settings.model
 
     def _to_csv_report(self, results: list[BenchmarkResult]):
         df = to_dataframe(results, self.report_mode)
@@ -829,23 +828,21 @@ def create_evaluation_name(
         date_str = date
     else:
         date_str = datetime.now(tz=timezone.utc).strftime("%Y%m%d")
-    
     # Make model name URL-safe (only alphanumeric and underscores)
     model_name = model.split("/")[-1]
     # Replace any non-alphanumeric chars with underscore
     model_name = "".join(c if c.isalnum() else "_" for c in model_name)
     # Remove repeated underscores and any leading/trailing underscores
     model_name = "_".join(filter(None, model_name.split("_"))).strip("_")
-    
+
     model_name = f"{date_str}_{model_name}"
-    
+
     if max_expansions:
         model_name += f"_max_exp{max_expansions}"
-    
+
     for key, value in kwargs.items():
         # Convert key-value pairs to URL-safe format
         safe_value = "".join(c if c.isalnum() else "_" for c in str(value))
         safe_value = "_".join(filter(None, safe_value.split("_"))).strip("_")
         model_name += f"_{key}_{safe_value}"
-    
     return model_name.lower()  # Convert to lowercase for consistency

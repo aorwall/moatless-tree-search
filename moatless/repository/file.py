@@ -2,6 +2,7 @@ import difflib
 import glob
 import logging
 import os
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict
@@ -111,21 +112,41 @@ class FileRepository(Repository):
         """
         Generates the full file path by combining repo_path and file_path.
         All paths are treated as relative to repo_path, even if they start with '/'.
-        
+
         Args:
             file_path: The file path to process (e.g., 'file.py' or '/src/file.py')
-            
+
         Returns:
             str: The full path relative to repo_path
         """
         # Strip leading slash if present
-        file_path = file_path.lstrip('/')
-        
+        file_path = file_path.lstrip("/")
+
         # If file_path starts with repo_dir, make it relative
         if file_path.startswith(self.repo_dir):
-            file_path = file_path.replace(self.repo_dir, "").lstrip('/')
+            file_path = file_path.replace(self.repo_dir, "").lstrip("/")
+
+        # Claude sets /repo/, remove it
+        if file_path.startswith("/repo/"):
+            file_path = file_path.replace("/repo/", "")
+        elif file_path.startswith("repo/"):
+            file_path = file_path.replace("repo/", "")
 
         return os.path.join(self.repo_path, file_path)
+
+    def get_relative_path(self, file_path: str) -> str:
+        """
+        Generates the relative path by removing repo_path from the full path.
+
+        Args:
+            file_path: The file path to process
+
+        Returns:
+            str: The relative path
+        """
+
+        full_path = self.get_full_path(file_path)
+        return full_path.replace(self.repo_path, "").lstrip("/")
 
     def get_file_content(self, file_path: str) -> str | None:
         full_path = self.get_full_path(file_path)
@@ -201,20 +222,25 @@ class FileRepository(Repository):
         try:
             # If absolute path, log warning and remove first slash
             if file_pattern.startswith("/"):
-                logger.warning(f"Converting absolute path {file_pattern} to relative path")
+                logger.warning(
+                    f"Converting absolute path {file_pattern} to relative path"
+                )
                 file_pattern = file_pattern[1:]
 
             # Split pattern into directory and filename parts
-            pattern_parts = file_pattern.split('/')
+            pattern_parts = file_pattern.split("/")
             filename = pattern_parts[-1]
-            
+
             # If filename doesn't contain wildcards, it should be an exact match
-            has_wildcards = any(c in filename for c in '*?[]')
+            has_wildcards = any(c in filename for c in "*?[]")
             if not has_wildcards:
                 # Prepend **/ only to the directory part if it exists
                 if len(pattern_parts) > 1:
-                    dir_pattern = '/'.join(pattern_parts[:-1])
-                    if not dir_pattern.startswith(("/", "\\", "**/")) and "**/" not in dir_pattern:
+                    dir_pattern = "/".join(pattern_parts[:-1])
+                    if (
+                        not dir_pattern.startswith(("/", "\\", "**/"))
+                        and "**/" not in dir_pattern
+                    ):
                         file_pattern = f"**/{dir_pattern}/{filename}"
                     else:
                         file_pattern = f"{dir_pattern}/{filename}"
@@ -222,7 +248,10 @@ class FileRepository(Repository):
                     file_pattern = f"**/{filename}"
             else:
                 # Original behavior for patterns with wildcards
-                if not file_pattern.startswith(("/", "\\", "**/")) and "**/" not in file_pattern:
+                if (
+                    not file_pattern.startswith(("/", "\\", "**/"))
+                    and "**/" not in file_pattern
+                ):
                     file_pattern = f"**/{file_pattern}"
 
             repo_path = Path(self.repo_path)
@@ -232,11 +261,14 @@ class FileRepository(Repository):
                     # For exact filename matches, verify the filename matches exactly
                     if not has_wildcards and path.name != filename:
                         continue
-                    relative_path = str(path.relative_to(self.repo_path)).replace(os.sep, "/")
+                    relative_path = str(path.relative_to(self.repo_path)).replace(
+                        os.sep, "/"
+                    )
                     matched_files.append(relative_path)
         except Exception as e:
-            raise RuntimeError(f"Error matching files for pattern {file_pattern}") from e
-    
+            logger.exception(f"Error finding files for pattern {file_pattern}:")
+            return []
+
         return matched_files
 
     def find_files(self, file_patterns: list[str]) -> set[str]:
@@ -282,6 +314,106 @@ class FileRepository(Repository):
     def model_validate(cls, obj: Dict):
         repo = cls(repo_path=obj["path"])
         return repo
+
+    def find_exact_matches(
+        self, search_text: str, file_pattern: Optional[str] = None
+    ) -> List[tuple[str, int]]:
+        """
+        Uses grep to search for exact text matches in files.
+        """
+        matches = []
+        if not file_pattern:
+            file_pattern = "."
+
+        try:
+            # Remove '**' and everything after it
+            grep_pattern = file_pattern
+            if "**" in grep_pattern:
+                grep_pattern = grep_pattern.split("**")[0]
+
+            cmd = ["grep", "-n", "-r", search_text, grep_pattern]
+
+            logger.info(f"Executing grep command: {' '.join(cmd)}")
+            logger.info(f"Search directory: {self.repo_path}")
+
+            result = subprocess.run(
+                cmd, cwd=self.repo_path, capture_output=True, text=True
+            )
+
+            if result.returncode not in (0, 1):  # grep returns 1 if no matches found
+                logger.info(
+                    f"Grep returned non-standard exit code: {result.returncode}"
+                )
+                if result.stderr:
+                    logger.warning(f"Grep error output: {result.stderr}")
+                return []
+
+            logger.info(f"Found {len(result.stdout.splitlines())} potential matches")
+
+            for line in result.stdout.splitlines():
+                try:
+                    parts = line.split(":", 2)
+                    if len(parts) < 2:
+                        logger.info(f"Skipping malformed line: {line}")
+                        continue
+
+                    if (
+                        os.path.isfile(os.path.join(self.repo_path, file_pattern))
+                        and "/" not in parts[0]
+                    ):
+                        # Format: "5:def test_partitions():"
+                        line_num = int(parts[0])
+                        content = parts[1]
+                        file_path = file_pattern
+                    else:
+                        # Format: "path/to/file:5:def test_partitions():"
+                        file_path = parts[0]
+                        if file_path.startswith("./"):
+                            file_path = file_path[2:]
+                        line_num = int(parts[1])
+                        content = parts[2]
+
+                    matches.append((file_path, int(line_num)))
+                except (ValueError, IndexError) as e:
+                    logger.info(f"Error parsing line '{line}': {e}")
+                    continue
+
+        except subprocess.SubprocessError as e:
+            logger.info(f"Grep command failed: {e}")
+            return []
+
+        logger.info(f"Returning {len(matches)} matches")
+        return matches
+
+    def list_directory(self, directory_path: str = "") -> Dict[str, List[str]]:
+        """
+        Lists files and directories in the specified directory.
+        Returns a dictionary with 'files' and 'directories' lists.
+        """
+        full_path = self.get_full_path(directory_path)
+        
+        if not os.path.exists(full_path):
+            return {"files": [], "directories": []}
+            
+        if not os.path.isdir(full_path):
+            return {"files": [], "directories": []}
+
+        files = []
+        directories = []
+        
+        for entry in os.listdir(full_path):
+            entry_path = os.path.join(full_path, entry)
+            relative_path = os.path.relpath(entry_path, self.repo_path).replace(os.sep, "/")
+            
+            if os.path.isfile(entry_path):
+                files.append(relative_path)
+            elif os.path.isdir(entry_path):
+                directories.append(relative_path)
+                
+        return {
+            "files": sorted(files),
+            "directories": sorted(directories)
+        }
 
 
 def remove_duplicate_lines(replacement_lines, original_lines):

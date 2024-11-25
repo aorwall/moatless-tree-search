@@ -132,7 +132,7 @@ from moatless.completion import CompletionModel
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.search_tree import SearchTree
-from moatless.actions import FindClass, FindFunction, FindCodeSnippet, SemanticSearch, RequestMoreContext, RequestCodeChange, Finish, Reject
+from moatless.actions import FindClass, FindFunction, FindCodeSnippet, SemanticSearch, ViewCode, StringReplace, CreateFile, AppendString, RunTests, Finish, Reject
 
 index_store_dir = "/tmp/index_store"
 repo_base_dir = "/tmp/repos"
@@ -153,8 +153,11 @@ actions = [
     FindFunction(code_index=code_index, repository=repository),
     FindCodeSnippet(code_index=code_index, repository=repository),
     SemanticSearch(code_index=code_index, repository=repository),
-    RequestMoreContext(repository=repository),
-    RequestCodeChange(repository=repository, completion_model=completion_model),
+    ViewCode(repository=repository),
+    StringReplace(repository=repository, code_index=code_index),
+    CreateFile(repository=repository, code_index=code_index),
+    AppendString(repository=repository, code_index=code_index),
+    RunTests(repository=repository, code_index=code_index),
     Finish(),
     Reject()
 ]
@@ -233,9 +236,11 @@ actions = [
     FindFunction(code_index=code_index, repository=repository),
     FindCodeSnippet(code_index=code_index, repository=repository),
     SemanticSearch(code_index=code_index, repository=repository),
-    RequestMoreContext(repository=repository),
-    RequestCodeChange(repository=repository, completion_model=completion_model),
-    RunTests(code_index=code_index, repository=repository, runtime=runtime),
+    ViewCode(repository=repository),
+    StringReplace(repository=repository, code_index=code_index),
+    CreateFile(repository=repository, code_index=code_index),
+    AppendString(repository=repository, code_index=code_index),
+    RunTests(repository=repository, code_index=code_index),
     Finish(),
     Reject()
 ]

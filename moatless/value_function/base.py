@@ -1,12 +1,14 @@
+import importlib
 import logging
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-from pydantic import BaseModel, PrivateAttr
+from pydantic import BaseModel, PrivateAttr, Field
 
 from moatless.actions.action import Action, RewardScaleEntry
 from moatless.completion.completion import CompletionModel
-from moatless.completion.model import Message, UserMessage, Completion
-from moatless.node import Node, MessageHistoryType
+from moatless.completion.model import UserMessage, Completion
+from moatless.node import Node
+from moatless.schema import MessageHistoryType
 from moatless.value_function.model import Reward
 
 logger = logging.getLogger(__name__)
@@ -14,19 +16,38 @@ logger = logging.getLogger(__name__)
 
 class ValueFunction(BaseModel):
     _completion: CompletionModel = PrivateAttr()
+    correction_award: Optional[int] = Field(
+        0,
+        description="The reward value to automatically assign when the agent expects a correction.",
+    )
 
-    def __init__(self, completion: CompletionModel):
-        super().__init__()
+    def __init__(self, completion: CompletionModel, **data):
+        super().__init__(**data)
         self._completion = completion
 
     def get_reward(self, node: Node) -> Tuple[Reward, Optional[Completion]]:
+        if node.observation.expect_correction and self.correction_award is not None:
+            logger.info(
+                f"Expecting a correction, assigning reward {self.correction_award}"
+            )
+            return Reward(
+                value=self.correction_award, explanation="Expects a correction"
+            ), None
+
+        if node.action.name == "Reject":
+            logger.info(f"Reject action, assigning reward -100")
+            return Reward(value=-100, explanation="Reject action"), None
+
+        if node.action.name == "Error":
+            logger.info(f"Error action, assigning reward -100")
+            return Reward(value=-100, explanation="Error action"), None
+
         messages = node.generate_message_history(
-            message_history_type=MessageHistoryType.MESSAGES,
-            include_extra_history=True,
-            include_file_context=False,
-            include_git_patch=False)
+            message_history_type=MessageHistoryType.SUMMARY
+        )
 
         last_message = ""
+
         if node.action.name == "Finish":
             last_message += "<reasoning_for_completion>\n"
             last_message += node.action.finish_reason
@@ -37,15 +58,34 @@ class ValueFunction(BaseModel):
             last_message += "\n<executed_action>\n"
             last_message += node.action.to_prompt()
             last_message += f"\n\n**Output:**\n{node.observation.message}"
-            if node.observation.extra:
-                last_message += f"\n{node.observation.extra}"
             last_message += "\n</executed_action>\n\n"
+
+        if not node.parent.file_context.is_empty():
+            last_message += (
+                "The file context the agent had access to when executing the new action"
+            )
+            last_message += node.file_context.create_prompt(
+                show_span_ids=False,
+                show_line_numbers=True,
+                exclude_comments=False,
+                show_outcommented_code=True,
+                outcomment_code_comment="... rest of the code",
+            )
+
+        full_patch = node.parent.file_context.generate_git_patch()
+        if full_patch.strip():
+            last_message += "\n\nThe git diff of the already made changes before executing the action:\n"
+            last_message += "<git_patch>\n"
+            last_message += full_patch
+            last_message += "\n</git_patch>\n"
 
         messages.append(UserMessage(content=last_message))
 
         system_prompt = self._create_system_prompt(node)
 
-        return self._completion.create_completion_with_response_model(messages=messages, system_prompt=system_prompt, response_model=Reward)
+        return self._completion.create_completion(
+            messages=messages, system_prompt=system_prompt, response_model=Reward
+        )
 
     def _create_system_prompt(self, node: Node) -> str:
         return self._build_system_prompt(node)
@@ -186,14 +226,42 @@ class ValueFunction(BaseModel):
 
         return formatted_scale
 
-    def model_dump(self, **kwargs):
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
         dump = super().model_dump(**kwargs)
-        dump["completion"] = self._completion.model_dump() if self._completion else None
+        dump["completion"] = self._completion.model_dump(**kwargs)
+        dump["value_function_class"] = (
+            f"{self.__class__.__module__}.{self.__class__.__name__}"
+        )
         return dump
 
     @classmethod
-    def model_validate(cls, obj):
-        completion = None
-        if "completion" in obj and obj["completion"]:
-            completion = CompletionModel.model_validate(obj["completion"])
-        return cls(completion=completion)
+    def model_validate(cls, obj: Any) -> "ValueFunction":
+        if isinstance(obj, dict):
+            obj = obj.copy()
+            completion_data = obj.pop("completion", None)
+            value_function_class_path = obj.pop("value_function_class", None)
+
+            if completion_data:
+                obj["completion"] = CompletionModel.model_validate(completion_data)
+            else:
+                obj["completion"] = None
+
+            if value_function_class_path:
+                module_name, class_name = value_function_class_path.rsplit(".", 1)
+                module = importlib.import_module(module_name)
+                value_function_class = getattr(module, class_name)
+                instance = value_function_class(**obj)
+            else:
+                instance = cls(**obj)
+
+            return instance
+
+        return super().model_validate(obj)
+
+    @property
+    def completion(self) -> CompletionModel:
+        return self._completion
+
+    @completion.setter
+    def completion(self, value: CompletionModel):
+        self._completion = value

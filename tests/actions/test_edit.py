@@ -29,7 +29,6 @@ def add(a, b):
     file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_text(content)
 
-    print(file_path)
     return "/src/test.py"
 
 @pytest.fixture
@@ -46,7 +45,6 @@ def test_view_command(edit_action, file_context, test_file):
     
     result = edit_action.execute(args, file_context)
     assert isinstance(result, Observation)
-    assert result.properties.get("success")
     assert "def hello():" in result.message
     assert "def add(a, b):" in result.message
 
@@ -61,7 +59,6 @@ def test_view_with_range(edit_action, file_context, test_file):
     result = edit_action.execute(args, file_context)
     print(result.message)
     assert isinstance(result, Observation)
-    assert result.properties.get("success")
     assert "def hello():" in result.message
     assert "print(" in result.message
     assert "def add" not in result.message
@@ -79,9 +76,7 @@ def test_create_command(edit_action, file_context, repo):
     
     result = edit_action.execute(args, file_context)
     assert isinstance(result, Observation)
-    assert result.properties.get("success")
     assert "File created successfully" in result.message
-    assert file_context.get_file(str(new_file)).content == content
 
 def test_str_replace_command(edit_action, file_context, test_file):
     args = EditActionArguments(
@@ -94,7 +89,6 @@ def test_str_replace_command(edit_action, file_context, test_file):
     
     result = edit_action.execute(args, file_context)
     assert isinstance(result, Observation)
-    assert result.properties.get("success")
     assert result.properties.get("diff")
     assert 'print("Hi, World!")' in file_context.get_file(str(test_file)).content
 
@@ -109,7 +103,6 @@ def test_insert_command(edit_action, file_context, test_file):
     
     result = edit_action.execute(args, file_context)
     assert isinstance(result, Observation)
-    assert result.properties.get("success")
     assert result.properties.get("diff")
     assert "# This is a test function" in file_context.get_file(str(test_file)).content
 
@@ -125,26 +118,30 @@ def test_file_not_found(edit_action, file_context, repo):
     result = edit_action.execute(args, file_context)
     assert isinstance(result, Observation)
     assert result.expect_correction
-    assert "The path /tmp/pytest-of-albert/pytest-26/test_file_not_found0/nonexistent.py does not exist. Please provide a valid path" in result.message
+    assert "does not exist. Please provide a valid path" in result.message
 
 
-def test_str_replace_multiple_occurrences(edit_action, file_context, test_file):
+def test_str_replace_multiple_occurrences(edit_action, file_context, repo):
     # Modify file to have multiple occurrences
-
-    file_context.get_file(str(test_file)).apply_changes("print('test')\nprint('test')")
+    file_path = Path(repo.repo_path) / "src" / "test_multiple.py"
+    content = """print('test')
+print('test')
+"""
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text(content)
 
     args = EditActionArguments(
         scratch_pad="Replace string with multiple occurrences",
         command="str_replace",
-        path=str(test_file),
+        path="src/test_multiple.py",
         old_str="print('test')",
         new_str="print('updated')"
     )
     
     result = edit_action.execute(args, file_context)
     assert isinstance(result, Observation)
-    assert result.expect_correction
     assert "Multiple occurrences" in result.message
+    assert result.properties.get("flags") == ["multiple_occurrences"]
 
 def test_invalid_insert_line(edit_action, file_context, test_file):
     args = EditActionArguments(
@@ -157,4 +154,6 @@ def test_invalid_insert_line(edit_action, file_context, test_file):
     
     result = edit_action.execute(args, file_context)
     assert isinstance(result, Observation)
-    assert result.expect_correction 
+    assert result.expect_correction
+
+

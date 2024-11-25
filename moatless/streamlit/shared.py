@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 
@@ -6,6 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from moatless.benchmark.report import read_reports, to_dataframe
+from moatless.utils.tokenizer import count_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +66,7 @@ def generate_summary(df: pd.DataFrame):
                             f'Running ({status_counts.get("Running", 0)})',
                             f'Failed ({status_counts.get("Failed", 0)})',
                             f'Rejected ({status_counts.get("Rejected", 0)})',
+                            f'Error ({status_counts.get("Error", 0)})',
                         ],
                         range=[
                             "#4CAF50",
@@ -72,6 +75,7 @@ def generate_summary(df: pd.DataFrame):
                             "#2196F3",
                             "#F44336",
                             "#A52A2A",
+                            "#9C27B0",
                         ],
                     ),
                 ),
@@ -103,21 +107,35 @@ def trajectory_table(report_path: str):
     logger.info(f"Loaded {len(results)} trajectory reports")
     df = to_dataframe(results)
 
-    # Add a new column for success status
+    # Extract all unique flags from the results
+    all_flags = set()
+    for result in results:
+        if result.flags:  # Check if flags exists and is not empty
+            all_flags.update(result.flags)
+
+    # Extract all unique actions from the results
+    all_actions = set()
+    for result in results:
+        # Debug print to see the result structure
+        if hasattr(result, 'actions') and result.actions:  # Check if actions exists
+            all_actions.update(result.actions.keys())
+
     df["success_status"] = df.apply(
         lambda row: "Resolved"
-        if row["status"] == "resolved"
-        else "Running with Resolved Solutions"
-        if row["status"] == "running" and row["resolved_solutions"] > 0
+        if row["resolved"] is not None and row["resolved"]
         else "Partially Resolved"
         if row["resolved_solutions"] > 0
+        else "Failed"
+        if row["failed_solutions"] > 0
         else "Rejected"
         if row["status"] == "rejected"
         else "Running"
         if row["status"] == "running"
         else "Finished"
         if row["status"] == "finished"
-        else "Failed",
+        else "Error"
+        if row["status"] == "error"
+        else "Unknown",
         axis=1,
     )
 
@@ -137,40 +155,53 @@ def trajectory_table(report_path: str):
             "Status", df["status"].unique(), key="status_filter"
         )
     with col2:
-        has_resolved_solutions = st.multiselect("Has Resolved Solutions", ["Yes", "No"])
+        has_resolved_solutions = st.multiselect(
+            "Has Resolved Solutions", ["Yes", "No"], key="resolved_solutions_filter"
+        )
     with col3:
-        instance_filter = st.multiselect(
-            "Instance", df["instance_id"].unique(), key="instance_filter"
+        flag_filter = st.multiselect(
+            "Flags", sorted(list(all_flags)), key="flag_filter"
         )
     with col4:
-        llmonkeys_rate_range = st.slider("LLMonkeys Rate (%)", 0, 100, (0, 100), 1)
-
-    # Apply filters
-    mask = pd.Series(True, index=df.index)
-    if status_filter:
-        mask &= df["status"].isin(status_filter)
-    if instance_filter:
-        mask &= df["instance_id"].isin(instance_filter)
-    if has_resolved_solutions:
-        if "Yes" in has_resolved_solutions:
-            mask &= df["resolved_solutions"] > 0
-        if "No" in has_resolved_solutions:
-            mask &= df["resolved_solutions"] == 0
-
-    if int(df["resolved_by"].min()) < int(df["resolved_by"].max()):
-        with col5:
+        if int(df["resolved_by"].min()) < int(df["resolved_by"].max()):
             resolved_by_range = st.slider(
                 "Resolved By",
                 int(df["resolved_by"].min()),
                 int(df["resolved_by"].max()),
                 (int(df["resolved_by"].min()), int(df["resolved_by"].max())),
+                key=f"resolved_by_slider",
             )
-
-        # Apply new filters
-        mask &= df["llmonkeys_rate"].apply(
-            lambda x: float(x.strip("%")) >= llmonkeys_rate_range[0]
-            and float(x.strip("%")) <= llmonkeys_rate_range[1]
+    with col5:
+        action_filter = st.multiselect(
+            "Actions", sorted(list(all_actions)), key="action_filter"
         )
+
+    # Apply filters
+    mask = pd.Series(True, index=df.index)
+    if status_filter:
+        mask &= df["status"].isin(status_filter)
+    if has_resolved_solutions:
+        if "Yes" in has_resolved_solutions:
+            mask &= df["resolved_solutions"] > 0
+        if "No" in has_resolved_solutions:
+            mask &= df["resolved_solutions"] == 0
+    if flag_filter:
+        mask &= df.apply(
+            lambda row: any(
+                flag in row.get("flags", []) for flag in flag_filter
+            ),
+            axis=1,
+        )
+    if action_filter:
+        mask &= df.apply(
+            lambda row: row.get('actions', {}) and any(
+                action in row['actions'] and row['actions'][action] > 0
+                for action in action_filter
+            ),
+            axis=1,
+        )
+
+    if int(df["resolved_by"].min()) < int(df["resolved_by"].max()):
         mask &= df["resolved_by"].between(resolved_by_range[0], resolved_by_range[1])
 
     filtered_df = df[mask]
@@ -182,10 +213,28 @@ def trajectory_table(report_path: str):
         axis=1,
     )
 
-    # Remove trajectory_path from the columns to be displayed
+    # Create a new column for fail issues that combines icons for different issues
+    def create_fail_issues_column(row):
+        # Get number of flags
+        num_flags = len(row.get('flags', []))
+        
+        if num_flags == 0:
+            return ""
+        
+        # Create tooltip with just flags
+        tooltip = f"Flags: {', '.join(row.get('flags', []))}"
+        
+        # Only show number of flags in the column
+        return f'<span title="{tooltip}">{num_flags}</span>'
+
+    # Apply the function to create the Issues column
+    filtered_df["Issues"] = filtered_df.apply(create_fail_issues_column, axis=1)
+
+    # Update display columns to include duplicated_actions
     display_columns = [
         "Select",
         "instance_id",
+        "Issues",
         "resolved_by",
         "llmonkeys_rate",
         "success_status",
@@ -197,29 +246,39 @@ def trajectory_table(report_path: str):
         "status",
         "all_transitions",
         "failed_actions",
+        "duplicated_actions",  # Add duplicated_actions column
         "total_cost",
         "prompt_tokens",
         "completion_tokens",
+        "max_build_tokens",
     ]
 
     filtered_df = filtered_df.sort_values(by="instance_id")
 
     # Function to apply color to rows based on success_status
     def color_rows(row):
-        if row["success_status"] == "Rejected":
-            return ["background-color: rgba(165, 42, 42, 0.3)"] * len(
-                row
-            )  # Brown for rejected
-        elif row["success_status"] == "Resolved":
-            return ["background-color: rgba(76, 175, 80, 0.3)"] * len(row)
-        elif row["success_status"] == "Finished":
-            return ["background-color: rgba(128, 128, 128, 0.3)"] * len(row)
-        elif row["success_status"] == "Partially Resolved":
-            return ["background-color: rgba(255, 235, 59, 0.3)"] * len(row)
-        elif row["success_status"] == "Running":
-            return ["background-color: rgba(33, 150, 243, 0.3)"] * len(row)
-        else:
-            return ["background-color: rgba(244, 67, 54, 0.3)"] * len(row)
+        base_colors = {
+            "Rejected": "rgba(165, 42, 42, 0.3)",  # Brown
+            "Resolved": "rgba(76, 175, 80, 0.3)",
+            "Finished": "rgba(128, 128, 128, 0.3)",
+            "Partially Resolved": "rgba(255, 235, 59, 0.3)",
+            "Running": "rgba(33, 150, 243, 0.3)",
+            "Error": "rgba(156, 39, 176, 0.3)",  # Purple
+            "Failed": "rgba(244, 67, 54, 0.3)"
+        }
+        
+        color = base_colors.get(row["success_status"], "rgba(244, 67, 54, 0.3)")
+        styles = [f"background-color: {color}"] * len(row)
+        
+        # Add error tooltip to status column if status is Error
+        if row["success_status"] == "Error" and row.get("error"):
+            # Find index of status column
+            status_idx = display_columns.index("status")
+            # Escape error message
+            error = row["error"].replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;')
+            styles[status_idx] = f"background-color: {color}; cursor: help; title: '<pre>{error}</pre>'"
+        
+        return styles
 
     # Apply the styling
     styled_df = filtered_df[display_columns].style.apply(color_rows, axis=1)
@@ -251,7 +310,68 @@ def trajectory_table(report_path: str):
     a:hover {{
         text-decoration: underline;
     }}
+    span[title] {{
+        position: relative;
+    }}
+    span[title]:hover::after {{
+        content: attr(title);
+        position: absolute;
+        left: 0;
+        top: 100%;
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 14px;
+        white-space: pre;
+        z-index: 1000;
+        font-family: monospace;
+    }}
     </style>
     """,
         unsafe_allow_html=True,
     )
+
+
+
+def show_completion(completion):
+    if completion:
+        st.json(
+            {
+                "model": completion.model,
+                "usage": completion.usage.model_dump() if completion.usage else None,
+            }
+        )
+        if completion.input:
+            st.subheader("Input prompts")
+            for input_idx, input_msg in enumerate(completion.input):
+                if "content" in input_msg:
+                    if isinstance(input_msg["content"], str):
+                        content = input_msg["content"]
+                    elif (
+                        isinstance(input_msg["content"], list)
+                        and input_msg["role"] == "user"
+                    ):
+                        content_list = [c.get("content") for c in input_msg["content"]]
+
+                        content = "\n\n".join(content_list)
+                    else:
+                        content = json.dumps(input_msg["content"], indent=2)
+
+                    tokens = count_tokens(content)
+                    with st.expander(
+                        f"Message {input_idx + 1} by {input_msg['role']} ({tokens} tokens)",
+                        expanded=(input_idx == len(completion.input) - 1),
+                    ):
+                        st.code(content, language="")
+                else:
+                    with st.expander(
+                        f"Message {input_idx + 1} by {input_msg['role']}",
+                        expanded=(input_idx == len(completion.input) - 1),
+                    ):
+                        st.json(input_msg)
+
+        if completion.response:
+            st.subheader("Completion response")
+            st.json(completion.response)
+

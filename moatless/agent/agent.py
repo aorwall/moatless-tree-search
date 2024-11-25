@@ -1,19 +1,24 @@
-import logging
-from typing import List, Type, Tuple, Dict, Any, Optional
 import importlib
-from enum import Enum
+import logging
+from typing import List, Type, Dict, Any, Optional
 
 from pydantic import BaseModel, Field, PrivateAttr, model_validator, ValidationError
 
 from moatless.actions.action import Action
-from moatless.actions.model import ActionArguments, Observation
-from moatless.actions.reject import RejectArgs, Reject
+from moatless.actions.model import (
+    ActionArguments,
+    Observation,
+    RetryException,
+    ActionError,
+)
+from moatless.agent.settings import AgentSettings
 from moatless.completion.completion import CompletionModel
-from moatless.completion.model import Message, AssistantMessage, UserMessage, Completion
-from moatless.exceptions import RuntimeError, RejectError, CompletionError, CompletionRejectError
+from moatless.completion.model import AssistantMessage, UserMessage, Completion
+from moatless.exceptions import RuntimeError, CompletionRejectError
 from moatless.index.code_index import CodeIndex
-from moatless.node import Node, MessageHistoryType
+from moatless.node import Node
 from moatless.repository.repository import Repository
+from moatless.message_history import MessageHistoryGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -23,21 +28,9 @@ class ActionAgent(BaseModel):
         None, description="System prompt to be used for generating completions"
     )
     actions: List[Action] = Field(default_factory=list)
-    message_history_type: MessageHistoryType = Field(
-        default=MessageHistoryType.MESSAGES,
-        description="Determines how message history is generated"
-    )
-    include_extra_history: bool = Field(
-        default=True,
-        description="Whether to include extra execution details in message history"
-    )
-    include_file_context: bool = Field(
-        default=False,
-        description="Whether to include the full file context in the last message"
-    )
-    include_git_patch: bool = Field(
-        default=False,
-        description="Whether to include the full git patch in the last message"
+    message_generator: MessageHistoryGenerator = Field(
+        default_factory=lambda: MessageHistoryGenerator(),
+        description="Generator for message history"
     )
 
     _completion: CompletionModel = PrivateAttr()
@@ -48,16 +41,30 @@ class ActionAgent(BaseModel):
         completion: CompletionModel,
         system_prompt: str | None = None,
         actions: List[Action] | None = None,
-        **data
+        message_generator: MessageHistoryGenerator | None = None,
+        **data,
     ):
         actions = actions or []
+        message_generator = message_generator or MessageHistoryGenerator()
         super().__init__(
             actions=actions, 
             system_prompt=system_prompt,
+            message_generator=message_generator,
             **data
         )
         self.set_actions(actions)
         self._completion = completion
+
+    @classmethod
+    def from_agent_settings(cls, agent_settings: AgentSettings, actions: List[Action] | None = None):
+        if agent_settings.actions:
+            actions = [action for action in actions if action.__class__.__name__ in agent_settings.actions]
+
+        return cls(
+            completion=agent_settings.completion_model,
+            system_prompt=agent_settings.system_prompt,
+            actions=actions,
+        )
 
     def set_actions(self, actions: List[Action]):
         self.actions = actions
@@ -84,8 +91,51 @@ class ActionAgent(BaseModel):
 
     def run(self, node: Node):
         """Run the agent on a node to generate and execute an action."""
-        try:
-            self.generate_action(node)
+
+        if node.action:
+            logger.info(f"Node{node.node_id}: Resetting node")
+            node.reset()
+
+        possible_actions = self.determine_possible_actions(node)
+        if not possible_actions:
+            raise RuntimeError(f"No possible actions for Node{node.node_id}")
+        node.possible_actions = [action.name for action in possible_actions]
+        system_prompt = self.generate_system_prompt(possible_actions)
+        action_args = [action.args_schema for action in possible_actions]
+
+        messages = self.message_generator.generate(node)
+
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            logger.info(
+                f"Node{node.node_id}: Run attempt {attempt + 1} of {max_attempts}"
+            )
+            try:
+                node.action, completion_response = self._completion.create_completion(
+                    messages, system_prompt=system_prompt, response_model=action_args
+                )
+                node.completions["build_action"] = completion_response
+            except CompletionRejectError as e:
+                node.action = ActionError(
+                    error=f"Failed to generate action. Error: {e}"
+                )
+
+                if e.last_completion:
+                    # TODO: Move mapping to completion.py
+                    node.completions["build_action"] = Completion.from_llm_completion(
+                        input_messages=e.messages,
+                        completion_response=e.last_completion,
+                        model=self.completion.model,
+                    )
+
+                node.observation = Observation(
+                    message=e.message,
+                    terminal=True,
+                    properties={"error": str(e), "retries": attempt},
+                )
+
+                return
+
             duplicate_node = node.find_duplicate()
             if duplicate_node:
                 node.is_duplicate = True
@@ -93,81 +143,60 @@ class ActionAgent(BaseModel):
                     f"Node{node.node_id} is a duplicate to Node{duplicate_node.node_id}. Skipping execution."
                 )
                 return
-            self.execute_action(node)
-        except RejectError as e:
-            logger.warning(f"Node{node.node_id}: Action rejected: {e.message}")
-            rejection_reason = str(e)
-            node.action = RejectArgs(rejection_reason=rejection_reason)
-            self.execute_action(node)
+            try:
+                node.observation = self._execute(node)
+                if node.observation.execution_completion:
+                    node.completions["execute_action"] = (
+                        node.observation.execution_completion
+                    )
 
-            if isinstance(e, CompletionRejectError):
-                if not node.observation.properties:
-                    node.observation.properties = {}
-                node.observation.properties["last_completion"] = e.last_completion
+                if attempt > 0:
+                    node.observation.properties["retries"] = attempt
 
-        except RuntimeError as e:
-            logger.error(f"Node{node.node_id}: Runtime error: {e.message}")
-            raise  #
-
-        logger.info(
-            f"Node{node.node_id}: Executed action: {node.action.name}. "
-            f"Terminal: {node.observation.terminal if node.observation else False}. "
-            f"Output: {node.observation.message if node.observation else None}"
-        )
-
-    def generate_action(self, node: Node):
-        """Generate an action for the node."""
-        if node.action:
-            logger.info(f"Node{node.node_id}: Action already generated. Skipping.")
-            return
-
-        possible_actions = self.determine_possible_actions(node)
-        # possible_actions = self.actions
-        node.possible_actions = [action.name for action in possible_actions]
-
-        system_prompt = self.generate_system_prompt(possible_actions)
-        messages = node.generate_message_history(
-            message_history_type=self.message_history_type,
-            include_extra_history=self.include_extra_history,
-            include_file_context=self.include_file_context,
-            include_git_patch=self.include_git_patch,
-        )
-
-        if node.message:
-            messages.append(UserMessage(content=node.message))
-
-        action_args = [action.args_schema for action in possible_actions]
-
-        try:
-            action, completion_response = self._completion.create_completion(
-                messages, system_prompt=system_prompt, actions=action_args
-            )
-        except ValidationError as e:
-            logger.warning(f"Failed to create completion: {e}")
-            raise RejectError(e.message) from e
-        node.action = action
-        node.completions["build_action"] = completion_response
-
-    def execute_action(self, node: Node):
-        """Execute the generated action."""
-        if node.observation:
-            logger.info(f"Node{node.node_id}: Observation already generated. Skipping.")
-            return
-
-        action = self._action_map.get(type(node.action))
-        if action:
-            node.observation = action.execute(node.action, node.file_context)
-
-            if node.observation.execution_completion:
-                node.completions["execute_action"] = (
-                    node.observation.execution_completion
+                logger.info(
+                    f"Node{node.node_id}: Executed action: {node.action.name}. "
+                    f"Terminal: {node.observation.terminal if node.observation else False}. "
+                    f"Output: {node.observation.message if node.observation else None}"
                 )
-        else:
+
+                return
+
+            except RetryException as e:
+                logger.warning(
+                    f"Node{node.node_id}: Action needs retry (attempt {attempt + 1}): {e.message}"
+                )
+
+                messages.append(
+                    AssistantMessage(tool_call=e.action_args.to_tool_call())
+                )
+                messages.append(UserMessage(content=e.message))
+                if attempt == max_attempts - 1:
+                    node.observation = Observation(
+                        message=e.message,
+                        is_terminal=True,
+                        properties={"retries": attempt},
+                    )
+                    return
+            except CompletionRejectError as e:
+                logger.warning(f"Node{node.node_id}: Action rejected: {e.message}")
+                node.completions["execute_action"] = e.last_completion
+                node.observation = Observation(
+                    message=e.message,
+                    is_terminal=True,
+                    properties={"retries": attempt},
+                )
+                return
+
+    def _execute(self, node: Node):
+        action = self._action_map.get(type(node.action))
+        if not action:
             logger.error(
                 f"Node{node.node_id}: Action {node.action.name} not found in action map. "
                 f"Available actions: {self._action_map.keys()}"
             )
-            raise Exception(f"Action {type(node.action)} not found in action map.")
+            raise RuntimeError(f"Action {type(node.action)} not found in action map.")
+
+        return action.execute(node.action, node.file_context)
 
     def determine_possible_actions(self, node: Node) -> List[Action]:
         """Determine which actions that the agent can take based on the current node state."""
@@ -186,13 +215,8 @@ class ActionAgent(BaseModel):
         dump["completion"] = self._completion.model_dump(**kwargs)
         dump["actions"] = []
         dump["agent_class"] = f"{self.__class__.__module__}.{self.__class__.__name__}"
-        dump["message_history_type"] = self.message_history_type.value
         for action in self.actions:
-            action_dump = action.model_dump(**kwargs)
-            action_dump["action_class"] = (
-                f"{action.__class__.__module__}.{action.__class__.__name__}"
-            )
-            dump["actions"].append(action_dump)
+            dump["actions"].append(action.model_dump(**kwargs))
         return dump
 
     @classmethod
@@ -207,18 +231,19 @@ class ActionAgent(BaseModel):
             obj = obj.copy()
             completion_data = obj.pop("completion", None)
             agent_class_path = obj.pop("agent_class", None)
-            
-            if "message_history_type" in obj:
-                obj["message_history_type"] = MessageHistoryType(obj["message_history_type"])
+
+            message_generator_data = obj.get("message_generator", {})
+            if message_generator_data:
+                obj["message_generator"] = MessageHistoryGenerator.model_validate(message_generator_data)
 
             if completion_data:
-                completion = CompletionModel.model_validate(completion_data)
+                obj["completion"] = CompletionModel.model_validate(completion_data)
             else:
-                completion = None
+                obj["completion"] = None
 
             if repository:
-                actions = [
-                    Action.from_dict(
+                obj["actions"] = [
+                    Action.model_validate(
                         action_data,
                         repository=repository,
                         runtime=runtime,
@@ -228,17 +253,16 @@ class ActionAgent(BaseModel):
                 ]
             else:
                 logger.debug(f"No repository provided, skip initiating actions")
-                actions = []
+                obj["actions"] = []
 
             if agent_class_path:
                 module_name, class_name = agent_class_path.rsplit(".", 1)
                 module = importlib.import_module(module_name)
                 agent_class = getattr(module, class_name)
-                instance = agent_class(actions=actions, completion=completion)
+                instance = agent_class(**obj)
             else:
-                instance = cls(actions=actions, completion=completion)
+                instance = cls(**obj)
 
-            instance._action_map = {action.args_schema: action for action in actions}
             return instance
 
         return super().model_validate(obj)

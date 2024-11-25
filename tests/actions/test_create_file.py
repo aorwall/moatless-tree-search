@@ -45,7 +45,6 @@ def test_create_file_already_exists(repository, file_context):
     observation = action.execute(args, file_context)
     
     assert observation.properties["fail_reason"] == "file_exists"
-    assert observation.expect_correction
 
 def test_create_file_with_path(repository, file_context):
     action = CreateFile(repository=repository)

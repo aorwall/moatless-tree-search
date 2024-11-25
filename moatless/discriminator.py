@@ -1,14 +1,12 @@
 import logging
-from typing import Optional, List, Callable, Tuple
-from functools import partial
+from typing import List
 
-from instructor import OpenAISchema
-from pydantic import Field, BaseModel, PrivateAttr
+from pydantic import Field, BaseModel
 
 from moatless.completion.completion import CompletionModel
-from moatless.node import Node
-from moatless.completion.model import Completion, Message, UserMessage
+from moatless.completion.model import UserMessage, StructuredOutput
 from moatless.debate import MultiAgentDebate
+from moatless.node import Node
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +47,14 @@ class MeanAwardDiscriminator(Discriminator):
 
 
 class BestRewardDiscriminator(Discriminator):
-
     def select(self, nodes: List[Node]) -> Node | None:
         best_finish_node: Node | None = None
 
         for finished_node in nodes:
-            if best_finish_node is None or finished_node.reward.value > best_finish_node.reward.value:
+            if (
+                best_finish_node is None
+                or finished_node.reward.value > best_finish_node.reward.value
+            ):
                 best_finish_node = finished_node
 
         if best_finish_node:
@@ -69,13 +69,12 @@ class BestRewardDiscriminator(Discriminator):
             return None
 
 
-class AgentDiscriminatorChoice(OpenAISchema):
+class AgentDiscriminatorChoice(StructuredOutput):
     ID: int
     EXPLANATION: str
 
 
 class AgentDiscriminator(Discriminator):
-
     completion: CompletionModel = Field()
     debate: MultiAgentDebate = Field()
 
@@ -121,7 +120,9 @@ Your task is to carefully evaluate each change and decide which one is the most 
             )
         else:
             response, completion = self.completion.create_completion(
-                messages, system_prompt=SYSTEM_MESSAGE, actions=[AgentDiscriminatorChoice]
+                messages,
+                system_prompt=SYSTEM_MESSAGE,
+                response_model=AgentDiscriminatorChoice,
             )
 
         return response.ID, response.EXPLANATION

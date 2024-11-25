@@ -2,7 +2,7 @@ from typing import Optional, List, Type, ClassVar
 
 from pydantic import Field, model_validator
 
-from moatless.actions.model import ActionArguments, FewShotExample
+from moatless.actions.model import ActionArguments, FewShotExample, Observation
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
 from moatless.index.types import SearchCodeResponse
 
@@ -10,18 +10,18 @@ from moatless.index.types import SearchCodeResponse
 class SemanticSearchArgs(SearchBaseArgs):
     """Use this when you don't know exact names or code but want to find related functionality.
 
-Perfect for:
-- Finding functionality by description: query="code that handles password hashing"
-- Finding related test cases: query="tests for user registration", category="test"
-- Finding implementations: query="database connection pooling", category="implementation"
-- Finding patterns: query="error handling for API requests"
+    Perfect for:
+    - Finding functionality by description: query="code that handles password hashing"
+    - Finding related test cases: query="tests for user registration", category="test"
+    - Finding implementations: query="database connection pooling", category="implementation"
+    - Finding patterns: query="error handling for API requests"
 
-This is the most flexible search when you:
-- Don't know exact function/class names
-- Want to find similar implementations
-- Need to discover related code
-- Want to explore how certain features are implemented
-"""
+    This is the most flexible search when you:
+    - Don't know exact function/class names
+    - Want to find similar implementations
+    - Need to discover related code
+    - Want to explore how certain features are implemented
+    """
 
     query: str = Field(
         ..., description="Natural language description of what you're looking for."
@@ -47,7 +47,6 @@ This is the most flexible search when you:
         return self
 
 
-
 class SemanticSearch(SearchBaseAction):
     args_schema: ClassVar[Type[ActionArguments]] = SemanticSearchArgs
 
@@ -55,7 +54,7 @@ class SemanticSearch(SearchBaseAction):
         return self._code_index.semantic_search(
             args.query,
             file_pattern=args.file_pattern,
-            max_results=25,
+            max_results=self.max_hits,
             category=args.category,
         )
 
@@ -65,7 +64,7 @@ class SemanticSearch(SearchBaseAction):
         if args.file_pattern:
             return self._code_index.semantic_search(
                 args.query,
-                max_results=25,
+                max_results=self.max_hits,
                 category=args.category,
             )
 
@@ -90,8 +89,8 @@ class SemanticSearch(SearchBaseAction):
                 action=SemanticSearchArgs(
                     scratch_pad="To find implementations of database connection pooling, we should search for code related to managing database connections efficiently. This might include classes or functions that handle connection creation, reuse, and management.",
                     query="database connection pooling implementation",
-                    category="implementation"
-                )
+                    category="implementation",
+                ),
             ),
             FewShotExample.create(
                 user_input="We need to find all test cases related to user authentication in our test suite",
@@ -99,7 +98,7 @@ class SemanticSearch(SearchBaseAction):
                     scratch_pad="To find test cases related to user authentication, we should search for test files that contain assertions and scenarios specifically testing authentication functionality.",
                     query="user authentication test cases",
                     file_pattern="tests/*.py",
-                    category="test"
-                )
-            )
+                    category="test",
+                ),
+            ),
         ]

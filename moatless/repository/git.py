@@ -1,14 +1,13 @@
 import logging
 import os
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
 
-import litellm
+from pydantic import Field
 
 from moatless.completion.completion import CompletionModel
 from moatless.completion.model import UserMessage
 from moatless.repository.file import FileRepository
 from moatless.utils.repo import maybe_clone, checkout_commit, clone_and_checkout
-from pydantic import Field
 
 logger = logging.getLogger(__name__)
 
@@ -189,3 +188,14 @@ class GitRepository(FileRepository):
                 return self.current_diff
             else:
                 return None
+
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        dump = super().model_dump(**kwargs)
+        dump.update(
+            {
+                "repo_path": self.repo_path,
+                "git_repo_url": self.repo_url,
+                "commit": self.initial_commit,
+            }
+        )
+        return dump

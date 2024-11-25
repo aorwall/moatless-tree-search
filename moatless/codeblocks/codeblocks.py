@@ -668,7 +668,7 @@ class CodeBlock:
         # Just to write out the first line number when there are no pre_lines on first block
         if (
             not self.pre_lines
-            and self.parent.type == CodeBlockType.MODULE
+            and self.parent and self.parent.type == CodeBlockType.MODULE
             and self.parent.children[0] == self
         ):
             contents += print_line(self.start_line)
@@ -701,12 +701,9 @@ class CodeBlock:
     ):
         contents = ""
         show_new_span_id = (
-                show_span_id
-                and self.belongs_to_span
-                and (
-                        not current_span_id
-                        or current_span_id != self.belongs_to_span.span_id
-                )
+            show_span_id
+            and self.belongs_to_span
+            and (not current_span_id or current_span_id != self.belongs_to_span.span_id)
         )
         contents += self._to_prompt_string(
             show_span_id=show_new_span_id, show_line_numbers=show_line_numbers
@@ -737,7 +734,6 @@ class CodeBlock:
                     ).to_string()
 
                 has_outcommented_code = False
-
 
                 if child.belongs_to_span:
                     current_span_id = child.belongs_to_span.span_id
@@ -1178,11 +1174,14 @@ class CodeBlock:
         return None
 
     def find_blocks_by_line_numbers(
-        self, start_line: int, end_line: int, include_parents: bool = False
+        self,
+        start_line: int,
+        end_line: int | None = None,
+        include_parents: bool = False,
     ) -> List["CodeBlock"]:
         blocks = []
         block = self
-        while block.next and block.start_line <= end_line:
+        while block.next and (end_line is None or block.start_line <= end_line):
             if include_parents and block.has_lines(start_line, end_line):
                 blocks.append(block)
             elif block.start_line >= start_line:
@@ -1309,8 +1308,10 @@ class CodeBlock:
     def belongs_to_any_span(self, span_ids: set[str]):
         return self.belongs_to_span and self.belongs_to_span.span_id in span_ids
 
-    def has_lines(self, start_line: int, end_line: int):
+    def has_lines(self, start_line: int, end_line: int | None = None):
         # Returns True if any part of the block is within the provided line range
+        if end_line is None:
+            return self.end_line >= start_line
         return not (self.end_line < start_line or self.start_line > end_line)
 
     def is_within_lines(self, start_line: int, end_line: int):

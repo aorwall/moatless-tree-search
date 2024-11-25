@@ -144,3 +144,29 @@ def test_matching_files_exact_filename(temp_repo):
     assert set(temp_repo.matching_files("**/helpers.py")) == {"src/utils/helpers.py"}
     # Should not match test_helpers.py
     assert "tests/unit/test_helpers.py" not in temp_repo.matching_files("*/helpers.py")
+
+
+def test_find_exact_matches(temp_repo):
+    # Create a test file with a function definition
+    test_file = Path(temp_repo.repo_path) / "tests" / "test_functions.py"
+    test_file.parent.mkdir(exist_ok=True)
+    test_file.write_text("""
+def some_other_function():
+    pass
+
+def test_partitions():
+    pass
+
+def another_function():
+    pass
+""")
+
+    # Test searching in a specific file
+    matches = temp_repo.find_exact_matches("def test_partitions():", "tests/test_functions.py")
+    assert len(matches) == 1
+    assert matches[0] == ("tests/test_functions.py", 5)
+
+    # Test searching in a directory
+    matches = temp_repo.find_exact_matches("def test_partitions():", "tests/")
+    assert len(matches) == 1
+    assert matches[0] == ("tests/test_functions.py", 5)

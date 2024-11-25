@@ -1,19 +1,17 @@
-import os
 import collections
-from typing import List, Callable, Tuple
+from typing import List
+import collections
 import json
+import logging
+from typing import List
+
+from litellm import token_counter
+from pydantic import Field, BaseModel, PrivateAttr
 from tqdm import tqdm
 
-from instructor import OpenAISchema
-from litellm import token_counter
-
+from moatless.completion.completion import CompletionModel
+from moatless.completion.model import Message, StructuredOutput
 from moatless.utils.misc import save_to_json
-from moatless.completion.completion import CompletionModel, LLMResponseFormat
-from moatless.completion.model import Completion, Message, UserMessage
-
-from pydantic import Field, BaseModel, PrivateAttr
-
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +27,7 @@ VALUE_OUTPUT_FORMAT = """OUTPUT FORMAT:
 <Reward>: integer reward (range: -100 to 100)."""
 
 
-class ValueFunctionDebateConclusion(OpenAISchema):
+class ValueFunctionDebateConclusion(StructuredOutput):
     explanation: str = Field(
         description="2-3 sentences explaining the the reasoning in your decision, alluding to the *common mistakes* where appropriate."
     )
@@ -37,7 +35,6 @@ class ValueFunctionDebateConclusion(OpenAISchema):
 
 
 class MultiAgentDebate(BaseModel):
-
     completion: CompletionModel = Field(
         description="The completion model used to generate responses."
     )
@@ -46,9 +43,7 @@ class MultiAgentDebate(BaseModel):
         5, description="The number of agents participating in the debate."
     )
 
-    n_rounds: int = Field(
-        3, description="The number of rounds in the debate."
-    )
+    n_rounds: int = Field(3, description="The number of rounds in the debate.")
 
     include_conclusion: bool = Field(
         True, description="Whether to include a conclusion in the debate."
@@ -60,7 +55,7 @@ class MultiAgentDebate(BaseModel):
         self,
         messages: List[Message],
         system_prompt: str,
-        output_format: type[OpenAISchema],
+        output_format: type[StructuredOutput],
     ):
         if not messages:
             raise ValueError("Messages list cannot be empty.")

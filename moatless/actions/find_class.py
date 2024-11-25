@@ -3,9 +3,8 @@ from typing import List, Type, ClassVar
 
 from pydantic import Field, model_validator
 
-from moatless.actions.model import ActionArguments, FewShotExample
+from moatless.actions.model import ActionArguments, FewShotExample, Observation
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
-from moatless.index import CodeIndex
 from moatless.index.types import SearchCodeResponse
 
 logger = logging.getLogger(__name__)
@@ -19,7 +18,7 @@ class FindClassArgs(SearchBaseArgs):
     - Locating test classes: class_name="TestUserAuthentication"
     - Finding base classes: class_name="BaseController"
     - Finding classes in specific modules: class_name="Config", file_pattern="src/config/*.py"
-"""
+    """
 
     class_name: str = Field(
         ..., description="Specific class name to include in the search."
@@ -33,6 +32,7 @@ class FindClassArgs(SearchBaseArgs):
 
     class Config:
         title = "FindClass"
+
 
 class FindClass(SearchBaseAction):
     args_schema: ClassVar[Type[ActionArguments]] = FindClassArgs
@@ -53,8 +53,8 @@ class FindClass(SearchBaseAction):
 
     def _select_span_instructions(self, search_result: SearchCodeResponse) -> str:
         return (
-            f"The class is too large. You must add the relevant functions to context to be able to use them. "
-            f"Use the function RequestMoreContext and specify the SpanIDs of the relevant functions to add them to context.\n"
+            f"Here's the class structure."
+            f"Use the function ViewCode and specify the SpanIDs of the relevant functions to view them.\n"
         )
 
     def _search_for_alternative_suggestion(
@@ -81,16 +81,15 @@ class FindClass(SearchBaseAction):
                 user_input="I need to see the implementation of the DatabaseManager class to understand how it handles transactions",
                 action=FindClassArgs(
                     scratch_pad="To examine how the DatabaseManager class handles transactions, we need to locate its implementation in the codebase.",
-                    class_name="DatabaseManager"
-                )
+                    class_name="DatabaseManager",
+                ),
             ),
             FewShotExample.create(
                 user_input="Show me the UserAuthentication class in the auth module",
                 action=FindClassArgs(
                     scratch_pad="Looking for the UserAuthentication class specifically in the authentication module.",
                     class_name="UserAuthentication",
-                    file_pattern="auth/*.py"
-                )
-            )
+                    file_pattern="auth/*.py",
+                ),
+            ),
         ]
-

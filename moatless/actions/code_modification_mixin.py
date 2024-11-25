@@ -8,6 +8,7 @@ from moatless.actions.model import Observation
 from moatless.actions.run_tests import RunTests, RunTestsArgs
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
+from moatless.index.code_index import is_test
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 
@@ -30,15 +31,16 @@ class CodeModificationMixin:
             file_path = file_path[1:]
         return file_path
 
-    def validate_file_access(self, file_path: str, file_context: FileContext, allow_missing: bool = False) -> Tuple[Optional[Path], Optional[Observation]]:
+    def validate_file_access(
+        self, file_path: str, file_context: FileContext, allow_missing: bool = False
+    ) -> Tuple[Optional[Path], Optional[Observation]]:
         """
         Validate file access and return either a valid Path object or an error Observation.
-        
+
         Args:
             file_path: The path to validate
             file_context: The file context
             allow_missing: Whether to allow missing files (for file creation)
-            
         Returns:
             Tuple of (Path object if valid, Error observation if invalid)
         """
@@ -66,42 +68,30 @@ class CodeModificationMixin:
 
         return path, None
 
-    def run_tests_and_update_observation(
+    def run_tests(
         self,
-        observation: Observation,
         file_path: str,
-        scratch_pad: str,
-        file_context: FileContext
-    ) -> Observation:
-        """Run tests and update the observation with test results"""
-        if not observation.properties or not observation.properties.get("diff"):
-            return observation
+        file_context: FileContext,
+    ):
+        if file_context.file_exists(file_path) and is_test(file_path):
+            file_context.add_test_file(file_path)
+        elif self._code_index:
+            # If the file is not a test file, find test files that might be related to the file
+            search_results = self._code_index.find_test_files(
+                file_path, query=file_path, max_results=2, max_spans=2
+            )
 
-        if not self._runtime:
-            return observation
+            for search_result in search_results:
+                 file_context.add_test_file(search_result.file_path)
+        else:
+            logger.warning(f"No code index cannot find test files for {file_path}")
+            return
 
-        run_tests = RunTests(
-            repository=self._repository,
-            runtime=self._runtime,
-            code_index=self._code_index
-        )
-        
-        test_observation = run_tests.execute(
-            RunTestsArgs(
-                scratch_pad=scratch_pad,
-                test_files=[file_path],
-            ),
-            file_context,
-        )
+        file_context.run_tests()
 
-        observation.properties.update(test_observation.properties)
-        observation.message += "\n\n" + test_observation.message
-
-        return observation
 
     def format_snippet_with_lines(self, snippet: str, start_line: int) -> str:
         """Format a code snippet with line numbers"""
         return "\n".join(
-            f"{i + start_line:6}\t{line}"
-            for i, line in enumerate(snippet.split("\n"))
-        ) 
+            f"{i + start_line:6}\t{line}" for i, line in enumerate(snippet.split("\n"))
+        )

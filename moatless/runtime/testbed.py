@@ -5,16 +5,17 @@ import re
 from datetime import datetime
 from typing import List
 
-from moatless.runtime.runtime import RuntimeEnvironment
-
-from moatless.file_context import RankedFileSpan, FileContext
+from moatless.exceptions import RuntimeError
+from moatless.index.code_index import is_test
 from moatless.repository import GitRepository
 from moatless.repository.repository import Repository
+from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.runtime.runtime import TestResult, TestStatus
+from moatless.schema import RankedFileSpan
 from testbeds.schema import EvaluationResult, TraceItem
 from testbeds.sdk import TestbedSDK
 from testbeds.sdk.exceptions import TestbedError
-from moatless.exceptions import RuntimeError
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,7 +27,8 @@ class TestbedEnvironment(RuntimeEnvironment):
         instance: dict | None = None,
         dataset_name="princeton-nlp/SWE-bench_Lite",
         log_dir: str | None = None,
-        enable_cache: bool = False
+        enable_cache: bool = False,
+        run_id: str = "default",
     ):
         self.testbed_sdk = testbed_sdk or TestbedSDK(enable_cache=enable_cache)
         self.repository = repository
@@ -35,6 +37,7 @@ class TestbedEnvironment(RuntimeEnvironment):
         self.tests_to_ignore = []
         self.log_dir = log_dir
         self._test_cache = {} if enable_cache else None
+        self.run_id = run_id
 
     @classmethod
     def from_instance(cls, instance: dict, repository: GitRepository, **kwargs):
@@ -42,7 +45,9 @@ class TestbedEnvironment(RuntimeEnvironment):
             testbed_sdk=TestbedSDK(), repository=repository, instance=instance, **kwargs
         )
 
-    def _generate_cache_key(self, test_files: List[str] | None, patch: str | None) -> str:
+    def _generate_cache_key(
+        self, test_files: List[str] | None, patch: str | None = None
+    ) -> str:
         """Generate a unique cache key based on test files and patch content"""
         key_parts = []
         if test_files:
@@ -51,35 +56,38 @@ class TestbedEnvironment(RuntimeEnvironment):
             key_parts.append(patch)
         if not key_parts:
             key_parts.append("all_tests_no_patch")
-            
+
         combined = "|".join(key_parts)
         return hashlib.sha256(combined.encode()).hexdigest()
 
     def run_tests(
-        self, file_context: FileContext, test_files: List[str] | None = None
+        self, patch: str | None = None, test_files: List[str] | None = None
     ) -> List[TestResult]:
-        patch = file_context.generate_git_patch()
-
         if patch and not patch.endswith("\n"):
             patch += "\n"
 
         # Check cache if enabled
-        if self._test_cache is not None:
+        if self._test_cache is not None and patch:
             cache_key = self._generate_cache_key(test_files, patch)
             cached_results = self._test_cache.get(cache_key)
             if cached_results:
-                logger.info("Returning cached test results")
                 return cached_results
 
         log_content = "# Test Run\n\n"
         log_content += f"Files: {test_files}"
-        log_content += f"\n\n# Patch:\n```diff\n{patch}\n```"
+        if patch:
+            log_content += f"\n\n# Patch:\n```diff\n{patch}\n```"
 
         try:
             with self.testbed_sdk.create_client(
-                instance_id=self.instance["instance_id"], dataset_name=self.dataset_name
+                instance_id=self.instance["instance_id"],
+                dataset_name=self.dataset_name,
+                log_dir=self.log_dir,
+                #run_id=self.run_id,
             ) as testbed:
-                response = testbed.run_tests(test_files=test_files, patch=patch)
+                response = testbed.run_tests(
+                    test_files=test_files, patch=patch, timeout=600
+                )
 
                 if response.output:
                     log_content += f"\n\n## Log:\n{response.output}\n"
@@ -125,7 +133,16 @@ class TestbedEnvironment(RuntimeEnvironment):
 
             traceback = traceback.format_exc()
             log_content += f"\n\n# Traceback:\n{traceback}"
-            raise RuntimeError(f"Error running tests for instance {self.instance['instance_id']} and files {test_files}") from e  
+
+            if isinstance(e, TimeoutError):
+                logger.warning(
+                    f"Timeout running tests for instance {self.instance['instance_id']} and files {test_files}"
+                )
+                return []
+
+            raise RuntimeError(
+                f"Error running tests for instance {self.instance['instance_id']} and files {test_files}"
+            ) from e
         finally:
             if self.log_dir:
                 datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -231,9 +248,8 @@ class TestbedEnvironment(RuntimeEnvironment):
         return hashlib.sha256("\n".join(filtered_out_lines).encode()).hexdigest()
 
     def _map_test_results_to_issues(self, test_results: List) -> List[TestResult]:
-        logger.debug(f"Map {len(test_results)} test results.")
-
         file_cache = {}
+
         def get_cached_file(file_path: str):
             if file_path not in file_cache:
                 file_cache[file_path] = self.repository.get_file(file_path)
@@ -244,16 +260,19 @@ class TestbedEnvironment(RuntimeEnvironment):
 
         mapped_results = []
         for test_result in test_results:
+
             trace_items = test_result.stacktrace
 
             test_status = TestStatus(test_result.status)
 
             if test_status not in [TestStatus.ERROR, TestStatus.FAILED]:
-                mapped_results.append(TestResult(
-                    status=test_status,
-                    message=test_result.name,
-                    file_path=test_result.file_path,
-                ))
+                mapped_results.append(
+                    TestResult(
+                        status=test_status,
+                        message=test_result.name,
+                        file_path=test_result.file_path,
+                    )
+                )
                 continue
 
             # reverse to start from root cause method on ERROR
@@ -269,7 +288,7 @@ class TestbedEnvironment(RuntimeEnvironment):
                 last_line = [
                     line
                     for line in test_result.failure_output.split("\n")
-                    if line.strip()
+                    if line.strip() and not line.startswith("_____")
                 ][-1]
                 if any(error in last_line for error in ignored_errors):
                     logger.info(
@@ -278,11 +297,13 @@ class TestbedEnvironment(RuntimeEnvironment):
                     continue
 
             if not test_result.failure_output:
-                logger.debug(
+                logger.info(
                     f"Skipping test {test_result.method} in {test_result.file_path} with no failure output"
                 )
                 test_output = None
             else:
+                # Add log to see failure output
+                logger.info(f"Test failure output for {test_result.file_path}: {test_result.failure_output[:200]}...")
                 failure_sections = test_result.failure_output.split(
                     "_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _"
                 )
@@ -300,7 +321,7 @@ class TestbedEnvironment(RuntimeEnvironment):
                     ignored_tests += 1
                     test_output = None
                 else:
-                    # If the test has more than 50 lines justp ick the last 50
+                    # If the test has more than 50 lines just pick the last 50
                     if len(test_result.failure_output.split("\n")) > 50:
                         test_output = "\n".join(
                             test_result.failure_output.split("\n")[-50:]
@@ -309,29 +330,6 @@ class TestbedEnvironment(RuntimeEnvironment):
                         test_output = test_result.failure_output
 
             relevant_files = self._relevant_files_from_trace(trace_items)
-            if not test_result.file_path or not test_result.method:
-                # Use the file with the root cause for the error if no file path or method is set
-                if (
-                    test_status in [TestStatus.ERROR, TestStatus.FAILED]
-                    and relevant_files
-                ):
-                    test_result.file_path = relevant_files[0].file_path
-                    test_result.method = relevant_files[0].span_id
-                    logger.info(
-                        f'No filepath found on test "{test_result.name}". Using file path {test_result.file_path} and {test_result.method} from trace for test {test_result.name}'
-                    )
-                elif (
-                    test_status in [TestStatus.ERROR, TestStatus.FAILED]
-                    and not test_result.file_path
-                ):
-                    logger.warning(
-                        f"Could not find file path and/or method for test {test_result}"
-                    )
-                elif (
-                    test_status in [TestStatus.ERROR, TestStatus.FAILED]
-                    and not test_result.method
-                ):
-                    logger.info(f"Could not find method for test {test_result}")
 
             if test_result.method:
                 method = test_result.method
@@ -343,12 +341,17 @@ class TestbedEnvironment(RuntimeEnvironment):
             file = None
             if test_result.file_path:
                 file = get_cached_file(test_result.file_path)
-                if not file and trace_items:
-                    for item in trace_items:
-                        file = get_cached_file(item.file_path)
-                        if file:
-                            method = item.method
-                            break
+
+            if not file:
+                mapped_results.append(
+                    TestResult(
+                        status=test_status,
+                        message=test_output,
+                        file_path=test_result.file_path,
+                        relevant_files=relevant_files,
+                    )
+                )
+                continue
 
             if file and file.module and method:
                 block = None
@@ -402,25 +405,29 @@ class TestbedEnvironment(RuntimeEnvironment):
 
                 if hashed_section:
                     root_causes.add(hashed_section)
+
             elif test_output:
-                logger.info(
-                    f'Could not find file {test_result.file_path} or method in test "{test_result.name}"'
-                )
                 mapped_results.append(
-                    TestResult(status=test_status, message=test_output)
+                    TestResult(
+                        status=test_status,
+                        message=test_output,
+                        file_path=test_result.file_path,
+                        relevant_files=relevant_files,
+                    )
                 )
             elif test_status in [TestStatus.ERROR, TestStatus.FAILED]:
                 logger.warning(
                     f'Could not find file {test_result.file_path} or method in test "{test_result.name}" and no output exists, will ignore'
                 )
             else:
-                logger.debug(
+                logger.info(
                     f"Skipping test {test_result.name} with status {test_status}"
                 )
 
         if ignored_tests:
             logger.info(f"Ignored {ignored_tests} tests with redundant root cause")
 
+        logger.info(f"Finished mapping {len(test_results)} results to {len(mapped_results)} issues")
         return mapped_results
 
     def clear_cache(self):

@@ -2,7 +2,7 @@ from typing import Optional, List, Type, ClassVar
 
 from pydantic import Field, model_validator
 
-from moatless.actions.model import ActionArguments, FewShotExample
+from moatless.actions.model import ActionArguments, FewShotExample, Observation
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs, logger
 from moatless.codeblocks import CodeBlockType
 from moatless.index.types import SearchCodeResponse, SearchCodeHit, SpanHit
@@ -11,20 +11,20 @@ from moatless.index.types import SearchCodeResponse, SearchCodeHit, SpanHit
 class FindFunctionArgs(SearchBaseArgs):
     """Use this when you know the exact name of a function or method you want to find.
 
-Perfect for:
-- Finding test cases: function_name="test_user_login"
-- Locating specific implementations: function_name="process_payment"
-- Finding all methods with a name: function_name="validate"
-- Finding a specific class method: function_name="save", class_name="UserRepository"
-"""
+    Perfect for:
+    - Finding test cases: function_name="test_user_login"
+    - Locating specific implementations: function_name="process_payment"
+    - Finding all methods with a name: function_name="validate"
+    - Finding a specific class method: function_name="save", class_name="UserRepository"
+    """
 
     function_name: str = Field(
-        ..., 
-        description="The exact name of the function or method you want to find. Must match the function definition in code."
+        ...,
+        description="The exact name of the function or method you want to find. Must match the function definition in code.",
     )
     class_name: Optional[str] = Field(
-        default=None, 
-        description="Optional class name if searching for a specific class method. Leave empty for standalone functions."
+        default=None,
+        description="Optional class name if searching for a specific class method. Leave empty for standalone functions.",
     )
 
     @model_validator(mode="after")
@@ -45,6 +45,7 @@ Perfect for:
         if self.file_pattern:
             prompt += f" in files matching the pattern: {self.file_pattern}"
         return prompt
+
 
 class FindFunction(SearchBaseAction):
     args_schema: ClassVar[Type[ActionArguments]] = FindFunctionArgs
@@ -118,16 +119,15 @@ class FindFunction(SearchBaseAction):
                 action=FindFunctionArgs(
                     scratch_pad="To review the logic of the calculate_interest function, we need to locate its implementation in the financial module.",
                     function_name="calculate_interest",
-                    file_pattern="financial/**/*.py"
-                )
+                    file_pattern="financial/**/*.py",
+                ),
             ),
             FewShotExample.create(
                 user_input="Show me the validate_token method in the JWTAuthenticator class",
                 action=FindFunctionArgs(
                     scratch_pad="Looking for the validate_token method specifically within the JWTAuthenticator class to examine the token validation logic.",
                     function_name="validate_token",
-                    class_name="JWTAuthenticator"
-                )
-            )
+                    class_name="JWTAuthenticator",
+                ),
+            ),
         ]
-

@@ -1,18 +1,21 @@
+from typing import List
+
 from moatless.actions.code_change import RequestCodeChange
+from moatless.actions.model import ActionArguments
 from moatless.actions.run_tests import RunTests
+from moatless.feedback.feedback import FeedbackGenerator
 from moatless.node import Node
 from moatless.feedback.feedback import FeedbackGenerator
 from typing import List, Any
 
-import logging
-logger = logging.getLogger(__name__)
 
-
-# class FeedbackGenerator(BaseModel):
-#     def generate_feedback(self, node: Node) -> str | None:
-#         if node.reward:
-#             if node.reward.feedback:
-#                 return self._create_message_feedback_llmselector(node)
+class RewardFeedbackGenerator(FeedbackGenerator):
+    def generate_feedback(
+        self, node: Node, actions: List[ActionArguments] | None = None
+    ) -> str | None:
+        visited_children = [child for child in node.children if child.reward]
+        if not visited_children:
+            return None
 
 #         # else:
 

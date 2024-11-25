@@ -4,9 +4,14 @@ import pkgutil
 from abc import ABC
 from typing import List, Type, Tuple, Any, Dict, Optional, ClassVar
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict
 
-from moatless.actions.model import ActionArguments, Observation, RewardScaleEntry, FewShotExample
+from moatless.actions.model import (
+    ActionArguments,
+    Observation,
+    RewardScaleEntry,
+    FewShotExample,
+)
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.repository import Repository
@@ -139,37 +144,12 @@ At this stage, the agent is still working on the solution. Your task is twofold:
 """
 
     @classmethod
-    def from_dict(
-        cls,
-        obj: dict,
-        repository: Repository = None,
-        runtime: Any = None,
-        code_index: CodeIndex = None,
-    ) -> "Action":
-        obj = obj.copy()
-        obj.pop("args_schema", None)
-        action_class_path = obj.pop("action_class", None)
-        if action_class_path:
-            module_name, class_name = action_class_path.rsplit(".", 1)
-            module = importlib.import_module(module_name)
-            action_class = getattr(module, class_name)
-
-            if repository and hasattr(action_class, "_repository"):
-                obj["repository"] = repository
-
-            if code_index and hasattr(action_class, "_code_index"):
-                obj["code_index"] = code_index
-
-            if runtime and hasattr(action_class, "_runtime"):
-                obj["runtime"] = runtime
-
-            return action_class.model_validate(obj)
-
-        raise ValueError(f"Unknown action: {obj}")
-
-    @classmethod
-    def model_validate(cls, obj: Any) -> "Action":
-        return cls(**obj)
+    def get_few_shot_examples(cls) -> List[FewShotExample]:
+        """
+        Returns a list of few-shot examples specific to this action.
+        Override this method in subclasses to provide custom examples.
+        """
+        return []
 
     @classmethod
     def get_action_by_args_class(
@@ -224,10 +204,34 @@ At this stage, the agent is still working on the solution. Your task is twofold:
                 if isinstance(obj, type) and issubclass(obj, Action) and obj != Action:
                     _actions[name] = obj
 
+
     @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        """
-        Returns a list of few-shot examples specific to this action.
-        Override this method in subclasses to provide custom examples.
-        """
-        return []
+    def model_validate(cls, obj: Any,
+                       repository: Repository = None,
+                       runtime: Any = None,
+                       code_index: CodeIndex = None) -> "Action":
+        if isinstance(obj, dict):
+            obj = obj.copy()
+            action_class_path = obj.pop("action_class", None)
+            
+            if action_class_path:
+                module_name, class_name = action_class_path.rsplit(".", 1)
+                module = importlib.import_module(module_name)
+                action_class = getattr(module, class_name)
+
+                if repository and hasattr(action_class, "_repository"):
+                    obj["repository"] = repository
+                if code_index and hasattr(action_class, "_code_index"):
+                    obj["code_index"] = code_index
+                if runtime and hasattr(action_class, "_runtime"):
+                    obj["runtime"] = runtime
+
+                return action_class(**obj)
+                
+        return cls(**obj)
+
+
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        dump = super().model_dump(**kwargs)
+        dump["action_class"] = f"{self.__class__.__module__}.{self.__class__.__name__}"
+        return dump
