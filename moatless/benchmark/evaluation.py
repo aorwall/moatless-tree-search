@@ -62,7 +62,7 @@ class ModelSettings(BaseModel):
         description="The API key for the model API.",
     )
     max_tokens: Optional[int] = Field(
-        2000,
+        4000,
         description="The maximum number of tokens to generate.",
     )
     response_format: Optional[LLMResponseFormat] = Field(
@@ -223,12 +223,14 @@ class Evaluation:
         num_workers: int = 1,
         use_testbed: bool = False,
         overwrite: bool = False,
+        use_edit_actions: bool = False,
     ):
         self.evaluations_dir = evaluations_dir
         self.num_workers = num_workers
         self.report_mode = report_mode
         self.dataset_name = dataset_name
         self.evaluation_name = evaluation_name
+        self.use_edit_actions = use_edit_actions
 
         self.log_handler = LogHandler(evaluations_dir)
         litellm.callbacks = [self.log_handler]
@@ -471,7 +473,7 @@ class Evaluation:
                         repository=repository,
                         code_index=code_index,
                         runtime=runtime,
-                        use_edit_actions=False
+                        use_edit_actions=self.use_edit_actions
                     )
 
                     if completion_model.model in ["claude-3-5-sonnet-20241022"]:
@@ -509,7 +511,7 @@ class Evaluation:
                         selector = BestFirstSelector()
                     else:
                         selector = SoftmaxSelector()
-
+                    
                     if self.settings.max_expansions > 1:
                         value_function = ValueFunction(
                             completion=self._create_completion_model(

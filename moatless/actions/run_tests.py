@@ -39,7 +39,7 @@ class RunTests(Action):
     args_schema = RunTestsArgs
 
     max_output_tokens: int = Field(
-        2000,
+        4000,
         description="The maximum number of tokens in the test result output message",
     )
 

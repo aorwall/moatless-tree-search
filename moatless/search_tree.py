@@ -276,6 +276,7 @@ class SearchTree(BaseModel):
 
         if self.feedback_generator:
             child_node.message = self.feedback_generator.generate_feedback(child_node, self.agent.actions)
+            child_node.feedback = child_node.message
 
         self.log(logger.info, f"Expanded Node{node.node_id} to new Node{child_node.node_id}")
         return child_node

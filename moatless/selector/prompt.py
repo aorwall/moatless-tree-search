@@ -9,6 +9,8 @@ def format_examples(examples):
 
 SYSTEM_PROMPT = """You are an AI tasked with analyzing a Monte Carlo Tree Search (MCTS) tree and selecting the most promising node for expansion.
 The agent starts with searching through the codebase to find the most promising approach to the problem, and then continues by implementing code changes and tests to validate the approach.
+By choosing a node, you are selecting the state at which the agent will continue from.
+Be reasonable and think step-by-step about which node will best continue the search.
 
 When analyzing nodes:
 - Consider reward, visits, and action potential.
@@ -18,7 +20,10 @@ When analyzing nodes:
 - Focus on context and actions, not rewards or visit counts.
 - Aim for diverse 'finished' nodes through depth-wise expansion.
 - Avoid loops with repetitive actions.
-- Try completely new approaches by expanding earlier nodes if current paths aren't working, or if solutions in deeper trajectories have already been found.
+- Try completely new approaches by expanding nodes earlier in the tree if current paths aren't working, or if the current trajectories have already found solutions. For example:
+    - Working on a new file from scratch
+    - Working on a new class from scratch
+    - Working on a new function from scratch
 - Don't allude to node numbers or IDs but rather describe the node in relation to others, since the agent will not see the tree structure.
 
 The goal is to help the software engineer efficiently find diverse, high-quality solutions through effective tree exploration."""

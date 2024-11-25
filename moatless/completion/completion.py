@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 class LLMResponseFormat(str, Enum):
     TOOLS = "tool_call"
     JSON = "json"
+    STRUCTURED = "structured_output"
 
 
 class CompletionModel(BaseModel):

@@ -28,6 +28,7 @@ def evaluate_search_and_code(
     overwrite: bool = False,
     min_resolved: Optional[int] = None,
     max_resolved: Optional[int] = None,
+    use_edit_actions: bool = False,
     **kwargs,
 ):
     temperature = tree_search_settings.model.temperature or kwargs.get("temp_bias", 0.2)
@@ -82,6 +83,7 @@ def evaluate_search_and_code(
         num_workers=num_workers,
         use_testbed=use_testbed,
         overwrite=overwrite,
+        use_edit_actions=use_edit_actions,
     )
 
     evaluation.run_evaluation(
@@ -195,6 +197,11 @@ def main():
         "--use_testbed", 
         action="store_true",
         help="Enable testbed for running tests"
+    )
+    features_group.add_argument(
+        "--use_edit_actions",
+        action="store_true",
+        help="Enable edit actions for the coding agent"
     )
 
     # Runtime settings
@@ -376,6 +383,7 @@ def main():
         overwrite=args.overwrite,
         min_resolved=args.min_resolved,
         max_resolved=args.max_resolved,
+        use_edit_actions=args.use_edit_actions,
     )
 
 if __name__ == "__main__":

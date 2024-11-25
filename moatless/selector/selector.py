@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field, PrivateAttr
 
 from moatless.selector.similarity import calculate_similarity
 from moatless.node import Node, generate_ascii_tree
+import re
+from moatless.utils.parse import parse_value, parse_explanation
 
 logger = logging.getLogger(__name__)
 
@@ -552,7 +554,7 @@ class NodeSelection(OpenAISchema):
 from instructor import OpenAISchema
 from pydantic import Field
 from moatless.node import Node, generate_ascii_tree
-from moatless.completion.model import Message
+from moatless.completion.model import Message, Completion
 from moatless.completion.completion import CompletionModel
 from moatless.selector.prompt import SYSTEM_PROMPT, ALL_EXAMPLES
 import json
@@ -637,7 +639,6 @@ class LLMSelector(Selector):
             include_action_details=False,
             include_file_context=False,
         )
-        print(ascii_tree_colored)
         
         # Construct the system message with context based on feedback requirement
         system_message = f"{SYSTEM_PROMPT}\n\n"
@@ -678,33 +679,53 @@ class LLMSelector(Selector):
                 system_prompt=system_message,
             )
             
+            # Convert Message objects to dictionaries and format the response
+            input_messages = [
+                {"role": "system", "content": system_message}
+            ] + [
+                {"role": msg.role, "content": msg.content} 
+                for msg in messages
+            ]
+            
+            # Add debug logging
+            print(f"Storing selector completion for Node{node.node_id}")
+            
+            node.completions["selector"] = Completion(
+                model=self.completion.model,
+                input=input_messages,
+                response={"content": response_text},
+                usage=completion.usage if hasattr(completion, 'usage') else None
+            )
+            
+            # Verify storage
+            print(f"Stored completion keys: {node.completions.keys()}")
+            
             try:
-                if require_feedback:
-                    # Extract node_id and feedback using simple string parsing
-                    node_id_start = response_text.find("<node_id>:") + len("<node_id>:")
-                    node_id_end = response_text.find("\n", node_id_start)
-                    node_id = int(response_text[node_id_start:node_id_end].strip())
+                # Parse node_id using the parse_value function
+                node_id = parse_value(response_text, keyword='node_id')
+                if node_id is None:
+                    # Fallback to looking for just a number if the parsing fails
+                    numbers = re.findall(r'\d+', response_text)
+                    if numbers:
+                        node_id = int(numbers[0])
+                    else:
+                        raise ValueError("Could not find a valid node ID in the response")
+
+                # Parse explanation using the parse_explanation function
+                explanation = parse_explanation(response_text)
+                if not explanation:
+                    # Fallback to everything after the node ID if no explicit explanation found
+                    explanation = response_text.split(str(node_id))[-1].strip()
+                
+                return NodeSelection(node_id=node_id, explanation=explanation)
                     
-                    feedback_start = response_text.find("<feedback>:") + len("<feedback>:")
-                    feedback = response_text[feedback_start:].strip()
-                else:
-                    # Parse just the node number, handling "Node" prefix if present
-                    response_text = response_text.strip()
-                    if response_text.startswith('Node'):
-                        response_text = response_text[4:]  # Remove "Node" prefix
-                    node_id = int(response_text.strip())
-                    feedback = ""
-                
-                return NodeSelection(node_id=node_id, explanation=feedback)
-                
             except Exception as e:
                 logger.error(f"Failed to parse LLM response: {e}\nResponse text: {response_text}")
                 raise e
-                
+                  
         except Exception as e:
             logger.error(f"Failed to get LLM completion: {e}")
             raise e
-            # return NodeSelection(node_id=0, explanation="Failed to get LLM completion")
     
     def select(self, nodes: List[Node]) -> Node:
         if len(nodes) == 1:

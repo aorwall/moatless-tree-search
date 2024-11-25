@@ -749,6 +749,14 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                     if selected_node.reward:
                         tabs.append("Reward")
 
+                    # Check both current node and parent for selector completion
+                    has_selector = (
+                        "selector" in selected_node.completions or 
+                        (selected_node.parent and "selector" in selected_node.parent.completions)
+                    )
+                    if has_selector:
+                        tabs.append("Selector")
+
                     if eval_result and str(selected_node.node_id) in eval_result.get(
                         "node_results", {}
                     ):
@@ -780,6 +788,21 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                                 st.code(selected_node.observation.message)
                                 if selected_node.observation.extra:
                                     st.code(selected_node.observation.extra)
+                        
+                            # Add reward and feedback display
+                            if selected_node.reward:
+                                if selected_node.reward.explanation:
+                                    st.subheader("Explanation")
+                                    st.write(selected_node.reward.explanation)
+                                if selected_node.reward.feedback:
+                                    st.subheader("Feedback")
+                                    st.write(selected_node.reward.feedback)
+                        
+                        # Add feedback display
+                        if selected_node.feedback:
+                            st.subheader("Feedback")
+                            st.write(selected_node.feedback)
+                        
                         if selected_node.message:
                             st.write(selected_node.message)
 
@@ -811,6 +834,34 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                             node_result = eval_result["node_results"].get(str(node_id))
                             if node_result:
                                 st.json(node_result)
+
+                    if "Selector" in tabs:
+                        with tab_contents[tabs.index("Selector")]:
+                            # Try to get completion from current node or parent
+                            selector_completion = (
+                                selected_node.completions.get("selector") or 
+                                (selected_node.parent.completions.get("selector") if selected_node.parent else None)
+                            )
+
+                            if selector_completion:
+                                st.subheader("LLM Selection Process")
+                                show_completion(selector_completion)
+
+                                # Show the selection result
+                                if selected_node.reward and selected_node.reward.feedback:
+                                    st.subheader("Selection Result")
+                                    st.markdown(f"""
+                                    **Selected Node:** Node{selected_node.node_id}  
+                                    **Explanation:** {selected_node.reward.feedback}
+                                    """)
+
+                                # Show which node made the selection
+                                completion_owner = (
+                                    "current node" 
+                                    if "selector" in selected_node.completions 
+                                    else "parent node"
+                                )
+                                st.info(f"This selection was made by the {completion_owner}.")
 
                     with tab_contents[tabs.index("JSON")]:
                         st.json(
