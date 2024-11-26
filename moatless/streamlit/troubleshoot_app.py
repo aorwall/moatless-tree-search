@@ -142,8 +142,8 @@ def create_node_row(node: Node, search_tree: SearchTree, instance: dict):
         
         # Input tab
         with action_tabs[0]:
-            if hasattr(node.action, "scratch_pad") and node.action.scratch_pad:
-                st.markdown(node.action.scratch_pad)
+            if hasattr(node.action, "thoughts") and node.action.thoughts:
+                st.markdown(node.action.thoughts)
         
             if hasattr(node.action, "old_str"):
                 st.markdown(f"**File path:** `{node.action.path}`")
@@ -156,7 +156,7 @@ def create_node_row(node: Node, search_tree: SearchTree, instance: dict):
                 st.markdown("**File text:**")
                 st.code(node.action.file_text)
             else:
-                st.json(node.action.model_dump(exclude={"scratch_pad"}, exclude_none=True))
+                st.json(node.action.model_dump(exclude={"thoughts"}, exclude_none=True))
 
         # Build tab
         with action_tabs[1]:

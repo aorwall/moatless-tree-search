@@ -49,7 +49,7 @@ class CodeSpan(BaseModel):
 class ViewCodeArgs(ActionArguments):
     """View the code in a file or a specific code span."""
 
-    scratch_pad: str = Field(..., description="Your thoughts on the code change.")
+    thoughts: str = Field(..., description="Your thoughts on the code change.")
     files: List[CodeSpan] = Field(
         ..., description="The code that should be provided in the file context."
     )
@@ -327,7 +327,7 @@ class ViewCode(Action):
             FewShotExample.create(
                 user_input="I need to see the implementation of the authenticate method in the AuthenticationService class",
                 action=ViewCodeArgs(
-                    scratch_pad="To understand the authentication implementation, we need to examine the authenticate method within the AuthenticationService class.",
+                    thoughts="To understand the authentication implementation, we need to examine the authenticate method within the AuthenticationService class.",
                     files=[
                         CodeSpan(
                             file_path="auth/service.py",
@@ -339,7 +339,7 @@ class ViewCode(Action):
             FewShotExample.create(
                 user_input="Show me lines 50-75 of the database configuration file",
                 action=ViewCodeArgs(
-                    scratch_pad="To examine the database configuration settings, we'll look at the specified line range in the config file.",
+                    thoughts="To examine the database configuration settings, we'll look at the specified line range in the config file.",
                     files=[
                         CodeSpan(
                             file_path="config/database.py", start_line=50, end_line=75

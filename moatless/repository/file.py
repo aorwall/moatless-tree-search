@@ -331,6 +331,9 @@ class FileRepository(Repository):
             if "**" in grep_pattern:
                 grep_pattern = grep_pattern.split("**")[0]
 
+            if not grep_pattern:
+                grep_pattern = "."
+
             cmd = ["grep", "-n", "-r", search_text, grep_pattern]
 
             logger.info(f"Executing grep command: {' '.join(cmd)}")

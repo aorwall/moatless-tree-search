@@ -55,10 +55,10 @@ def create_linear_table(nodes: List[Node], max_node_id: int, eval_result: Option
                     
                     # Test results summary
                     st.markdown("#### Test Results")
-                    st.markdown(nodes[-1].file_context.get_test_summary())
+                    test_summary = nodes[-1].file_context.get_test_summary()
+                    st.markdown(test_summary)
                     
                     # Test metrics visualization
-                    test_summary = nodes[-1].file_context.get_test_summary()
                     passed = int(test_summary.split('passed')[0].strip())
                     failed = int(test_summary.split('failed')[0].split('.')[-1].strip())
                     errors = int(test_summary.split('errors')[0].split('.')[-1].strip())
@@ -140,13 +140,39 @@ def create_linear_table(nodes: List[Node], max_node_id: int, eval_result: Option
                 if node.observation:
                     if node.observation.properties.get("fail_reason"):
                         color = "red"
-                    elif node.observation.properties.get("test_results"):
-                        test_results = node.observation.properties["test_results"]
-                        total_tests = len(test_results)
-                        failed_tests = sum(1 for t in test_results if t["status"] in ["FAILED", "ERROR"])
-                        color = "yellow" if failed_tests > 0 else "green"
-                        test_status = f"{failed_tests}/{total_tests} failed"
+                        fail_reason = node.observation.properties.get("fail_reason", "")
+                    else:
+                        fail_reason = ""
+                    
+                    if node.file_context and node.file_context.test_files:
+                        test_status = node.file_context.get_test_status()
+                        if test_status:
+                            if test_status == TestStatus.ERROR:
+                                color = "red"
+                                test_status = "⚠️ Error"
+                            elif test_status == TestStatus.FAILED:
+                                color = "yellow"
+                                test_status = "❌ Failed"
+                            else:
+                                color = "green"
+                                test_status = "✅ Passed"
                 
+                    diff_stats = ""
+                    if node.observation.properties.get("diff"):
+                        diff_lines = node.observation.properties["diff"].split('\n')
+                        additions = sum(1 for line in diff_lines if line.startswith('+') and not line.startswith('+++'))
+                        deletions = sum(1 for line in diff_lines if line.startswith('-') and not line.startswith('---'))
+                        if additions or deletions:
+                            diff_stats = f"+{additions}/-{deletions}"
+
+                # Combine test status and diff stats on same line if both exist
+                status_line = test_status
+                if diff_stats:
+                    status_line = f"{test_status} {diff_stats}" if test_status else diff_stats
+                if fail_reason:
+                    status_line = fail_reason
+                    color = "red"
+
                 # Create a styled div for the node
                 if node.observation:
                     fail_reason = node.observation.properties.get("fail_reason", "")
@@ -163,8 +189,7 @@ def create_linear_table(nodes: List[Node], max_node_id: int, eval_result: Option
                     ">
                         <div style="font-weight: bold;">Node {node.node_id}</div>
                         <div style="font-size: 0.8em;">{node.action.name if node.action else 'Start'}</div>
-                        <div style="font-size: 0.8em; color: {color};">{test_status}</div>
-                        <div style="font-size: 0.8em; color: red;">{fail_reason}</div>
+                        <div style="font-size: 0.8em;">{status_line}</div>
                     </div>
                     """, unsafe_allow_html=True)
         
@@ -235,8 +260,8 @@ def create_linear_table(nodes: List[Node], max_node_id: int, eval_result: Option
             
             # Input tab
             with action_tabs[0]:
-                if hasattr(node.action, "scratch_pad") and node.action.scratch_pad:
-                    st.markdown(node.action.scratch_pad)
+                if hasattr(node.action, "thoughts") and node.action.thoughts:
+                    st.markdown(node.action.thoughts)
             
                 if hasattr(node.action, "old_str"):
                     st.markdown(f"**File path:** `{node.action.path}`")
@@ -249,7 +274,7 @@ def create_linear_table(nodes: List[Node], max_node_id: int, eval_result: Option
                     st.markdown("**File text:**")
                     st.code(node.action.file_text)
                 else:
-                    st.json(node.action.model_dump(exclude={"scratch_pad"}, exclude_none=True))
+                    st.json(node.action.model_dump(exclude={"thoughts"}, exclude_none=True))
 
             # Build tab
             with action_tabs[1]:

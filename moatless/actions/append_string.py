@@ -41,7 +41,7 @@ class AppendStringArgs(ActionArguments):
             FewShotExample.create(
                 user_input="Add a new helper function at the end of the utilities file",
                 action=AppendStringArgs(
-                    scratch_pad="Adding a new utility function for date formatting",
+                    thoughts="Adding a new utility function for date formatting",
                     path="utils/formatters.py",
                     new_str="""
 

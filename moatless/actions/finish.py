@@ -16,7 +16,7 @@ from moatless.file_context import FileContext
 class FinishArgs(ActionArguments):
     """Indicate that the task is fully completed."""
 
-    scratch_pad: str = Field(
+    thoughts: str = Field(
         ..., description="Your reasoning about why the task is complete."
     )
     finish_reason: str = Field(..., description="Explanation of completion.")

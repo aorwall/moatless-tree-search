@@ -183,8 +183,8 @@ class Completion(BaseModel):
 
 class StructuredOutput(OpenAISchema):
 
-    @classproperty
-    def openai_schema(cls) -> dict[str, Any]:
+    @classmethod
+    def openai_schema(cls, thoughts_in_action: bool = False) -> dict[str, Any]:
         """
         Return the schema in the format of OpenAI's schema as jsonschema
 
@@ -199,6 +199,7 @@ class StructuredOutput(OpenAISchema):
         parameters = {
             k: v for k, v in schema.items() if k not in ("title", "description")
         }
+
         for param in docstring.params:
             if (name := param.arg_name) in parameters["properties"] and (
                 description := param.description
@@ -207,7 +208,7 @@ class StructuredOutput(OpenAISchema):
                     parameters["properties"][name]["description"] = description
 
         parameters["required"] = sorted(
-            k for k, v in parameters["properties"].items() if "default" not in v
+            k for k, v in parameters["properties"].items() if "default" not in v and (thoughts_in_action or k != "thoughts")
         )
 
         if "description" not in schema:
@@ -309,7 +310,7 @@ class StructuredOutput(OpenAISchema):
         Format the input arguments for LLM completion calls. Override in subclasses for custom formats.
         Default implementation returns JSON format.
         """
-        return json.dumps(self.model_dump(exclude={"scratch_pad"} if hasattr(self, "scratch_pad") else None), indent=2)
+        return json.dumps(self.model_dump(exclude={"thoughts"} if hasattr(self, "thoughts") else None), indent=2)
 
     @classmethod
     def format_schema_for_llm(cls) -> str:

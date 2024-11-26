@@ -50,7 +50,7 @@ class ViewDiff(Action):
             FewShotExample.create(
                 user_input="Show me the current changes in the workspace",
                 action=ViewDiffArgs(
-                    scratch_pad="Viewing current git diff of all changes"
+                    thoughts="Viewing current git diff of all changes"
                 ),
             )
         ] 

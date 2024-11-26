@@ -112,7 +112,7 @@ class ApplyCodeChangeAndTest(RequestCodeChange):
         )
         test_observation = run_tests.execute(
             RunTestsArgs(
-                scratch_pad=args.scratch_pad,
+                thoughts=args.thoughts,
                 test_files=[args.file_path],
             ),
             file_context,

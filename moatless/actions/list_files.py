@@ -83,14 +83,14 @@ class ListFiles(Action):
             FewShotExample.create(
                 user_input="Show me what files are in the tests directory",
                 action=ListFilesArgs(
-                    scratch_pad="I'll list the contents of the tests directory to see what test files are available.",
+                    thoughts="I'll list the contents of the tests directory to see what test files are available.",
                     directory="tests"
                 ),
             ),
             FewShotExample.create(
                 user_input="What files are in the root directory?",
                 action=ListFilesArgs(
-                    scratch_pad="I'll list the contents of the root directory to see the project structure.",
+                    thoughts="I'll list the contents of the root directory to see the project structure.",
                     directory=""
                 ),
             ),

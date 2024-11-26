@@ -316,7 +316,7 @@ def create_trajectory_stats(
                     + node.completions["build_action"].usage.cached_tokens,
                 )
 
-            current_action_dump = node.action.model_dump(exclude={"scratch_pad"})
+            current_action_dump = node.action.model_dump(exclude={"thoughts"})
             action_dumps.append(current_action_dump)
             
             if current_action_dump in action_dumps[:-1]:

@@ -1035,7 +1035,7 @@ Please provide instructions for the code change again."""
             FewShotExample.create(
                 user_input="Add error handling to the process_payment method in the PaymentProcessor class",
                 action=RequestCodeChangeArgs(
-                    scratch_pad="We need to add try-catch blocks to handle potential payment processing errors.",
+                    thoughts="We need to add try-catch blocks to handle potential payment processing errors.",
                     file_path="payment/processor.py",
                     instructions="Add error handling to catch and handle payment processing exceptions",
                     pseudo_code="""try:
@@ -1052,7 +1052,7 @@ except PaymentError as e:
             FewShotExample.create(
                 user_input="Add import for the logging module",
                 action=RequestCodeChangeArgs(
-                    scratch_pad="We need to add the logging import at the top of the file.",
+                    thoughts="We need to add the logging import at the top of the file.",
                     file_path="utils/helper.py",
                     instructions="Add import for the logging module",
                     pseudo_code="import logging",

@@ -8,9 +8,9 @@ from typing import Optional
 from moatless.benchmark.evaluation import (
     create_evaluation_name,
     Evaluation,
-    TreeSearchSettings,
-    ModelSettings,
+    TreeSearchSettings
 )
+from moatless.completion.completion import CompletionModel
 
 logger = logging.getLogger(__name__)
 
@@ -341,8 +341,7 @@ def main():
     logging.getLogger("moatless.benchmark.run_evaluation").setLevel(logging.INFO)
     # logging.getLogger("mcts_tree").setLevel(logging.INFO)
 
-    # Create ModelSettings instance
-    model_settings = ModelSettings(
+    model_settings = CompletionModel(
         model=args.model, temperature=args.temp, max_tokens=3000
     )
 
