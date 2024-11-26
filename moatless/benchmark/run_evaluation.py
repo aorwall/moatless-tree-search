@@ -82,8 +82,6 @@ def evaluate_search_and_code(
         max_file_context_tokens=16000,
         num_workers=num_workers,
         use_testbed=use_testbed,
-        overwrite=overwrite,
-        use_edit_actions=use_edit_actions,
     )
 
     evaluation.run_evaluation(
@@ -245,26 +243,13 @@ def main():
     instance_group.add_argument(
         "--min_resolved",
         type=int,
-        default=None,
-        help="Filter instances by minimum number of resolved solutions",
+        help="Minimum number of people who resolved the issue",
     )
     instance_group.add_argument(
         "--max_resolved",
         type=int,
         default=None,
         help="Filter instances by maximum number of resolved solutions",
-    )
-    instance_group.add_argument(
-        "--min_resolved",
-        type=int,
-        default=None,
-        help="Filter instances by minimum number of resolved solutions"
-    )
-    instance_group.add_argument(
-        "--max_resolved",
-        type=int,
-        default=None,
-        help="Filter instances by maximum number of resolved solutions"
     )
 
     # Other settings

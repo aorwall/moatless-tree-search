@@ -204,13 +204,13 @@ class Evaluation:
         num_workers: int = 1,
         use_testbed: bool = False,
         selector: Selector | None = None,
+        overwrite: bool = False,
     ):
         self.evaluations_dir = evaluations_dir
         self.num_workers = num_workers
         self.report_mode = report_mode
         self.dataset_name = dataset_name
         self.evaluation_name = evaluation_name
-        self.use_edit_actions = use_edit_actions
 
         self.log_handler = LogHandler(evaluations_dir)
         litellm.callbacks = [self.log_handler]
