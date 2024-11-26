@@ -2,7 +2,7 @@ import logging
 import math
 import random
 from dataclasses import dataclass
-from typing import List, Type, Literal, Dict, Any, Tuple
+from typing import List, Type, Literal, Dict, Any, Tuple, Optional
 
 import numpy as np
 from pydantic import BaseModel, Field, PrivateAttr

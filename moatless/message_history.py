@@ -12,7 +12,7 @@ from moatless.file_context import FileContext
 from moatless.node import Node
 from moatless.schema import MessageHistoryType
 from moatless.utils.tokenizer import count_tokens
-from testbeds.schema import TestStatus
+from moatless.runtime.runtime import TestStatus
 
 logger = logging.getLogger(__name__)
 

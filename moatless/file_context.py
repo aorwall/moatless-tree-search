@@ -24,7 +24,7 @@ from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment, TestResult
 from moatless.schema import FileWithSpans
 from moatless.utils.tokenizer import count_tokens
-from testbeds.schema import TestStatus
+from moatless.runtime.runtime import TestStatus
 
 logger = logging.getLogger(__name__)
 
@@ -1429,7 +1429,7 @@ class FileContext(BaseModel):
                 status_counts[result.status] += 1
             test_summary.append(f" - {test_file.file_path}: {len(test_file.test_results)} tests. {status_counts}")
         
-        logger.info(f"Test summary by file:\n{'\n'.join(test_summary)}")
+        logger.info(f"Test summary by file:{chr(10)}{chr(10).join(test_summary)}")
         
         return list(self._test_files.values())
 

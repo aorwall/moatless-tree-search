@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, PrivateAttr, Field
 
 from moatless.actions.action import Action, RewardScaleEntry
-from moatless.completion.completion import CompletionModel
+from moatless.completion.completion import CompletionModel, Message
 from moatless.completion.model import UserMessage, Completion
 from moatless.node import Node
 from moatless.schema import MessageHistoryType
