@@ -680,10 +680,18 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                             if selected_node.action:
                                 if selected_node.message:
                                     st.write(selected_node.message)
-                                    st.subheader(f"Action: {selected_node.action.name}")
-                                    st.json(
-                                        selected_node.action.model_dump(exclude={"scratch_pad"})
-                                    )
+
+                                if (
+                                    hasattr(selected_node.action, "thoughts")
+                                    and selected_node.action.thoughts
+                                ):
+                                    st.subheader("Thoughts")
+                                    st.write(selected_node.action.thoughts)
+
+                                st.subheader(f"Action: {selected_node.action.name}")
+                                st.json(
+                                    selected_node.action.model_dump(exclude={"thoughts"})
+                                )
 
                                 if selected_node.observation:
                                     st.subheader("Output")

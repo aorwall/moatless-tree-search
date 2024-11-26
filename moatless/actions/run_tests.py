@@ -24,7 +24,7 @@ class RunTestsArgs(ActionArguments):
     Run the specified unit tests on the codebase.
     """
 
-    scratch_pad: str = Field(..., description="Your reasoning on what tests to run.")
+    thoughts: str = Field(..., description="Your reasoning on what tests to run.")
     test_files: List[str] = Field(..., description="The list of test files to run")
 
     class Config:

@@ -44,14 +44,14 @@ def investigate_node(search_tree: SearchTree, node_id: int):
     # Action column with tabs
     if current_node.action:
         tab_names = ["Input", "Build"]
-        if hasattr(current_node.action, "scratch_pad") and current_node.action.scratch_pad:
+        if hasattr(current_node.action, "thoughts") and current_node.action.thoughts:
             tab_names.append("Thoughts")
         
         action_tabs = cols[1].tabs(tab_names)
         
         # Input tab
         with action_tabs[0]:
-            st.json(current_node.action.model_dump(exclude={"scratch_pad"}))
+            st.json(current_node.action.model_dump(exclude={"thoughts"}))
         
         # Build tab
         with action_tabs[1]:
@@ -63,7 +63,7 @@ def investigate_node(search_tree: SearchTree, node_id: int):
         # Thoughts tab
         if "Thoughts" in tab_names:
             with action_tabs[2]:
-                st.markdown(current_node.action.scratch_pad)
+                st.markdown(current_node.action.thoughts)
     
     # Observation column with tabs
     if current_node.observation:

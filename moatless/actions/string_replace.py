@@ -146,10 +146,12 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
         # Use find_exact_matches instead of inline code
         exact_matches = find_exact_matches(old_str, file_content)
 
+        logger.info(f"Found {len(exact_matches)} exact matches")
+
         # Filter matches to only those in context
         in_context_exact_matches = [
             match for match in exact_matches 
-            if context_file.lines_is_in_context(match['start_line'] - 1, match['end_line'] - 1)
+            if context_file.lines_is_in_context(match['start_line'], match['end_line'])
         ]
 
         if len(in_context_exact_matches) == 1:
@@ -160,8 +162,16 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
 
         if len(exact_matches) == 0:
             potential_matches = find_match_when_ignoring_indentation(old_str, file_content)
-            logger.info(potential_matches)
             
+            if len(potential_matches) > 0:
+                in_context_potential_matches = [
+                    match for match in potential_matches 
+                    if context_file.lines_is_in_context(match['start_line'], match['end_line'])
+                ]
+
+                if len(in_context_potential_matches) == 1:
+                    potential_matches = in_context_potential_matches
+
             # Handle auto-correction if enabled
             if (self.auto_correct_indentation and 
                 len(potential_matches) == 1 and 
@@ -200,7 +210,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                 # Filter potential matches to only those in context
                 in_context_potential_matches = [
                     match for match in potential_matches
-                    if context_file.lines_is_in_context(match['start_line'] - 1, match['end_line'] - 1)
+                    if context_file.lines_is_in_context(match['start_line'], match['end_line'])
                 ]
 
                 if len(potential_matches) > 0 and len(in_context_potential_matches) == 1:
@@ -235,7 +245,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                     )
                 elif len(potential_matches) > 1:
                     matches_info = "\n".join(
-                        f"- Lines {m['start_line']}-{m['end_line']} ({m['diff_reason']})"
+                        f"- Lines {m['start_line']}-{m['end_line']} ({m['diff_reason']}):\n```\n{m['content']}\n```"
                         for m in potential_matches
                     )
                     return Observation(
@@ -257,7 +267,10 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                     properties={"fail_reason": "string_not_found"},
                 )
         elif len(exact_matches) > 1:
-            matches_info = "\n".join(f"- Line {m['start_line']}" for m in exact_matches)
+            matches_info = "\n".join(
+                f"- Lines {m['start_line']}-{m['end_line']}:\n```\n{m['content']}\n```"
+                for m in exact_matches
+            )
             return Observation(
                 message=f"Multiple occurrences of string found:\n{matches_info}\nTry including more surrounding lines to create a unique match.",
                 properties={"flags": ["multiple_occurrences"]},
@@ -265,19 +278,34 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
             )
 
         match = exact_matches[0]
-        start_line = match["start_line"] - 1  # Convert to 0-based index
-        end_line = match["end_line"] - 1
-
-        # Check if the lines to be modified are in context
-        if not context_file.lines_is_in_context(start_line, end_line):
+        # Split content into lines for targeted replacement
+        content_lines = file_content.splitlines()
+        
+        if not context_file.lines_is_in_context(match["start_line"], match["end_line"]):
             properties["flags"] = ["lines_not_in_context"]
             logger.warning(
-                f"Lines {start_line + 1}-{end_line + 1} are not in context for {path}"
+                f"Lines {match['start_line']}-{match['end_line']} are not in context for {path}"
             )
+        
+        start_line = match["start_line"] - 1  # Convert to 0-based index
+        end_line = match["end_line"] 
 
-        new_file_content = file_content.replace(old_str, new_str)
+        # Replace only the specific lines we matched
+        old_content = "\n".join(content_lines[start_line:end_line])
+        if old_content != old_str:
+            logger.error(f"Content mismatch at lines {match['start_line']}-{match['end_line']}")
+            raise ValueError(f"Content mismatch at lines {match['start_line']}-{match['end_line']}")
+
+        # Create new content with targeted replacement
+        new_content_lines = (
+            content_lines[:start_line] +
+            new_str.splitlines() +
+            content_lines[end_line:]
+        )
+        new_file_content = "\n".join(new_content_lines)
+        
+        # Generate diff and apply changes
         diff = do_diff(str(path), file_content, new_file_content)
-
         context_file.apply_changes(new_file_content)
 
         # Create a snippet of the edited section
@@ -316,7 +344,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
             FewShotExample.create(
                 user_input="Update the error message in the validate_user method",
                 action=StringReplaceArgs(
-                    scratch_pad="Improving the error message to be more descriptive",
+                    thoughts="Improving the error message to be more descriptive",
                     path="auth/validator.py",
                     old_str="""    if not user.is_active:
         raise ValueError("Invalid user")
@@ -329,7 +357,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
             FewShotExample.create(
                 user_input="Update the user validation logic",
                 action=StringReplaceArgs(
-                    scratch_pad="Adding email validation and password strength check",
+                    thoughts="Adding email validation and password strength check",
                     path="auth/validator.py",
                     old_str="""def validate_user(username, password):
     if len(username) < 3:
@@ -350,7 +378,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
             FewShotExample.create(
                 user_input="Add a new helper function to validate passwords",
                 action=StringReplaceArgs(
-                    scratch_pad="Adding a new function to check password complexity",
+                    thoughts="Adding a new function to check password complexity",
                     path="auth/validator.py",
                     old_str="""def validate_user(username, password):
     if len(username) < 3 or not is_valid_email(username):
@@ -380,7 +408,7 @@ def validate_user(username, password):
             FewShotExample.create(
                 user_input="Remove the deprecated logging configuration",
                 action=StringReplaceArgs(
-                    scratch_pad="Removing old logging setup that's no longer needed",
+                    thoughts="Removing old logging setup that's no longer needed",
                     path="utils/logger.py",
                     old_str="""    # Legacy logging configuration
     if legacy_mode:

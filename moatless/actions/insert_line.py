@@ -156,7 +156,7 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
         )
         test_observation = run_tests.execute(
             RunTestsArgs(
-                scratch_pad=args.scratch_pad,
+                thoughts=args.thoughts,
                 test_files=[args.path],
             ),
             file_context,
@@ -173,7 +173,7 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
             FewShotExample.create(
                 user_input="Add a new import statement at the beginning of the file",
                 action=InsertLineArgs(
-                    scratch_pad="Adding import for datetime module",
+                    thoughts="Adding import for datetime module",
                     path="utils/time_helper.py",
                     insert_line=1,
                     new_str="from datetime import datetime, timezone",
@@ -182,7 +182,7 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
             FewShotExample.create(
                 user_input="Add a new method to the UserProfile class",
                 action=InsertLineArgs(
-                    scratch_pad="Adding a method to update user preferences",
+                    thoughts="Adding a method to update user preferences",
                     path="models/user.py",
                     insert_line=15,
                     new_str="""    def update_preferences(self, preferences: dict) -> None:
@@ -194,7 +194,7 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
             FewShotExample.create(
                 user_input="Add a new configuration option",
                 action=InsertLineArgs(
-                    scratch_pad="Adding Redis configuration settings",
+                    thoughts="Adding Redis configuration settings",
                     path="config/settings.py",
                     insert_line=25,
                     new_str="""REDIS_CONFIG = {

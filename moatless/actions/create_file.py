@@ -104,7 +104,7 @@ class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
             FewShotExample.create(
                 user_input="Create a new Python file for handling user authentication",
                 action=CreateFileArgs(
-                    scratch_pad="Creating a new authentication module with basic user authentication functionality",
+                    thoughts="Creating a new authentication module with basic user authentication functionality",
                     path="auth/user_auth.py",
                     file_text="""import logging
 from typing import Optional

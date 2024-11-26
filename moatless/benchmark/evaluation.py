@@ -280,15 +280,32 @@ class Evaluation:
         min_resolved: Optional[int] = None,
         max_resolved: Optional[int] = None,
     ):
-        file_path = os.path.join(
-            os.path.dirname(__file__), f"swebench_{split}_all_evaluations.json"
-        )
-        with open(file_path) as f:
-            instances = json.load(f)
+        if split == "combo":
+            # Load both lite and verified datasets
+            lite_path = os.path.join(os.path.dirname(__file__), "swebench_lite_all_evaluations.json")
+            verified_path = os.path.join(os.path.dirname(__file__), "swebench_verified_all_evaluations.json")
+            
+            with open(lite_path) as f:
+                lite_instances = json.load(f)
+            with open(verified_path) as f:
+                verified_instances = json.load(f)
+                
+            # Get instance IDs that exist in both datasets
+            lite_ids = {instance["instance_id"] for instance in lite_instances}
+            verified_ids = {instance["instance_id"] for instance in verified_instances}
+            common_ids = lite_ids.intersection(verified_ids)
+            
+            # Use instances from lite dataset that exist in both
+            instances = [instance for instance in lite_instances if instance["instance_id"] in common_ids]
+            logger.info(f"Found {len(instances)} instances that exist in both lite and verified datasets")
+        else:
+            file_path = os.path.join(os.path.dirname(__file__), f"swebench_{split}_all_evaluations.json")
+            with open(file_path) as f:
+                instances = json.load(f)
+            logger.info(f"Loaded {len(instances)} instances from {file_path}")
 
         random.shuffle(instances)
 
-        logger.info(f"Loaded {len(instances)} instances from {file_path}")
 
         if instance_ids:
             instances = [
@@ -389,10 +406,6 @@ class Evaluation:
         log_dir = os.path.join(instance_dir, "logs")
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
-
-        completion_log_dir = os.path.join(instance_dir, "completion_logs")
-        os.makedirs(completion_log_dir, exist_ok=True)
-        litellm.callbacks = [LogHandler(completion_log_dir)]
 
         eval_result_path = os.path.join(instance_dir, "eval_result.json")
         if os.path.exists(eval_result_path):

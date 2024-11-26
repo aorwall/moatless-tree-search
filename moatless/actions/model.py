@@ -18,7 +18,7 @@ _action_args: Dict[str, Type["ActionArguments"]] = {}
 
 
 class ActionArguments(StructuredOutput, ABC):
-    scratch_pad: str = Field(description="Your reasoning for the action.")
+    thoughts: str = Field(description="Your reasoning for the action.")
 
     class Config:
         title = "Action"
@@ -27,39 +27,47 @@ class ActionArguments(StructuredOutput, ABC):
     def name(cls):
         return cls.Config.title if hasattr(cls.Config, "title") else cls.__name__
 
-    def to_tool_call(self) -> ToolCall:
-        return ToolCall(name=self.name, input=self.model_dump())
+    def to_tool_call(self, thoughts_in_action: bool = False) -> ToolCall:
+        tool_input = self.model_dump()
+        if not thoughts_in_action and "thoughts" in tool_input:
+            del tool_input["thoughts"]
+
+        return ToolCall(name=self.name, input=tool_input)
 
     @classmethod
     def from_tool_call(cls, tool_args: dict[str, Any], tool_name: str | None = None):
         return cls(**tool_args)
 
     def equals(self, other: "ActionArguments") -> bool:
-        return self.model_dump(exclude={"scratch_pad"}) == other.model_dump(
-            exclude={"scratch_pad"}
+        return self.model_dump(exclude={"thoughts"}) == other.model_dump(
+            exclude={"thoughts"}
         )
 
     def to_prompt(self):
         prompt = f"Action: {self.name}\n"
         prompt += "\n".join(
-            [f"  {k}: {v}" for k, v in self.model_dump(exclude={"scratch_pad"}).items()]
+            [f"  {k}: {v}" for k, v in self.model_dump(exclude={"thoughts"}).items()]
         )
         return prompt
 
     @model_validator(mode="before")
     @classmethod
-    def fix_scratch_pad(cls, data: Any) -> Any:
-        """Allow scratch_pad to be null."""
+    def fix_thoughts(cls, data: Any) -> Any:
+        """Allow thoughts to be null."""
         if isinstance(data, dict):
-            if not data.get("scratch_pad"):
-                data["scratch_pad"] = ""
+            if "scratch_pad" in data:
+                data["thoughts"] = data["scratch_pad"]
+                del data["scratch_pad"]
+
+            if not data.get("thoughts"):
+                data["thoughts"] = ""
 
         return data
 
     @model_validator(mode="before")
     @classmethod
     def fix_null_fields(cls, data: Any) -> Any:
-        """Allow scratch_pad to be null."""
+        """Allow thoughts to be null."""
         if isinstance(data, dict):
             for key, value in data.items():
                 if value == "null":

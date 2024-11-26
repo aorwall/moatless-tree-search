@@ -1,4 +1,5 @@
 import importlib
+import json
 import logging
 from typing import List, Type, Dict, Any, Optional
 
@@ -12,7 +13,7 @@ from moatless.actions.model import (
     ActionError,
 )
 from moatless.agent.settings import AgentSettings
-from moatless.completion.completion import CompletionModel
+from moatless.completion.completion import CompletionModel, LLMResponseFormat
 from moatless.completion.model import AssistantMessage, UserMessage, Completion
 from moatless.exceptions import RuntimeError, CompletionRejectError
 from moatless.index.code_index import CodeIndex
@@ -24,8 +25,11 @@ logger = logging.getLogger(__name__)
 
 
 class ActionAgent(BaseModel):
-    system_prompt: Optional[str] = Field(
-        None, description="System prompt to be used for generating completions"
+    system_prompt: str = Field(
+        ..., description="System prompt to be used for generating completions"
+    )
+    use_few_shots: bool = Field(
+        True, description="Whether to use few-shot examples for generating completions"
     )
     actions: List[Action] = Field(default_factory=list)
     message_generator: MessageHistoryGenerator = Field(
@@ -71,12 +75,6 @@ class ActionAgent(BaseModel):
         self._action_map = {action.args_schema: action for action in actions}
 
     @model_validator(mode="after")
-    def verify_system_prompt(self) -> "ActionAgent":
-        if self.system_prompt == "":
-            self.system_prompt = None
-        return self
-
-    @model_validator(mode="after")
     def verify_actions(self) -> "ActionAgent":
         for action in self.actions:
             if not isinstance(action, Action):
@@ -96,12 +94,9 @@ class ActionAgent(BaseModel):
             logger.info(f"Node{node.node_id}: Resetting node")
             node.reset()
 
-        possible_actions = self.determine_possible_actions(node)
-        if not possible_actions:
-            raise RuntimeError(f"No possible actions for Node{node.node_id}")
-        node.possible_actions = [action.name for action in possible_actions]
-        system_prompt = self.generate_system_prompt(possible_actions)
-        action_args = [action.args_schema for action in possible_actions]
+        node.possible_actions = [action.name for action in self.actions]
+        system_prompt = self.generate_system_prompt()
+        action_args = [action.args_schema for action in self.actions]
 
         messages = self.message_generator.generate(node)
 
@@ -198,17 +193,71 @@ class ActionAgent(BaseModel):
 
         return action.execute(node.action, node.file_context)
 
-    def determine_possible_actions(self, node: Node) -> List[Action]:
-        """Determine which actions that the agent can take based on the current node state."""
-        actions = self.actions
-        logger.debug(
-            f"Possible actions for Node{node.node_id}: {[action.__class__.__name__ for action in actions]}"
-        )
-        return actions
 
-    def generate_system_prompt(self, possible_actions: List[Action]) -> str:
+    def generate_system_prompt(self) -> str:
         """Generate a system prompt for the agent."""
-        return self.system_prompt
+
+        system_prompt = self.system_prompt
+        if self.use_few_shots:
+            system_prompt += "\n\n" + self.generate_few_shots()
+
+        return system_prompt
+
+    def generate_few_shots(self) -> str:
+        few_shot_examples = []
+        for action in self.actions:
+            examples = action.get_few_shot_examples()
+            if examples:
+                few_shot_examples.extend(examples)
+
+        prompt = ""
+        if few_shot_examples:
+            prompt += "\n\n# Examples\nHere are some examples of how to use the available actions:\n\n"
+            for i, example in enumerate(few_shot_examples):
+                if self.completion.response_format == LLMResponseFormat.REACT:
+                    prompt += f"\n**Example {i + 1}**"
+                    action_data = example.action.model_dump()
+                    thoughts = action_data.pop("thoughts", "")
+
+                    # Special handling for StringReplace and CreateFile action
+                    if example.action.__class__.__name__ in ["StringReplaceArgs", "CreateFileArgs", "AppendStringArgs"]:
+                        prompt += f"\nTask: {example.user_input}"
+                        prompt += f"\nThought: {thoughts}\n"
+                        prompt += f"Action: {example.action.name}\n"
+
+                        if example.action.__class__.__name__ == "StringReplaceArgs":
+                            prompt += f"<path>{action_data['path']}</path>\n"
+                            prompt += f"<old_str>\n{action_data['old_str']}\n</old_str>\n"
+                            prompt += f"<new_str>\n{action_data['new_str']}\n</new_str>\n"
+                        elif example.action.__class__.__name__ == "AppendStringArgs":
+                            prompt += f"<path>{action_data['path']}</path>\n"
+                            prompt += f"<new_str>\n{action_data['new_str']}\n</new_str>\n"
+                        elif example.action.__class__.__name__ == "CreateFileArgs":
+                            prompt += f"<path>{action_data['path']}</path>\n"
+                            prompt += f"<file_text>\n{action_data['file_text']}\n</file_text>\n"
+                    else:
+                        # Original JSON format for other actions
+                        prompt += (
+                            f"\nTask: {example.user_input}"
+                            f"Thought: {thoughts}\n"
+                            f"Action: {example.action.name}\n"
+                            f"{json.dumps(action_data)}\n\n"
+                        )
+
+                elif self.completion.response_format == LLMResponseFormat.JSON:
+                    action_json = {
+                        "action": example.action.model_dump(),
+                        "action_type": example.action.name,
+                    }
+                    prompt += f"User: {example.user_input}\nAssistant:\n```json\n{json.dumps(action_json, indent=2)}\n```\n\n"
+
+                elif self.completion.response_format == LLMResponseFormat.TOOLS:
+                    tools_json = {"tool": example.action.name}
+                    tools_json.update(example.action.model_dump())
+
+                    prompt += f"User: {example.user_input}\nAssistant:{json.dumps(tools_json)}\n\n"
+
+        return prompt
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         dump = super().model_dump(**kwargs)

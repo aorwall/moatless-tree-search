@@ -64,6 +64,28 @@ class MessageHistoryGenerator(BaseModel):
 
         return generators[self.message_history_type](node, previous_nodes)
 
+    def _generate_message_history(self, node: "Node", previous_nodes: List["Node"]) -> List[Message]:
+        messages = [UserMessage(content=node.get_root().message)]
+
+        if len(previous_nodes) <= 1:
+            return messages
+
+        node_messages = self.get_node_messages(node)
+
+        for action, observation in node_messages:
+            thoughts = (
+                f"<thoughts>{action.thoughts}</thoughts>"
+                if hasattr(action, "thoughts")
+                else ""
+            )
+
+            messages.append(AssistantMessage(tool_call=action.to_tool_call(thoughts_in_action=True)))
+            messages.append(UserMessage(content=f"<observation>\n{observation}\n</observation>"))
+
+        tokens = count_tokens("".join([m.content for m in messages if m.content is not None]))
+        logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
+        return messages
+
     def _generate_react_history(self, node: "Node", previous_nodes: List["Node"]) -> List[Message]:
         messages = [UserMessage(content=node.get_root().message)]
         
@@ -76,8 +98,8 @@ class MessageHistoryGenerator(BaseModel):
         for action, observation in node_messages:
             # Add thought and action message
             thought = (
-                f"Thought: {action.scratch_pad}"
-                if hasattr(action, "scratch_pad")
+                f"Thought: {action.thoughts}"
+                if hasattr(action, "thoughts")
                 else ""
             )
             action_str = f"Action: {action.name}"
@@ -151,98 +173,6 @@ class MessageHistoryGenerator(BaseModel):
 
         return [UserMessage(content=content)]
 
-    def _generate_message_history(self, node: Node, previous_nodes: List[Node]) -> List[Message]:
-        messages: List[Message] = []
-        last_file_updates = {}
-
-        if self.include_file_context:
-            # Track when each file was last modified
-            for i, node in enumerate(previous_nodes):
-                if not node.parent:
-                    updated_files = set(
-                        [file.file_path for file in node.file_context.get_context_files()]
-                    )
-                else:
-                    updated_files = node.file_context.get_updated_files(
-                        node.parent.file_context
-                    )
-                    for file in updated_files:
-                        last_file_updates[file] = i
-
-        for i, previous_node in enumerate(previous_nodes):
-            if previous_node.message:
-                messages.append(UserMessage(content=previous_node.message))
-
-            if previous_node.action:
-                tool_call = previous_node.action.to_tool_call()
-                messages.append(AssistantMessage(tool_call=tool_call))
-
-                content = ""
-                if previous_node.observation:
-                    if self.include_file_context and previous_node.observation.summary:
-                        content += previous_node.observation.summary
-                    else:
-                        content += previous_node.observation.message
-
-                messages.append(UserMessage(content=content))
-
-            # Show file context for updated files
-            self._add_file_context_messages(previous_node, i, last_file_updates, messages)
-
-        if node.feedback:
-            messages.append(UserMessage(content=node.feedback))
-
-        return messages
-
-    def _add_file_context_messages(
-        self, 
-        previous_node: Node,
-        i: int, 
-        last_file_updates: Dict[str, int], 
-        messages: List[Message]
-    ):
-        if not previous_node.parent:
-            updated_files = set(
-                [file.file_path for file in previous_node.file_context.get_context_files()]
-            )
-        else:
-            updated_files = previous_node.file_context.get_updated_files(
-                previous_node.parent.file_context
-            )
-
-        files_to_show = set(
-            [f for f in updated_files if last_file_updates.get(f) == i]
-        )
-
-        for file_path in files_to_show:
-            context_file = previous_node.file_context.get_context_file(file_path)
-
-            if context_file.show_all_spans:
-                args = ViewCodeArgs(
-                    scratch_pad=f"Let's view the content in {file_path}",
-                    files=[CodeSpan(file_path=file_path)],
-                )
-            elif context_file.span_ids:
-                args = ViewCodeArgs(
-                    scratch_pad=f"Let's view the content in {file_path}",
-                    files=[CodeSpan(file_path=file_path, span_ids=context_file.span_ids)],
-                )
-            else:
-                continue
-
-            messages.append(AssistantMessage(tool_call=args.to_tool_call()))
-            messages.append(
-                UserMessage(
-                    content=context_file.to_prompt(
-                        show_span_ids=False,
-                        show_line_numbers=True,
-                        exclude_comments=False,
-                        show_outcommented_code=True,
-                        outcomment_code_comment="... rest of the code",
-                    )
-                )
-            )
-
     def get_node_messages(self, node: "Node") -> List[tuple[ActionArguments, str]]:
         """
         Creates a list of (action, observation) tuples from the node's trajectory.
@@ -267,7 +197,7 @@ class MessageHistoryGenerator(BaseModel):
         run_tests_args = None
         if node.file_context.has_patch():
             run_tests_args = RunTestsArgs(
-                scratch_pad=f"Run the tests to verify the changes.",
+                thoughts=f"Run the tests to verify the changes.",
                 test_files=list(node.file_context._test_files.keys())
             )
             
@@ -367,7 +297,7 @@ class MessageHistoryGenerator(BaseModel):
                         
                         if code_spans:
                             thought = f"Let's view the content in the updated files"
-                            args = ViewCodeArgs(files=code_spans, scratch_pad=thought)
+                            args = ViewCodeArgs(files=code_spans, thoughts=thought)
                             current_messages.append((args, "\n\n".join(observations)))
 
                     # Show ViewDiff on first edit
@@ -375,7 +305,7 @@ class MessageHistoryGenerator(BaseModel):
                         patch = node.file_context.generate_git_patch()
                         if patch:
                             view_diff_args = ViewDiffArgs(
-                                scratch_pad="Let's review the changes made to ensure we've properly implemented everything required for the task. I'll check the git diff to verify the modifications."
+                                thoughts="Let's review the changes made to ensure we've properly implemented everything required for the task. I'll check the git diff to verify the modifications."
                             )
                             diff_tokens = count_tokens(patch) + count_tokens(view_diff_args.model_dump_json())
                             if total_tokens + diff_tokens <= self.max_tokens:
@@ -390,7 +320,7 @@ class MessageHistoryGenerator(BaseModel):
                         current_test_status = node.file_context.get_test_status()
                         if last_test_status is None or current_test_status != last_test_status:
                             run_tests_args = RunTestsArgs(
-                                scratch_pad=f"Run the tests to verify the changes.",
+                                thoughts=f"Run the tests to verify the changes.",
                                 test_files=list(node.file_context._test_files.keys())
                             )
                             
