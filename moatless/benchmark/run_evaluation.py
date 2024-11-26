@@ -11,6 +11,8 @@ from moatless.benchmark.evaluation import (
     TreeSearchSettings
 )
 from moatless.completion.completion import CompletionModel
+from moatless.completion.completion import LLMResponseFormat
+from moatless.schema import MessageHistoryType
 
 logger = logging.getLogger(__name__)
 
@@ -44,14 +46,14 @@ def evaluate_search_and_code(
 
     # Expect models with prefix openai/ to be custom
     if tree_search_settings.model.model.startswith("openai/"):
-        tree_search_settings.model.base_url = os.getenv("CUSTOM_LLM_API_BASE")
-        tree_search_settings.model.api_key = os.getenv("CUSTOM_LLM_API_KEY")
+        tree_search_settings.model.model_base_url = os.getenv("CUSTOM_LLM_API_BASE")
+        tree_search_settings.model.model_api_key = os.getenv("CUSTOM_LLM_API_KEY")
 
     logger.info("Evaluation Parameters:")
     logger.info(f"Evalation dir: {evaluations_dir}")
     logger.info(f"Evaluation Name: {evaluation_name}")
     logger.info(f"Model: {tree_search_settings.model.model}")
-    logger.info(f"Model Base URL: {tree_search_settings.model.base_url}")
+    logger.info(f"Model Base URL: {tree_search_settings.model.model_base_url}")
     logger.info(f"Temperature: {temperature}")
     logger.info(f"Tree Search Settings:")
     logger.info(f"  Max Expansions: {tree_search_settings.max_expansions}")
@@ -130,6 +132,13 @@ def main():
     model_group = parser.add_argument_group("model settings")
     model_group.add_argument(
         "--temp", type=float, default=0.2, help="Temperature for model sampling"
+    )
+    model_group.add_argument(
+        "--format",
+        type=str,
+        choices=["tools", "json", "react"],
+        default="tools",
+        help="Response format for the model"
     )
 
     # Search settings
@@ -341,8 +350,23 @@ def main():
     logging.getLogger("moatless.benchmark.run_evaluation").setLevel(logging.INFO)
     # logging.getLogger("mcts_tree").setLevel(logging.INFO)
 
+    def get_response_format(format_str: str) -> LLMResponseFormat:
+        format_map = {
+            "tools": LLMResponseFormat.TOOLS,
+            "json": LLMResponseFormat.JSON,
+            "react": LLMResponseFormat.REACT
+        }
+        return format_map[format_str]
+
+    def get_message_history_type(format_str: str) -> MessageHistoryType:
+        # Only use REACT for react format, use MESSAGES for all others
+        return MessageHistoryType.REACT if format_str == "react" else MessageHistoryType.MESSAGES
+
     model_settings = CompletionModel(
-        model=args.model, temperature=args.temp, max_tokens=3000
+        model=args.model, 
+        temperature=args.temp, 
+        max_tokens=3000,
+        response_format=get_response_format(args.format)
     )
 
     tree_search_settings = TreeSearchSettings(
@@ -357,6 +381,7 @@ def main():
         debate=args.debate,
         best_first=True,
         model=model_settings,
+        agent_message_history_type=get_message_history_type(args.format)
     )
 
     evaluate_search_and_code(
