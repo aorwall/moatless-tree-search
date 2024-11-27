@@ -96,67 +96,43 @@ class CodingValueFunction(ValueFunction):
                     explanation="Search returned results and added new spans to the context",
                 ), None
 
-            test_results = node.observation.properties.get("test_results", [])
-            if test_results:
-                failure_count = sum(
-                    1 for result in test_results if result["status"] == "FAILED"
-                )
-                error_count = sum(
-                    1 for result in test_results if result["status"] == "ERROR"
-                )
-                total_tests = len(test_results)
-                passed_count = total_tests - failure_count - error_count
+            if node.file_context.was_edited():
+                passed_count, failure_count, error_count = node.file_context.get_test_counts()
 
                 # Get previous test results
-                previous_failure_count = None
-                previous_error_count = None
-                previous_reward = None
+                previous_failure_count = 0
+                previous_error_count = 0
+                previous_passed_count = 0
+                previous_reward = 0
                 parent_node = node.parent
-                if (
-                    parent_node
-                    and parent_node.observation
-                    and parent_node.observation.properties
-                    and parent_node.reward
-                    and parent_node.observation.properties.get("test_results") is not None
-                ):
-                    prev_test_results = parent_node.observation.properties.get(
-                        "test_results", []
-                    )
-                    previous_failure_count = sum(
-                        1
-                        for result in prev_test_results
-                        if result["status"] == "FAILED"
-                    )
-                    previous_error_count = sum(
-                        1 for result in prev_test_results if result["status"] == "ERROR"
-                    )
-                    previous_reward = parent_node.reward.value
+                if parent_node and parent_node.file_context:
+                    previous_passed_count, previous_failure_count, previous_error_count = parent_node.file_context.get_test_counts()
+                    if parent_node.reward:
+                        previous_reward = parent_node.reward.value
+                    previous_total_tests = previous_passed_count + previous_failure_count + previous_error_count
 
-                if previous_reward is None:
-                    # No previous test runs found
-                    if failure_count == 0 and error_count == 0:
-                        return Reward(
-                            value=100, explanation=f"All {passed_count} tests passing"
-                        ), None
+                # Compare with previous test results
+                total_tests = passed_count + failure_count + error_count
+                if total_tests == 0:
+                    return Reward(
+                        value=25, explanation="No tests run"
+                    ), None
+                elif failure_count == 0 and error_count == 0:
+                    return Reward(
+                        value=100, explanation=f"All {passed_count} tests passing"
+                    ), None
+                elif previous_total_tests == 0:
                     return Reward(
                         value=50,
                         explanation=f"First test run with {failure_count} failures and {error_count} errors",
                     ), None
-
-                # Compare with previous failures and errors
-                if (
-                    failure_count > previous_failure_count
-                    or error_count > previous_error_count
-                ):
+                elif failure_count > previous_failure_count or error_count > previous_error_count:
                     new_value = max(-100, previous_reward - 50)
                     return Reward(
                         value=new_value,
                         explanation=f"Test failures/errors increased: failures {previous_failure_count}->{failure_count}, errors {previous_error_count}->{error_count}",
                     ), None
-                elif (
-                    failure_count < previous_failure_count
-                    and error_count <= previous_error_count
-                ):
+                elif failure_count < previous_failure_count and error_count <= previous_error_count:
                     new_value = min(75, previous_reward + 25)
                     return Reward(
                         value=new_value,

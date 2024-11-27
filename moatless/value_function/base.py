@@ -7,6 +7,7 @@ from pydantic import BaseModel, PrivateAttr, Field
 from moatless.actions.action import Action, RewardScaleEntry
 from moatless.completion.completion import CompletionModel
 from moatless.completion.model import UserMessage, Completion
+from moatless.message_history import MessageHistoryGenerator
 from moatless.node import Node
 from moatless.schema import MessageHistoryType
 from moatless.value_function.model import Reward
@@ -15,15 +16,17 @@ logger = logging.getLogger(__name__)
 
 
 class ValueFunction(BaseModel):
-    _completion: CompletionModel = PrivateAttr()
+    completion_model: CompletionModel = Field(
+        ..., description="Completion model to be used for generating completions"
+    )
+    message_generator: MessageHistoryGenerator = Field(
+        default_factory=lambda: MessageHistoryGenerator(),
+        description="Generator for message history"
+    )
     correction_award: Optional[int] = Field(
         0,
         description="The reward value to automatically assign when the agent expects a correction.",
     )
-
-    def __init__(self, completion: CompletionModel, **data):
-        super().__init__(**data)
-        self._completion = completion
 
     def get_reward(self, node: Node) -> Tuple[Reward, Optional[Completion]]:
         if node.observation.expect_correction and self.correction_award is not None:
@@ -42,9 +45,8 @@ class ValueFunction(BaseModel):
             logger.info(f"Error action, assigning reward -100")
             return Reward(value=-100, explanation="Error action"), None
 
-        messages = node.generate_message_history(
-            message_history_type=MessageHistoryType.SUMMARY
-        )
+
+        messages = self.message_generator.generate(node)
 
         last_message = ""
 
@@ -83,7 +85,7 @@ class ValueFunction(BaseModel):
 
         system_prompt = self._create_system_prompt(node)
 
-        return self._completion.create_completion(
+        return self.completion_model.create_completion(
             messages=messages, system_prompt=system_prompt, response_model=Reward
         )
 
@@ -160,7 +162,7 @@ class ValueFunction(BaseModel):
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         dump = super().model_dump(**kwargs)
-        dump["completion"] = self._completion.model_dump(**kwargs)
+        dump["completion_model"] = self.completion_model.model_dump(**kwargs)
         dump["value_function_class"] = (
             f"{self.__class__.__module__}.{self.__class__.__name__}"
         )
@@ -170,13 +172,13 @@ class ValueFunction(BaseModel):
     def model_validate(cls, obj: Any) -> "ValueFunction":
         if isinstance(obj, dict):
             obj = obj.copy()
-            completion_data = obj.pop("completion", None)
+            completion_data = obj.pop("completion_model", None)
             value_function_class_path = obj.pop("value_function_class", None)
 
             if completion_data:
-                obj["completion"] = CompletionModel.model_validate(completion_data)
+                obj["completion_model"] = CompletionModel.model_validate(completion_data)
             else:
-                obj["completion"] = None
+                obj["completion_model"] = None
 
             if value_function_class_path:
                 module_name, class_name = value_function_class_path.rsplit(".", 1)
@@ -189,11 +191,3 @@ class ValueFunction(BaseModel):
             return instance
 
         return super().model_validate(obj)
-
-    @property
-    def completion(self) -> CompletionModel:
-        return self._completion
-
-    @completion.setter
-    def completion(self, value: CompletionModel):
-        self._completion = value

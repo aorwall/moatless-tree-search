@@ -107,7 +107,6 @@ class TrajectoryStats(BaseModel):
     failed_actions: int = 0
     expect_corrections: int = 0
     max_repeated_actions: int = 0
-    fail_reasons: list[str] = []
     flags: list[str] = []
 
     missing_test_files: int = 0
@@ -265,8 +264,8 @@ def create_trajectory_stats(
                             failed_test["file_path"]
                             and not failed_test["file_path"] in file_paths_in_context
                         ):
-                            if not "test_not_in_context" in result.fail_reasons:
-                                result.fail_reasons.append("test_not_in_context")
+                            if not "test_not_in_context" in result.flags:
+                                result.flags.append("test_not_in_context")
 
                     failed_test_count = len(failed_tests)
 
@@ -292,8 +291,9 @@ def create_trajectory_stats(
 
                 if "fail_reason" in node.observation.properties:
                     result.failed_actions += 1
-                    if node.observation.properties["fail_reason"] not in result.fail_reasons:
-                        result.fail_reasons.append(node.observation.properties["fail_reason"])
+                    fail_reason = node.observation.properties["fail_reason"]
+                    if fail_reason not in result.flags:
+                        result.flags.append(fail_reason)
 
             if node.observation and node.observation.properties.get("diff"):
                 if hasattr(node.action, "file_path"):
@@ -681,8 +681,7 @@ def to_dataframe(
             if k.endswith("_spans_details"):
                 items.append((new_key, json.dumps(v)))
 
-            # Ensure fail_reasons is properly serialized
-            if k == "fail_reasons" and isinstance(v, (list, set)):
+            if k == "flags" and isinstance(v, (list, set)):
                 items.append((new_key, list(v)))
 
         if previous_report:

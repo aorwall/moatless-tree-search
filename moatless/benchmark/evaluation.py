@@ -490,7 +490,7 @@ class Evaluation:
 
                     if self.settings.max_expansions > 1:
                         value_function = CodingValueFunction(
-                            completion=self._create_completion_model(
+                            completion_model=self._create_completion_model(
                                 self.settings.value_function_model
                             )
                         )
