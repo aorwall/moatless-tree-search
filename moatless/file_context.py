@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Set
+from typing import Optional, List, Dict, Set, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from unidiff import PatchSet
@@ -1368,6 +1368,23 @@ class FileContext(BaseModel):
             span_ids.extend(file.span_ids)
         return len(span_ids)
 
+    def get_test_counts(self) -> Tuple[int, int, int]:
+        """
+        Returns counts of passed, failed, and errored tests.
+        
+        Returns:
+            Tuple[int, int, int]: A tuple containing (passed_count, failure_count, error_count)
+        """
+        all_results = []
+        for test_file in self._test_files.values():
+            all_results.extend(test_file.test_results)
+            
+        failure_count = sum(1 for r in all_results if r.status == TestStatus.FAILED)
+        error_count = sum(1 for r in all_results if r.status == TestStatus.ERROR)
+        passed_count = len(all_results) - failure_count - error_count
+        
+        return (passed_count, failure_count, error_count)
+
     def run_tests(self, test_files: List[str] | None = None) -> List[TestFile]:
         """
         Runs tests using the runtime environment and groups results by file.
@@ -1540,5 +1557,14 @@ class FileContext(BaseModel):
             return TestStatus.FAILED
         else:
             return TestStatus.PASSED
+
+    def was_edited(self) -> bool:
+        """
+        Checks if any files in the context were edited.
+        
+        Returns:
+            bool: True if any file has been edited, False otherwise
+        """
+        return any(file.was_edited for file in self._files.values())
 
     

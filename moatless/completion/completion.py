@@ -52,7 +52,9 @@ class CompletionModel(BaseModel):
         default=None, description="The base URL for the model API"
     )
     model_api_key: Optional[str] = Field(
-        default=None, description="The API key for the model"
+        default=None, 
+        description="The API key for the model",
+        exclude=True
     )
     response_format: LLMResponseFormat = Field(
         LLMResponseFormat.TOOLS, description="The response format expected from the LLM"

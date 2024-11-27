@@ -8,7 +8,8 @@ from typing import Optional
 from moatless.benchmark.evaluation import (
     create_evaluation_name,
     Evaluation,
-    TreeSearchSettings
+    TreeSearchSettings,
+    BestFirstSelector
 )
 from moatless.completion.completion import CompletionModel
 from moatless.completion.completion import LLMResponseFormat
@@ -29,9 +30,19 @@ def evaluate_search_and_code(
     min_resolved: Optional[int] = None,
     max_resolved: Optional[int] = None,
     repos: Optional[list[str]] = None,
+    split: str = "lite",
+    high_value_threshold: float = 50.0,
+    high_value_leaf_bonus_constant: float = 50.0,
+    use_average_reward: bool = False,
     **kwargs,
 ):
-    temperature = tree_search_settings.model.temperature or kwargs.get("temp_bias", 0.2)
+    selector = BestFirstSelector(
+        high_value_threshold=high_value_threshold,
+        high_value_leaf_bonus_constant=high_value_leaf_bonus_constant,
+        use_average_reward=use_average_reward
+    )
+
+    temperature = tree_search_settings.model.temperature
 
     if evaluation_name is None:
         evaluation_name = create_evaluation_name(
@@ -76,6 +87,7 @@ def evaluate_search_and_code(
 
     evaluation = Evaluation(
         settings=tree_search_settings,
+        selector=selector,
         evaluations_dir=evaluations_dir,
         evaluation_name=evaluation_name,
         repo_base_dir=repo_base_dir,
@@ -89,6 +101,7 @@ def evaluate_search_and_code(
         repos=repos,
         min_resolved=min_resolved,
         max_resolved=max_resolved,
+        split=split,
     )
 
     return os.path.join(evaluations_dir, evaluation_name)
@@ -146,7 +159,7 @@ def main():
     search_group.add_argument(
         "--max_expansions",
         type=int,
-        default=3,
+        default=30,
         help="Maximum number of expansions per node",
     )
     search_group.add_argument(
@@ -162,7 +175,7 @@ def main():
         help="Maximum number of finished nodes before stopping",
     )
     search_group.add_argument(
-        "--max_iterations", type=int, default=50, help="Maximum number of iterations"
+        "--max_iterations", type=int, default=100, help="Maximum number of iterations"
     )
     search_group.add_argument(
         "--max_cost",
@@ -173,7 +186,7 @@ def main():
     search_group.add_argument(
         "--reward_threshold",
         type=int,
-        default=None,
+        default=90,
         help="Minimum reward threshold to consider before finishing",
     )
     search_group.add_argument(
@@ -235,12 +248,6 @@ def main():
         help="Filter instances by repository names",
     )
     instance_group.add_argument(
-        "--resolved_by",
-        type=int,
-        default=None,
-        help="Filter instances by resolved solutions (e.g., 1, 2, 3, ...)",
-    )
-    instance_group.add_argument(
         "--min_resolved",
         type=int,
         help="Minimum number of people who resolved the issue",
@@ -250,6 +257,13 @@ def main():
         type=int,
         default=None,
         help="Filter instances by maximum number of resolved solutions",
+    )
+    instance_group.add_argument(
+        "--split",
+        type=str,
+        choices=["lite", "combo"],
+        default="lite",
+        help="Dataset split to use (lite or combo)",
     )
 
     # Other settings
@@ -264,6 +278,25 @@ def main():
         "--overwrite",
         action="store_true",
         help="Overwrite existing evaluation results if they exist"
+    )
+
+    selector_group = parser.add_argument_group("selector settings")
+    selector_group.add_argument(
+        "--high_value_threshold",
+        type=float,
+        default=50.0,
+        help="Threshold for considering a node's reward as high value"
+    )
+    selector_group.add_argument(
+        "--high_value_leaf_bonus_constant",
+        type=float,
+        default=50.0,
+        help="Bonus constant for high-value leaf nodes"
+    )
+    selector_group.add_argument(
+        "--use_average_reward",
+        action="store_true",
+        help="Use average reward across trajectory instead of node reward"
     )
 
     args = parser.parse_args()
@@ -406,6 +439,10 @@ def main():
         best_first=not args.sample_first,
         min_resolved=args.min_resolved,
         max_resolved=args.max_resolved,
+        split=args.split,
+        high_value_threshold=args.high_value_threshold,
+        high_value_leaf_bonus_constant=args.high_value_leaf_bonus_constant,
+        use_average_reward=args.use_average_reward,
     )
 
 
