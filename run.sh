@@ -31,8 +31,8 @@ python ./moatless/benchmark/run_evaluation.py \
         --temp 0.7 \
         --num_workers 5 \
         --format react \
-        --feedback \
         --max_iterations 250 \
+        --max_expansions 1 \
         --min_resolved 1 \
         --max_resolved 100 \
         --instance_ids scikit-learn__scikit-learn-25500

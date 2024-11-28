@@ -609,51 +609,34 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                     node_id = st.session_state.selected_node_id
                     selected_node = find_node_by_id(search_tree.root, node_id)
 
+                    # Define available tabs
                     tabs = ["Summary"]
-
-                    if not selected_node or selected_node.node_id == 0:
-                        if eval_result and eval_result.get("error"):
-                            tabs.append("Error")
-
+                    
+                    # Only add tabs if we have a valid selected node
                     if selected_node:
                         if selected_node.file_context:
                             tabs.append("FileContext")
 
-                        if (
-                            selected_node.action
-                            and selected_node.completions.get("build_action") is not None
-                        ):
+                        if selected_node.action and selected_node.completions.get("build_action"):
                             tabs.append("Build")
 
-                        if (
-                            selected_node.action
-                            and selected_node.completions.get("execute_action") is not None
-                        ):
+                        if selected_node.action and selected_node.completions.get("execute_action"):
                             tabs.append("Execution")
 
-                    # Check both current node and parent for selector completion
-                    has_selector = (
-                        "selector" in selected_node.completions or 
-                        (selected_node.parent and "selector" in selected_node.parent.completions)
-                    )
-                    if has_selector:
-                        tabs.append("Selector")
+                        # Check for selector completion
+                        has_selector = (
+                            "selector" in selected_node.completions or 
+                            (selected_node.parent and "selector" in selected_node.parent.completions)
+                        )
+                        if has_selector:
+                            tabs.append("Selector")
 
-                    if eval_result and str(selected_node.node_id) in eval_result.get(
-                        "node_results", {}
-                    ):
-                        tabs.append("Evaluation")
-                        if selected_node.reward:
-                            tabs.append("Reward")
-
-                        if (
-                            eval_result
-                            and str(selected_node.node_id)
-                            in eval_result.get("node_results", {})
-                            is not None
-                        ):
+                        if eval_result and str(node_id) in eval_result.get("node_results", {}):
                             tabs.append("Evaluation")
+                            if selected_node.reward:
+                                tabs.append("Reward")
 
+                        # Always add JSON tab if we have a selected node
                         tabs.append("JSON")
 
                         if selected_node.action:
@@ -662,85 +645,29 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                         if instance:
                             tabs.append("Instance")
 
-                        if selected_node.action:
-                            tabs.append("Rerun")
+                    # Create all tabs at once
+                    tab_contents = st.tabs(tabs)
 
-                        tab_contents = st.tabs(tabs)
-
-                        with tab_contents[tabs.index("Summary")]:
-                            troubleshoot_url = f"?path={selected_tree_path}&node_id={selected_node.node_id}"
-                            st.markdown(
-                                f'<a href="{troubleshoot_url}" target="_blank">'
-                                '<button style="width:80%; margin:0 10%; padding:4px; background-color:#4a4a4a; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.9em;">'
-                                '🔍 Troubleshoot Node'
-                                '</button></a>', 
-                                unsafe_allow_html=True
-                            )
-    
+                    # Now handle each tab's content
+                    if selected_node:  # Only process tabs if we have a valid node
+                        # Summary tab is always first
+                        with tab_contents[0]:  # Summary tab
                             if selected_node.action:
                                 if selected_node.message:
                                     st.write(selected_node.message)
 
-                                if (
-                                    hasattr(selected_node.action, "thoughts")
-                                    and selected_node.action.thoughts
-                                ):
+                                if hasattr(selected_node.action, "thoughts") and selected_node.action.thoughts:
                                     st.subheader("Thoughts")
                                     st.write(selected_node.action.thoughts)
 
                                 st.subheader(f"Action: {selected_node.action.name}")
-                                st.json(
-                                    selected_node.action.model_dump(exclude={"thoughts"})
-                                )
+                                st.json(selected_node.action.model_dump(exclude={"thoughts"}))
 
                                 if selected_node.observation:
                                     st.subheader("Output")
                                     st.code(selected_node.observation.message)
 
-                        # Add feedback display
-                        if selected_node.feedback:
-                            st.subheader("Feedback")
-                            st.write(selected_node.feedback)
-                        
-                        if selected_node.message:
-                            st.write(selected_node.message)
-                            st.subheader(f"Action: {selected_node.action.name}")
-                            st.json(
-                                selected_node.action.model_dump(exclude={"scratch_pad"})
-                            )
-
-                        if selected_node.observation:
-                            st.subheader("Output")
-                            st.code(selected_node.observation.message)
-
-                        if selected_node.parent:
-                            updated_context = (
-                                selected_node.file_context.get_context_diff(
-                                    selected_node.parent.file_context
-                                )
-                            )
-                            if not updated_context.is_empty():
-                                st.subheader("Updated Context")
-                                st.json(updated_context.model_dump())
-
-                        if (
-                            selected_node.action.name == "Reject"
-                            and selected_node.observation.properties
-                            and selected_node.observation.properties.get(
-                                "last_completion"
-                            )
-                        ):
-                            st.subheader("Last completion")
-                            st.json(
-                                selected_node.observation.properties.get(
-                                    "last_completion"
-                                )
-                            )
-
-                        if "Error" in tabs:
-                            with tab_contents[tabs.index("Error")]:
-                                st.code(eval_result["error"])
-
+                        # Handle other tabs
                         if "FileContext" in tabs:
                             with tab_contents[tabs.index("FileContext")]:
                                 st.json(selected_node.file_context.model_dump())
@@ -755,14 +682,14 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                                 completion = selected_node.completions.get("execute_action")
                                 show_completion(completion)
 
-                        if "Reward" in tabs:
-                            with tab_contents[tabs.index("Reward")]:
-                                st.subheader(f"Reward: {selected_node.reward.value}")
-                                st.write(selected_node.reward.explanation)
-                                st.subheader("Completion")
-                                show_completion(
-                                    selected_node.completions.get("value_function")
+                        if "Selector" in tabs:
+                            with tab_contents[tabs.index("Selector")]:
+                                selector_completion = (
+                                    selected_node.completions.get("selector") or 
+                                    (selected_node.parent.completions.get("selector") if selected_node.parent else None)
                                 )
+                                if selector_completion:
+                                    show_completion(selector_completion)
 
                         if "Evaluation" in tabs:
                             with tab_contents[tabs.index("Evaluation")]:
@@ -770,59 +697,25 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                                 if node_result:
                                     st.json(node_result)
 
-                        with tab_contents[tabs.index("JSON")]:
-                            st.json(
-                                selected_node.model_dump(exclude={"parent", "children"})
-                            )
+                        if "Reward" in tabs:
+                            with tab_contents[tabs.index("Reward")]:
+                                st.subheader(f"Reward: {selected_node.reward.value}")
+                                st.write(selected_node.reward.explanation)
+                                show_completion(selected_node.completions.get("value_function"))
+
+                        if "JSON" in tabs:
+                            with tab_contents[tabs.index("JSON")]:
+                                st.json(selected_node.model_dump(exclude={"parent", "children"}))
+
+                        if "Rerun" in tabs:
+                            with tab_contents[tabs.index("Rerun")]:
+                                rerun_node(selected_node.node_id, search_tree.persist_path, instance)
 
                         if "Instance" in tabs:
                             with tab_contents[tabs.index("Instance")]:
                                 st.json(instance)
-
-                    if "Selector" in tabs:
-                        with tab_contents[tabs.index("Selector")]:
-                            # Try to get completion from current node or parent
-                            selector_completion = (
-                                selected_node.completions.get("selector") or 
-                                (selected_node.parent.completions.get("selector") if selected_node.parent else None)
-                            )
-
-                            if selector_completion:
-                                st.subheader("LLM Selection Process")
-                                show_completion(selector_completion)
-
-                                # Show the selection result
-                                if selected_node.reward and selected_node.reward.feedback:
-                                    st.subheader("Selection Result")
-                                    st.markdown(f"""
-                                    **Selected Node:** Node{selected_node.node_id}  
-                                    **Explanation:** {selected_node.reward.feedback}
-                                    """)
-
-                                # Show which node made the selection
-                                completion_owner = (
-                                    "current node" 
-                                    if "selector" in selected_node.completions 
-                                    else "parent node"
-                                )
-                                st.info(f"This selection was made by the {completion_owner}.")
-
-                    with tab_contents[tabs.index("JSON")]:
-                        st.json(
-                            selected_node.model_dump(exclude={"parent", "children"})
-                        )
-                        if "Rerun" in tabs:
-                            with tab_contents[tabs.index("Rerun")]:
-                                rerun_node(
-                                    selected_node.node_id,
-                                    search_tree.persist_path,
-                                    instance,
-                                )
-
-                else:
-                    st.info(
-                        "Select a node in the graph or from the dropdown to view details"
-                    )
+                    else:
+                        st.info("Select a node in the graph or from the dropdown to view details")
 
             # Auto-play logic
             if (
