@@ -3,12 +3,15 @@ import math
 import random
 from dataclasses import dataclass
 from typing import List, Type, Literal, Dict, Any, Tuple, Optional
+import logging
+import re
 
 import numpy as np
 from pydantic import BaseModel, Field, PrivateAttr
 
 from moatless.node import Node
 from moatless.selector.similarity import calculate_similarity
+from moatless.utils.parse import parse_value, parse_explanation
 
 logger = logging.getLogger(__name__)
 
@@ -673,9 +676,9 @@ class LLMSelector(Selector):
                 FindClass,
                 FindFunction,
                 FindCodeSnippet,
-                RequestMoreContext,
                 Finish,
-                # Import only the actions that exist in your project
+                # Remove RequestMoreContext since it doesn't exist
+                # RequestMoreContext,  
             )
             
             definitions = "\nAvailable Actions:\n"
@@ -684,9 +687,9 @@ class LLMSelector(Selector):
                 FindClass,
                 FindFunction,
                 FindCodeSnippet,
-                RequestMoreContext,
                 Finish,
-                # Add other action classes to this list
+                # Remove from this list as well
+                # RequestMoreContext,
             ]
             
             for action_class in available_actions:
@@ -747,7 +750,7 @@ class LLMSelector(Selector):
             user_content += (
                 f"Respond using these exact tags:\n"
                 f"<node_id>: [number of the selected node]\n"
-                f"<feedback>: [detailed explanation and guidance]\n\n"
+                f"<feedback>: [detailed feedback information and guidance]\n\n"
             )
         else:
             user_content += "Respond with only the node number.\n\n"
@@ -832,10 +835,12 @@ class LLMSelector(Selector):
             # Find and return the selected node
             for node in nodes:
                 if node.node_id == selection.node_id:
-                    try:
-                        node.reward.feedback = selection.explanation
-                    except AttributeError:
-                        logger.warning(f"Node {node.node_id}, has no reward attribute")
+                    # try:
+                    #     node.feedback = selection.explanation
+                    #     node.message = selection.explanation
+                    #     node.reward.explanation += f"\n{selection.explanation}"
+                    # except AttributeError:
+                    #     logger.warning(f"Node {node.node_id}, has no reward attribute")
                     return node
             
             # If we get here, the selected node wasn't in the list

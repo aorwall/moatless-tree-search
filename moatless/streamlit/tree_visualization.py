@@ -65,21 +65,30 @@ def build_graph(
     root_node: Node, eval_result: dict | None = None, instance: dict | None = None
 ):
     G = nx.DiGraph()
-
-    # Add new layout logic for linear trajectory
+    
+    # Determine if this is a linear trajectory
     is_linear = getattr(root_node, "max_expansions", None) == 1
+    
+    # Add debug logging
+    logger.info(f"Building graph from root node {root_node.node_id} (linear: {is_linear})")
 
     def is_resolved(node_id):
         if not eval_result:
             return None
 
-        if str(node_id) not in eval_result.get("node_results"):
+        if str(node_id) not in eval_result.get("node_results", {}):
             return None
 
         return eval_result["node_results"][str(node_id)].get("resolved", False)
 
-    def add_node_to_graph(node: Node):
+    def add_node_to_graph(node: Node, parent_id: str | None = None):
         node_id = f"Node{node.node_id}"
+        
+        # Debug logging
+        if parent_id:
+            logger.info(f"Processing node {node_id} with parent {parent_id}")
+        else:
+            logger.info(f"Processing root node {node_id}")
 
         if node.action:
             if node.action.name == "str_replace_editor":
@@ -102,7 +111,6 @@ def build_graph(
                 failed_test_count = sum(
                     1 for test in test_results if test["status"] in ["FAILED", "ERROR"]
                 )
-
                 if failed_test_count > 0:
                     warning = f"{failed_test_count} failed tests"
             if "fail_reason" in node.observation.properties:
@@ -113,33 +121,56 @@ def build_graph(
 
         resolved = is_resolved(node.node_id)
 
-        G.add_node(
-            node_id,
-            name=action_name,
-            type="node",
-            visits=node.visits or 1,
-            duplicate=node.is_duplicate,
-            avg_reward=node.value / node.visits if node.visits else 0,
-            reward=node.reward.value if node.reward else 0,
-            warning=warning,
-            error=error,
-            resolved=resolved,
-            context_status=context_stats.status if context_stats else None,
-            patch_status=context_stats.patch_status if context_stats else None,
-            explanation=node.reward.explanation if node.reward else "",
-            is_linear=is_linear,
-        )
+        # Only add the node if it doesn't exist
+        if not G.has_node(node_id):
+            G.add_node(
+                node_id,
+                name=action_name,
+                type="node",
+                visits=node.visits or 1,
+                duplicate=node.is_duplicate,
+                avg_reward=node.value / node.visits if node.visits else 0,
+                reward=node.reward.value if node.reward else 0,
+                warning=warning,
+                error=error,
+                resolved=resolved,
+                context_status=context_stats.status if context_stats else None,
+                patch_status=context_stats.patch_status if context_stats else None,
+                explanation=node.reward.explanation if node.reward else "",
+                is_linear=is_linear,
+            )
 
+        # Add edge from parent if provided
+        if parent_id:
+            if G.has_edge(parent_id, node_id):
+                logger.warning(f"Duplicate edge detected: {parent_id} -> {node_id}")
+            else:
+                G.add_edge(parent_id, node_id)
+
+        # Process children
         for child in node.children:
-            child_id = f"Node{child.node_id}"
-            add_node_to_graph(child)
-            G.add_edge(node_id, child_id)
+            add_node_to_graph(child, node_id)
 
+    # Start from root with no parent
     add_node_to_graph(root_node)
+    
+    # Verify tree structure
+    for node in G.nodes():
+        in_edges = list(G.in_edges(node))
+        if len(in_edges) > 1:
+            logger.error(f"Node {node} has multiple parents: {in_edges}")
+    
     G.graph["graph"] = {
-        "ranksep": "2.0",
-        "nodesep": "1.0",
-    }  # Increase spacing between ranks and nodes
+        "rankdir": "TB",
+        "ranksep": "3.0",
+        "nodesep": "2.0",
+        "splines": "polyline",
+        "ordering": "out",
+        "concentrate": "true",
+        "overlap": "false",
+        "pack": "true",
+    }
+    
     return G
 
 
@@ -286,14 +317,6 @@ def create_graph_figure(G_subset, G, pos, is_linear=False):
                 badge_x.append(x + 0.04)
                 badge_y.append(y + 0.04)
                 badge_symbols.append(badge[0])
-                badge_colors.append(badge[1])
-            elif node_info.get("expected_span_identified") or node_info.get(
-                "alternative_span_identified"
-            ):
-                badge = ("star", "gold")
-                badge_x.append(x + 0.04)
-                badge_y.append(y + 0.04)
-                badge_symbols.append(badge[0])
 
             node_text.append(extra)
             node_labels.append(f"{node}<br>{node_info.get('name', 'unknown')}")
@@ -327,7 +350,7 @@ def create_graph_figure(G_subset, G, pos, is_linear=False):
                 [1, "green"],
             ],
             color=node_colors,
-            size=node_sizes,
+            size=80,
             colorbar=dict(
                 thickness=15,
                 title="Reward",
@@ -336,14 +359,18 @@ def create_graph_figure(G_subset, G, pos, is_linear=False):
                 tickmode="array",
                 tickvals=[-100, 0, 50, 75, 100],
                 ticktext=["-100", "0", "50", "75", "100"],
+                tickfont=dict(color='black'),
+                titlefont=dict(color='black')
             ),
             cmin=-100,
             cmax=100,
             line=dict(width=node_line_widths, color=node_line_colors),
         ),
-        text=node_labels,
+        text=[f'<span style="color: black">{label}</span>' for label in node_labels],  # Force black text using HTML
         hovertext=node_text,
         textposition="middle center",
+        textfont=dict(size=14, color='black'),
+        hoverlabel=dict(font=dict(color='black')),
     )
     fig.add_trace(node_trace)
 
@@ -356,7 +383,7 @@ def create_graph_figure(G_subset, G, pos, is_linear=False):
             hoverinfo="none",
             marker=dict(
                 symbol=badge_symbols,
-                size=10,
+                size=15,
                 color=badge_colors,
                 line=dict(width=1, color="rgba(0, 0, 0, 0.5)"),
             ),
@@ -364,53 +391,84 @@ def create_graph_figure(G_subset, G, pos, is_linear=False):
         )
         fig.add_trace(badge_trace)
 
-    # Update layout based on linear vs tree visualization
-    if is_linear:
-        fig.update_layout(
-            width=max(1000, len(G_subset.nodes()) * 100),
-            height=400,
-            margin=dict(l=50, r=50, t=50, b=50),
-            autosize=False,
-            showlegend=False,
-            hovermode="closest",
-            xaxis=dict(
-                showgrid=False,
-                zeroline=False,
-                showticklabels=False,
-                rangeslider=dict(visible=False),
-            ),
-            yaxis=dict(
-                showgrid=False,
-                zeroline=False,
-                showticklabels=False,
-                scaleanchor="x",
-                scaleratio=1,
-            ),
-        )
-        node_trace.update(
-            textposition=[
-                "bottom center" if i % 2 == 0 else "top center"
-                for i in range(len(node_x))
-            ],
-            textfont=dict(size=10),
-        )
-    else:
-        fig.update_layout(
-            title="Search Tree",
-            titlefont_size=16,
-            showlegend=False,
-            hovermode="closest",
-            margin=dict(b=20, l=5, r=5, t=40),
-            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            height=600 * (max(1, len(G_subset.nodes()) / 20)),
-        )
+    # Use dot layout with strict mode
+    pos = nx.nx_agraph.graphviz_layout(
+        G, 
+        prog="dot",
+        args="-Gstart=5 -Gdpi=300 -Gnodesep=2"  # Additional layout arguments
+    )
+
+    # Adjust position scaling
+    x_values, y_values = zip(*pos.values())
+    x_min, x_max = min(x_values), max(x_values)
+    y_min, y_max = min(y_values), max(y_values)
+    
+    # More aggressive position normalization
+    for node in pos:
+        x, y = pos[node]
+        normalized_x = (x - x_min) / (x_max - x_min) if x_max != x_min else 0.5
+        normalized_y = (y - y_min) / (y_max - y_min) if y_max != y_min else 0.5
+        # Scale positions to spread out the nodes more
+        pos[node] = (normalized_x * 1.5, normalized_y * 2.0)
+
+    # Create a mapping of point indices to node IDs
+    point_to_node_id = {i: node for i, node in enumerate(G_subset.nodes())}
+
+    # Normalize positions to fit in [0, 1] range
+    x_values, y_values = zip(*pos.values())
+    x_min, x_max = min(x_values), max(x_values)
+    y_min, y_max = min(y_values), max(y_values)
+
+    # Calculate the scaling factor based on the number of nodes
+    num_nodes = len(G.nodes())
+    height_scale = max(1, num_nodes / 20)  # Increase height as nodes increase
+
+    for node in pos:
+        x, y = pos[node]
+        normalized_x = 0.5 if x_max == x_min else (x - x_min) / (x_max - x_min)
+        normalized_y = 0.5 if y_max == y_min else (y - y_min) / (y_max - y_min)
+        pos[node] = (normalized_x, normalized_y * height_scale)
+
+    # Update layout settings with tighter margins and auto-sizing
+    fig.update_layout(
+        title=dict(
+            text="Search Tree",
+            font=dict(size=20, color='black')
+        ),
+        hoverlabel=dict(font_size=16, font_color='black'),
+        showlegend=False,
+        hovermode="closest",
+        margin=dict(b=20, l=20, r=20, t=40),  # Reduced margins
+        xaxis=dict(
+            showgrid=False, 
+            zeroline=False, 
+            showticklabels=False,
+            range=[-0.1, 1.1]  # Tighter x-axis range
+        ),
+        yaxis=dict(
+            showgrid=False, 
+            zeroline=False, 
+            showticklabels=False,
+            scaleanchor="x",
+            scaleratio=1
+        ),
+        width=1000,  # Reduced default width
+        height=800 * (max(1, len(G_subset.nodes()) / 15)),  # Adjusted height scaling
+        plot_bgcolor='rgba(0,0,0,0)',
+        autosize=True  # Enable auto-sizing
+    )
 
     return fig
 
 
 
-def update_visualization(container, search_tree: SearchTree, selected_tree_path: str, instance: Optional[dict] = None):
+def update_visualization(
+    container, 
+    search_tree: SearchTree, 
+    selected_tree_path: str, 
+    instance: Optional[dict] = None, 
+    force_linear: bool = False
+):
     eval_result = None
     logger.info(f"Selected tree path: {selected_tree_path}")
     directory_path = os.path.dirname(selected_tree_path)
@@ -452,7 +510,7 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
             search_tree.root, st.session_state.max_node_id
         )
         
-        is_linear = getattr(search_tree.root, "max_expansions", None) == 1
+        is_linear = force_linear if force_linear is not None else getattr(search_tree.root, "max_expansions", None) == 1
         
         if is_linear:
             # Use the new table visualization for linear trajectories
@@ -631,10 +689,8 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                         if has_selector:
                             tabs.append("Selector")
 
-                        if eval_result and str(node_id) in eval_result.get("node_results", {}):
-                            tabs.append("Evaluation")
-                            if selected_node.reward:
-                                tabs.append("Reward")
+                        if selected_node.completions.get("value_function"):
+                            tabs.append("Reward")
 
                         # Always add JSON tab if we have a selected node
                         tabs.append("JSON")
@@ -645,6 +701,10 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                         if instance:
                             tabs.append("Instance")
 
+                        # Add Feedback tab if feedback exists in completions
+                        if "feedback" in selected_node.completions:
+                            tabs.append("Feedback")
+
                     # Create all tabs at once
                     tab_contents = st.tabs(tabs)
 
@@ -652,8 +712,18 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                     if selected_node:  # Only process tabs if we have a valid node
                         # Summary tab is always first
                         with tab_contents[0]:  # Summary tab
+                            # Show feedback response if it exists
+                            if "feedback" in selected_node.completions:
+                                feedback_completion = selected_node.completions["feedback"]
+                                if hasattr(feedback_completion, 'response'):
+                                    response_data = feedback_completion.response
+                                    if hasattr(response_data, 'feedback'):
+                                        st.info(response_data.feedback)
+
+                            # Show existing summary information
                             if selected_node.action:
                                 if selected_node.message:
+                                    st.subheader("Feedback")
                                     st.write(selected_node.message)
 
                                 if hasattr(selected_node.action, "thoughts") and selected_node.action.thoughts:
@@ -691,16 +761,11 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                                 if selector_completion:
                                     show_completion(selector_completion)
 
-                        if "Evaluation" in tabs:
-                            with tab_contents[tabs.index("Evaluation")]:
-                                node_result = eval_result["node_results"].get(str(node_id))
-                                if node_result:
-                                    st.json(node_result)
-
                         if "Reward" in tabs:
                             with tab_contents[tabs.index("Reward")]:
-                                st.subheader(f"Reward: {selected_node.reward.value}")
-                                st.write(selected_node.reward.explanation)
+                                if selected_node.reward:
+                                    st.subheader(f"Reward: {selected_node.reward.value}")
+                                    st.write(selected_node.reward.explanation)
                                 show_completion(selected_node.completions.get("value_function"))
 
                         if "JSON" in tabs:
@@ -714,6 +779,100 @@ def update_visualization(container, search_tree: SearchTree, selected_tree_path:
                         if "Instance" in tabs:
                             with tab_contents[tabs.index("Instance")]:
                                 st.json(instance)
+
+                        if "Feedback" in tabs:
+                            with tab_contents[tabs.index("Feedback")]:
+                                try:
+                                    # Access the feedback completion from the completions dictionary
+                                    feedback_completion = selected_node.completions["feedback"]
+                                    
+                                    # Debug logging
+                                    logger.debug(f"Feedback completion type: {type(feedback_completion)}")
+                                    
+                                    # Convert the completion to a dictionary first
+                                    completion_data = (
+                                        feedback_completion.model_dump() 
+                                        if hasattr(feedback_completion, 'model_dump') 
+                                        else feedback_completion
+                                    )
+                                    
+                                    response_data = completion_data.get('response', {})
+                                    
+                                    # Display feedback summary
+                                    st.subheader("Feedback Summary")
+                                    st.info(response_data.get('analysis', "No analysis available"))
+                                    st.success(response_data.get('feedback', "No feedback available"))
+
+                                    # System Prompt
+                                    with st.expander("System Prompt"):
+                                        system_prompt = response_data.get('system_prompt')
+                                        if system_prompt:
+                                            st.code(system_prompt)
+                                        else:
+                                            st.text("No system prompt available")
+
+                                    # Raw Messages
+                                    with st.expander("Raw Messages"):
+                                        # Get messages from the completion data
+                                        messages = completion_data.get('input', [])
+                                        if messages:
+                                            for msg in messages:
+                                                try:
+                                                    # Debug logging
+                                                    logger.debug(f"Message type: {type(msg)}")
+                                                    logger.debug(f"Message content: {msg}")
+                                                    
+                                                    # Ensure we're working with a dictionary
+                                                    msg_dict = (
+                                                        msg.model_dump() if hasattr(msg, 'model_dump')
+                                                        else msg if isinstance(msg, dict)
+                                                        else {'role': 'unknown', 'content': str(msg)}
+                                                    )
+                                                    
+                                                    role = msg_dict.get('role', 'unknown')
+                                                    content = msg_dict.get('content', '')
+                                                    
+                                                    st.markdown(f"**{role}**")
+                                                    st.text(content)
+                                                    st.markdown("---")
+                                                except Exception as msg_error:
+                                                    logger.exception(f"Error processing message: {msg_error}")
+                                                    st.error(f"Error displaying message: {msg_error}")
+                                        else:
+                                            st.text("No input messages available")
+
+                                    # Raw Completion
+                                    with st.expander("Raw Completion"):
+                                        raw_completion = response_data.get('raw_completion')
+                                        if raw_completion:
+                                            st.code(raw_completion)
+                                        else:
+                                            st.text("No raw completion available")
+
+                                    # Usage Information
+                                    usage_data = completion_data.get('usage', {})
+                                    if usage_data:
+                                        st.subheader("Usage Information")
+                                        col1, col2 = st.columns(2)
+                                        with col1:
+                                            st.metric("Completion Cost", 
+                                                    f"${usage_data.get('completion_cost', 0):.4f}")
+                                            st.metric("Completion Tokens", 
+                                                    usage_data.get('completion_tokens', 0))
+                                        with col2:
+                                            st.metric("Prompt Tokens", 
+                                                    usage_data.get('prompt_tokens', 0))
+                                            st.metric("Cached Tokens", 
+                                                    usage_data.get('cached_tokens', 0))
+
+                                    # Timestamp if available
+                                    timestamp = response_data.get('timestamp')
+                                    if timestamp:
+                                        st.caption(f"Generated at: {timestamp}")
+                                except Exception as e:
+                                    st.error(f"Error displaying feedback: {str(e)}")
+                                    logger.exception("Error in feedback visualization")
+
                     else:
                         st.info("Select a node in the graph or from the dropdown to view details")
 

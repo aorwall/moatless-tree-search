@@ -1,6 +1,6 @@
 import importlib
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from pydantic import BaseModel, PrivateAttr, Field
 
@@ -27,8 +27,22 @@ class ValueFunction(BaseModel):
         0,
         description="The reward value to automatically assign when the agent expects a correction.",
     )
+    include_search_tree: bool = Field(
+        default=False,
+        description="Whether to include the search tree visualization in the value prompt"
+    )
+    coding_value_function: Optional["ValueFunction"] = Field(
+        default=None,
+        description="Optional CodingValueFunction to provide additional context for value decisions"
+    )
 
     def get_reward(self, node: Node) -> Tuple[Reward, Optional[Completion]]:
+        # First get coding value function result if enabled
+        coding_reward = None
+        if self.coding_value_function:
+            coding_reward, _ = self.coding_value_function.get_reward(node)
+            
+        # Handle automatic rewards first
         if node.observation.expect_correction and self.correction_award is not None:
             logger.info(
                 f"Expecting a correction, assigning reward {self.correction_award}"
@@ -45,10 +59,14 @@ class ValueFunction(BaseModel):
             logger.info(f"Error action, assigning reward -100")
             return Reward(value=-100, explanation="Error action"), None
 
-
         messages = self.message_generator.generate(node)
-
         last_message = ""
+
+        # Add coding value function context if available
+        if coding_reward:
+            last_message += "\n## Coding Value Function Assessment:\n"
+            last_message += f"Value: {coding_reward.value}\n"
+            last_message += f"Explanation: {coding_reward.explanation}\n\n"
 
         if node.action.name == "Finish":
             last_message += "<reasoning_for_completion>\n"
@@ -81,16 +99,51 @@ class ValueFunction(BaseModel):
             last_message += full_patch
             last_message += "\n</git_patch>\n"
 
+        if self.include_search_tree:
+            last_message += "\n\nCurrent search tree state:\n"
+            last_message += "<search_tree>\n"
+            from moatless.node import generate_ascii_tree
+            ascii_tree = generate_ascii_tree(
+                node.get_root(),
+                include_explanation=True,
+                use_color=False,
+                include_diffs=True,
+                include_action_details=False,
+                include_file_context=False,
+            )
+            last_message += ascii_tree
+            last_message += "\n</search_tree>\n"
+
         messages.append(UserMessage(content=last_message))
-
-        system_prompt = self._create_system_prompt(node)
-
+        system_prompt = self._create_system_prompt(node, coding_reward)
+        
         return self.completion_model.create_completion(
             messages=messages, system_prompt=system_prompt, response_model=Reward
         )
 
-    def _create_system_prompt(self, node: Node) -> str:
-        return self._build_system_prompt(node)
+    def _create_system_prompt(self, node: Node, coding_reward: Optional[Reward] = None) -> str:
+        base_prompt = self._build_system_prompt(node)
+        
+        if coding_reward:
+            base_prompt += f"""
+# Coding Value Function Context:
+The automated coding value function has provided the following assessment:
+* Value: {coding_reward.value}
+* Explanation: {coding_reward.explanation}
+
+Please consider this assessment in your evaluation, but feel free to disagree if you have strong reasons to do so. Your evaluation should:
+1. Acknowledge the coding value function's assessment
+2. Either reinforce its reasoning or explain why you disagree
+3. Provide your own comprehensive evaluation
+"""
+        if self.include_search_tree:
+            base_prompt += """
+# Search Tree Context:
+The search tree (<search_tree> ... </search_tree>) is provided below for context. Please consider it in your evaluation.
+If finished states are present, please consider them in your evaluation, and encourage the agent to take actions that lead to different finished states (e.g. by providing feedback on alternative approaches).
+"""
+        
+        return base_prompt
 
     def _create_message(self, node: Node) -> Message:
         previous_nodes = node.get_trajectory()[:-1]
@@ -183,7 +236,7 @@ class ValueFunction(BaseModel):
 # Feedback Structure:
 
 * **Explanation**: Offer a detailed explanation and reasoning behind your decision, focusing on the **last executed action**, its relation to previous actions and its impact.
-* **Feedback to Alternative Branch**: Offer guidance for a parallel problem-solving branch. Suggest conceptual alternative approaches or strategies without providing actual code implementations.
+* **Feedback to Alternative Branch**: Offer guidance for a parallel problem-solving branch. Suggest conceptual alternative approaches or strategies without providing actual code implementations. Use the search tree to guide your feedback, particularly by avoiding to suggest actions that would lead to the same or very similar previous outcomes.
 * **Reward**: Assign a single integer value between {min_value} and {max_value} based on your confidence in the correctness of the action and its likelihood of resolving the issue.
 """
 
@@ -234,6 +287,8 @@ class ValueFunction(BaseModel):
         dump["value_function_class"] = (
             f"{self.__class__.__module__}.{self.__class__.__name__}"
         )
+        if self.coding_value_function:
+            dump["coding_value_function"] = self.coding_value_function.model_dump(**kwargs)
         return dump
 
     @classmethod
@@ -242,11 +297,16 @@ class ValueFunction(BaseModel):
             obj = obj.copy()
             completion_data = obj.pop("completion_model", None)
             value_function_class_path = obj.pop("value_function_class", None)
+            coding_value_function_data = obj.pop("coding_value_function", None)
 
             if completion_data:
                 obj["completion_model"] = CompletionModel.model_validate(completion_data)
             else:
                 obj["completion_model"] = None
+
+            if coding_value_function_data:
+                from moatless.value_function.coding import CodingValueFunction
+                obj["coding_value_function"] = CodingValueFunction.model_validate(coding_value_function_data)
 
             if value_function_class_path:
                 module_name, class_name = value_function_class_path.rsplit(".", 1)

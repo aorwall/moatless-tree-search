@@ -1,6 +1,7 @@
 import json
 import logging
-from typing import Optional, Dict, Any, List, Callable
+import os
+from typing import Optional, Dict, Any, List, Callable, Union
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -21,13 +22,14 @@ from moatless.selector import BestFirstSelector, Selector, SoftmaxSelector, LLMS
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.value_function.base import ValueFunction
 from moatless.value_function.model import Reward
+from moatless.feedback.feedback_agent import FeedbackAgent
 
 logger = logging.getLogger(__name__)
 
 
 class SearchTree(BaseModel):
     root: Node = Field(..., description="The root node of the search tree.")
-    selector: Selector = Field(..., description="Selector for node selection.")
+    selector: Union[BestFirstSelector, SoftmaxSelector, LLMSelector] = Field(..., description="Selector for node selection.")
     agent: ActionAgent = Field(..., description="Agent for generating actions.")
     agent_settings: Optional[AgentSettings] = Field(
         None, description="Agent settings for the search tree."
@@ -79,6 +81,13 @@ class SearchTree(BaseModel):
     max_depth: Optional[int] = Field(
         None, description="The maximum depth for one trajectory in simulations."
     )
+    finish_before_reexpanding: bool = Field(
+        True, description="Whether to reach a Finish state before reexpanding."
+    )
+    finish_before_reexpanding_depth: Optional[int] = Field(
+        30, description="The depth to reach a Finish state before reexpanding."
+    )
+
 
     class Config:
         arbitrary_types_allowed = True
@@ -269,14 +278,29 @@ class SearchTree(BaseModel):
         """Select a node for expansion using the UCT algorithm."""
         expandable_nodes = node.get_expandable_descendants()
 
-        # filtered_nodes = [n for n in expandable_nodes if n.get_depth() < self.max_depth]
-        filtered_nodes = expandable_nodes
-
-        if not filtered_nodes:
+        if not expandable_nodes:
             self.log(logger.info, "No expandable nodes found.")
             return None
+
+        if self.finish_before_reexpanding:
+            
+            if expandable_nodes:
+                # Sort by node_id to get the most recently created node
+                latest_node = max(expandable_nodes, key=lambda n: n.node_id)
+                # Check if we've reached a finish state or exceeded the depth limit
+                if (not latest_node.is_finished() and 
+                    (self.finish_before_reexpanding_depth is None or 
+                     latest_node.get_depth() < self.finish_before_reexpanding_depth)):
+                    return latest_node
+                else:
+                    self.log(
+                        logger.info, 
+                        f"Breaking linear path at depth {latest_node.get_depth()}: {'finished state reached' if latest_node.is_finished() else 'depth limit exceeded'}"
+                    )
         
-        return self.selector.select(filtered_nodes)
+        # If no nodes in current path, latest node is finished, depth limit exceeded, 
+        # or finish_before_reexpanding is False, proceed with normal selection
+        return self.selector.select(expandable_nodes)
 
     def _expand(self, node: Node) -> Node:
         """Expand the node and return a child node."""
@@ -286,18 +310,11 @@ class SearchTree(BaseModel):
             self.log(logger.info, f"Returning unexecuted Node{node.node_id}")
             return node
 
-        child_node = self.expander.expand(node)
-
-        child_node = Node(
-            node_id=self._generate_unique_id(),
-            parent=node,
-            file_context=node.file_context.clone() if node.file_context else None,
-            max_expansions=self.max_expansions,
-        )
-        node.add_child(child_node)
+        child_node = self.expander.expand(node, self)
 
         if self.feedback_generator:
             child_node.message = self.feedback_generator.generate_feedback(child_node, self.agent.actions)
+            print(f"feedback\n{child_node.message}")
             child_node.feedback = child_node.message
 
         self.log(logger.info, f"Expanded Node{node.node_id} to new Node{child_node.node_id}")
@@ -714,3 +731,13 @@ class SearchTree(BaseModel):
         log_message = f"[{metadata_str}] {message}" if metadata else message
 
         logger_fn(log_message)
+
+    def create_feedback_generator(self) -> Optional[FeedbackGenerator]:
+        if not self.feedback_generator:
+            # Get the instance directory from the persist_path or current directory
+            instance_dir = os.path.dirname(self.persist_path) if self.persist_path else None
+            self.feedback_generator = FeedbackAgent(
+                completion_model=self.agent.completion_model,
+                instance_dir=instance_dir
+            )
+        return self.feedback_generator

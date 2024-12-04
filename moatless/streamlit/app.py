@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import sys
+import argparse
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -12,7 +13,7 @@ from moatless.benchmark.swebench.utils import create_index, create_repository
 from moatless.benchmark.utils import get_moatless_instance
 from moatless.search_tree import SearchTree
 from moatless.streamlit.shared import trajectory_table
-from moatless.streamlit.tree_vizualization import update_visualization
+from moatless.streamlit.tree_visualization import update_visualization
 from moatless.streamlit.investigate_node import investigate_node
 
 logging.basicConfig(
@@ -24,19 +25,29 @@ load_dotenv()
 
 
 def main():
+    # Add argument parsing at the start of main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('path', nargs='?', help='Path to the file')
+    parser.add_argument('--linear', action='store_true', help='Force linear visualization')
+    args, unknown = parser.parse_known_args()
+
     st.set_page_config(
         layout="wide",
         page_title="Moatless Visualizer",
         initial_sidebar_state="collapsed",
     )
+    
+    # Store the linear preference in session state
+    if "force_linear" not in st.session_state:
+        st.session_state.force_linear = args.linear
+
     container = st.container()
 
     # Get file path from command line args if provided
     if "path" in st.query_params:
         file_path = st.query_params["path"]
-    elif len(sys.argv) > 1:
-        file_path = sys.argv[1]
-
+    elif args.path:
+        file_path = args.path
         # is directory
         if os.path.isdir(file_path):
             logger.info("Generating report for directory")
@@ -131,7 +142,11 @@ def main():
                 else:
 
                     update_visualization(
-                        container, st.session_state.search_tree, file_path, instance
+                        container, 
+                        st.session_state.search_tree, 
+                        file_path, 
+                        instance,
+                        force_linear=args.linear
                     )
                     
         else:

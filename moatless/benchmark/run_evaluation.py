@@ -31,16 +31,18 @@ def evaluate_search_and_code(
     max_resolved: Optional[int] = None,
     repos: Optional[list[str]] = None,
     split: str = "lite",
+    overwrite: bool = False,
     high_value_threshold: float = 50.0,
     high_value_leaf_bonus_constant: float = 50.0,
     use_average_reward: bool = False,
     **kwargs,
 ):
-    selector = BestFirstSelector(
-        high_value_threshold=high_value_threshold,
-        high_value_leaf_bonus_constant=high_value_leaf_bonus_constant,
-        use_average_reward=use_average_reward
-    )
+    # selector = BestFirstSelector(
+    #     high_value_threshold=high_value_threshold,
+    #     high_value_leaf_bonus_constant=high_value_leaf_bonus_constant,
+    #     use_average_reward=use_average_reward
+    # )
+    selector = None
 
     temperature = tree_search_settings.model.temperature
 
@@ -94,6 +96,7 @@ def evaluate_search_and_code(
         max_file_context_tokens=16000,
         num_workers=num_workers,
         use_testbed=use_testbed,
+        overwrite=overwrite,
     )
 
     evaluation.run_evaluation(
@@ -261,9 +264,9 @@ def main():
     instance_group.add_argument(
         "--split",
         type=str,
-        choices=["lite", "combo"],
+        choices=["lite", "combo", "random"],
         default="lite",
-        help="Dataset split to use (lite or combo)",
+        help="Dataset split to use (lite, combo, or random)",
     )
 
     # Other settings
@@ -443,6 +446,7 @@ def main():
         high_value_threshold=args.high_value_threshold,
         high_value_leaf_bonus_constant=args.high_value_leaf_bonus_constant,
         use_average_reward=args.use_average_reward,
+        overwrite=args.overwrite,
     )
 
 

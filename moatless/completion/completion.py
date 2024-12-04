@@ -295,10 +295,11 @@ Make sure to return an instance of the JSON, not the schema itself.""")
         messages.insert(0, {"role": "system", "content": system_prompt})
 
         retries = tenacity.Retrying(
-            retry=tenacity.retry_if_not_exception_type(
-                (APIError, BadRequestError, NotFoundError, AuthenticationError)
-            ),
-            stop=tenacity.stop_after_attempt(3),
+            retry=tenacity.retry_if_exception_type((APIError, litellm.APIError, openai.InternalServerError)),
+            wait=tenacity.wait_exponential(multiplier=1, min=4, max=30),
+            stop=tenacity.stop_after_attempt(5),
+            before_sleep=tenacity.before_sleep_log(logger, logging.WARNING),
+            after=tenacity.after_log(logger, logging.INFO)
         )
 
         def _do_completion():

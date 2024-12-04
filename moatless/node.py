@@ -23,6 +23,15 @@ from moatless.value_function.model import Reward
 logger = logging.getLogger(__name__)
 
 
+class FeedbackData(BaseModel):
+    """Structured feedback data model"""
+    analysis: str = Field(..., description="Analysis of the task and alternative branch attempts")
+    feedback: str = Field(..., description="Direct feedback to the AI assistant")
+    system_prompt: Optional[str] = Field(None, description="System prompt used to generate feedback")
+    raw_completion: Optional[str] = Field(None, description="Raw completion response")
+    raw_messages: List[Dict] = Field(default_factory=list, description="Raw messages used to generate feedback")
+    timestamp: str = Field(..., description="When feedback was generated")
+
 
 class Node(BaseModel):
     node_id: int = Field(..., description="The unique identifier of the node")
@@ -64,10 +73,17 @@ class Node(BaseModel):
     agent_settings: Optional[AgentSettings] = Field(
         None, description="The agent settings associated with the node"
     )
+    feedback_data: Optional[FeedbackData] = Field(
+        None, description="Structured feedback data for the node"
+    )
 
     @classmethod
     def stub(cls, **kwargs):
-        return cls(node_id=0, **kwargs)
+        """Create a stub node with a unique ID."""
+        # Get the highest existing node ID from the kwargs or use 0
+        existing_nodes = kwargs.get('children', [])
+        highest_id = max([n.node_id for n in existing_nodes] + [kwargs.get('node_id', -1), -1]) + 1
+        return cls(node_id=highest_id, **kwargs)
 
     def is_leaf(self) -> bool:
         """Check if the node is a leaf node (no children)."""
@@ -213,7 +229,6 @@ class Node(BaseModel):
 
     def reset(self):
         """Reset the node state to be able to execute it again."""
-
         self.action = None
         self.visits = 0
         self.value = 0.0
@@ -223,19 +238,23 @@ class Node(BaseModel):
         self.is_duplicate = False
         if self.parent and self.parent.file_context:
             self.file_context = self.parent.file_context.clone()
-
         self.children = []
 
     def clone_and_reset(self) -> "Node":
         """
         Creates a copy of the node and resets its observation and file context.
-
+        
         Returns:
             Node: A new node instance with reset state
         """
-        # Create a new node with same base attributes
+        # Find highest node ID in the tree to ensure uniqueness
+        root = self.get_root()
+        all_nodes = root.get_all_nodes()
+        highest_id = max(node.node_id for node in all_nodes) + 1
+
+        # Create a new node with same base attributes but new ID
         new_node = Node(
-            node_id=self.node_id,
+            node_id=highest_id,  # Use new unique ID
             parent=self.parent,
             visits=self.visits,
             value=self.value,
@@ -244,9 +263,7 @@ class Node(BaseModel):
             feedback=self.feedback,
             is_duplicate=self.is_duplicate,
             action=self.action,
-            possible_actions=self.possible_actions.copy()
-            if self.possible_actions
-            else [],
+            possible_actions=self.possible_actions.copy() if self.possible_actions else []
         )
 
         new_node.reset()
@@ -331,6 +348,12 @@ class Node(BaseModel):
         node_data["visits"] = node_data.get("visits", 0)
         node_data["value"] = node_data.get("value", 0.0)
 
+        # Add feedback data reconstruction
+        if node_data.get("completions", {}).get("feedback"):
+            feedback_completion = node_data["completions"]["feedback"]
+            if isinstance(feedback_completion, dict) and "response" in feedback_completion:
+                node_data["feedback_data"] = FeedbackData.model_validate(feedback_completion["response"])
+        
         if "children" in node_data:
             children = node_data.get("children", [])
 
@@ -457,44 +480,6 @@ class Node(BaseModel):
         else:
             raise ValueError("Format must be either 'list' or 'tree'")
 
-    def reset(self):
-        """Reset the node state to be able to execute it again."""
-
-        self.action = None
-        self.visits = 0
-        self.value = 0.0
-        self.observation = None
-        self.feedback = None
-        self.completions = {}
-        self.is_duplicate = False
-        if self.parent and self.parent.file_context:
-            self.file_context = self.parent.file_context.clone()
-
-
-    def clone_and_reset(self) -> "Node":
-        """
-        Creates a copy of the node and resets its observation and file context.
-        
-        Returns:
-            Node: A new node instance with reset state
-        """
-        # Create a new node with same base attributes
-        new_node = Node(
-            node_id=self.node_id,
-            parent=self.parent,
-            visits=self.visits,
-            value=self.value,
-            max_expansions=self.max_expansions,
-            message=self.message,
-            feedback=self.feedback,
-            is_duplicate=self.is_duplicate,
-            action=self.action,
-            possible_actions=self.possible_actions.copy() if self.possible_actions else []
-        )
-
-        new_node.reset()
-        return new_node
-
 
 def generate_ascii_tree(
     root: Node, 
@@ -507,6 +492,10 @@ def generate_ascii_tree(
     use_color: bool = True
 ) -> str:
     tree_lines = ["MCTS Tree"]
+    # Make sure we're starting from the actual root node
+    if root.parent:
+        root = root.get_root()
+        
     _append_ascii_node(
         root, 
         "", 
@@ -543,33 +532,34 @@ def _append_ascii_node(
         if node.observation and node.observation.expect_correction:
             state_params.append("expect_correction")
 
-    state_info = f"Node{node.node_id}"
-    if state_params:
-        state_info += f"({', '.join(state_params)})"
-    else:
-        state_info += f"()"
-
-    if use_color and current and node.node_id == current.node_id:
-        state_info = color_white(state_info)
-
     # Build reward string
     if not node.reward:
         reward_str = "0"
-        node_str = f"Node{node.node_id} [-]"
+        node_str = f"Node{node.node_id}"
     else:
         if use_color:
             if node.reward.value >= 75:
                 reward_str = color_green(node.reward.value)
-                node_str = color_green(f"Node{node.node_id} [{node.reward.value}]")
+                node_str = color_green(f"Node{node.node_id}")
             elif node.reward.value <= 0:
                 reward_str = color_red(node.reward.value)
-                node_str = color_red(f"Node{node.node_id} [{node.reward.value}]")
+                node_str = color_red(f"Node{node.node_id}")
             else:
                 reward_str = color_yellow(node.reward.value)
-                node_str = color_yellow(f"Node{node.node_id} [{node.reward.value}]")
+                node_str = color_yellow(f"Node{node.node_id}")
         else:
             reward_str = str(node.reward.value)
-            node_str = f"Node{node.node_id} [{node.reward.value}]"
+            node_str = f"Node{node.node_id}"
+
+    # Build state info without repeating node ID
+    state_info = ""
+    if state_params:
+        state_info = f"({', '.join(state_params)})"
+    else:
+        state_info = "()"
+
+    if use_color and current and node.node_id == current.node_id:
+        state_info = color_white(state_info)
 
     # Add expandable status
     expandable_str = "expandable" if node.is_expandable() else "not-expandable"
@@ -593,15 +583,16 @@ def _append_ascii_node(
         _append_wrapped_text(tree_lines, explanation_text, content_prefix, "│ Explanation: ")
 
     # Add feedback if available
-    if include_feedback and node.reward and node.reward.feedback_to_alternative:
-        feedback_text = node.reward.feedback_to_alternative.strip()
-        _append_wrapped_text(tree_lines, feedback_text, content_prefix, "│ Feedback: ")
+    if include_feedback and node.feedback_data:
+        tree_lines.append(f"{content_prefix}│ Feedback:")
+        _append_wrapped_text(tree_lines, node.feedback_data.feedback, content_prefix, "│ Direct Feedback: ")
+        _append_wrapped_text(tree_lines, node.feedback_data.analysis, content_prefix, "│ Analysis: ")
 
     # Add diffs if available - only for Finish actions
     if include_diffs and node.file_context and node.action and node.action.name == "Finish":
         patch = node.file_context.generate_git_patch()
         if patch.strip():
-            tree_lines.append(f"{content_prefix}│ Changes:")
+            tree_lines.append(f"{content_prefix}│ Changes (git patch):")
             for line in patch.split('\n'):
                 if line.strip():
                     prefix_char = '+'if line.startswith('+') else ('-' if line.startswith('-') else ' ')

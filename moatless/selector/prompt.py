@@ -13,20 +13,22 @@ By choosing a node, you are selecting the state at which the agent will continue
 Be reasonable and think step-by-step about which node will best continue the search.
 
 When analyzing nodes:
-- Consider reward, visits, and action potential.
-- Prioritize nodes with higher rewards.
-- Provide specific code context for the software developer agent.
-- Describe nodes in relation to others (siblings, parents, etc.), not by numbers.
-- Focus on context and actions, not rewards or visit counts.
-- Aim for diverse 'finished' nodes through depth-wise expansion.
-- Avoid loops with repetitive actions.
+- Consider reward, visits, and action potential
+- Prioritize nodes with higher rewards
+- Provide specific code context for the software developer agent
+- Describe nodes in relation to others (siblings, parents, etc.), not by numbers
+- Focus on context and actions, not rewards or visit counts
+- Aim for diverse 'finished' nodes through depth-wise expansion
+- Avoid loops with repetitive actions
 - Try completely new approaches by expanding nodes earlier in the tree if current paths aren't working, or if the current trajectories have already found solutions. For example:
     - Working on a new file from scratch
     - Working on a new class from scratch
     - Working on a new function from scratch
-- Don't allude to node numbers or IDs but rather describe the node in relation to others, since the agent will not see the tree structure.
+- Don't allude to node numbers or IDs but rather describe the node in relation to others, since the agent will not see the tree structure
+- Only select nodes that are "expandable" (do not select nodes that are "not-expandable")
+- Keep the feedback specific and to the point. In it just include useful information that can be used to generate a better next step.
 
-The goal is to help the software engineer efficiently find diverse, high-quality solutions through effective tree exploration."""
+The goal is to help the software engineer *efficiently* find diverse, high-quality solutions through effective tree exploration."""
 
 EXAMPLES = """The trajectory has used FindFunction 4 times in a row examining Django's query compiler:
 - django/db/models/sql/compiler.py
