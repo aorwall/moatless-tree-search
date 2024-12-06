@@ -85,7 +85,7 @@ class SearchTree(BaseModel):
         True, description="Whether to reach a Finish state before reexpanding."
     )
     finish_before_reexpanding_depth: Optional[int] = Field(
-        30, description="The depth to reach a Finish state before reexpanding."
+        20, description="The depth to reach a Finish state before reexpanding."
     )
 
 
@@ -281,22 +281,20 @@ class SearchTree(BaseModel):
         if not expandable_nodes:
             self.log(logger.info, "No expandable nodes found.")
             return None
-
-        if self.finish_before_reexpanding:
             
-            if expandable_nodes:
-                # Sort by node_id to get the most recently created node
-                latest_node = max(expandable_nodes, key=lambda n: n.node_id)
-                # Check if we've reached a finish state or exceeded the depth limit
-                if (not latest_node.is_finished() and 
-                    (self.finish_before_reexpanding_depth is None or 
-                     latest_node.get_depth() < self.finish_before_reexpanding_depth)):
-                    return latest_node
-                else:
-                    self.log(
-                        logger.info, 
-                        f"Breaking linear path at depth {latest_node.get_depth()}: {'finished state reached' if latest_node.is_finished() else 'depth limit exceeded'}"
-                    )
+        if expandable_nodes:
+            # Sort by node_id to get the most recently created node
+            latest_node = max(expandable_nodes, key=lambda n: n.node_id)
+            # Check if we've reached a finish state or exceeded the depth limit
+            if (not latest_node.is_finished() and 
+                (self.finish_before_reexpanding_depth is None or 
+                    latest_node.get_depth() < self.finish_before_reexpanding_depth)):
+                return latest_node
+            else:
+                self.log(
+                    logger.info, 
+                    f"Breaking linear path at depth {latest_node.get_depth()}: {'finished state reached' if latest_node.is_finished() else 'depth limit exceeded'}"
+                )
         
         # If no nodes in current path, latest node is finished, depth limit exceeded, 
         # or finish_before_reexpanding is False, proceed with normal selection
@@ -543,7 +541,7 @@ class SearchTree(BaseModel):
             )
 
         selector = selector or BestFirstSelector()
-
+        
         expander = expander or Expander(max_expansions=max_expansions)
 
         return cls(

@@ -13,6 +13,7 @@ from moatless.feedback import FeedbackGenerator
 from moatless.node import Node, generate_ascii_tree
 from moatless.schema import MessageHistoryType
 from moatless.message_history import MessageHistoryGenerator
+from moatless.utils.parse import parse_node_id
 
 logger = logging.getLogger(__name__)
 
@@ -175,38 +176,41 @@ class FeedbackAgent(FeedbackGenerator):
     ) -> List[Message]:
         messages = []
 
-        # Add tree visualization if requested
+        # Format tree visualization section
         if include_tree:
-            tree_message = "# Current Tree Structure\n\n"
+            tree_message = "# Search Tree Visualization\n"
+            tree_message += "<search_tree>\n"
             tree_message += generate_ascii_tree(
                 current_node.get_root(),
-                current=current_node,  # Highlight current node
+                current=current_node,
                 include_explanation=True,
                 use_color=False,
                 include_diffs=True,
                 include_action_details=False,
                 include_file_context=False,
             )
-            tree_message += "\n\n---\n\n"
+            tree_message += "\n</search_tree>\n\n"
             messages.append(UserMessage(content=tree_message))
 
-        # Add node relationship context
-        relationship_message = (
-            f"# Node Relationships\n"
-            f"- Current Node: {current_node.node_id}\n"
-            f"- Parent Node: {current_node.parent.node_id if current_node.parent else 'None'}\n"
-            f"- Sibling Nodes: {[n.node_id for n in current_node.get_sibling_nodes()]}\n"
-            f"- Child Nodes: {[n.node_id for n in current_node.children]}\n\n"
-            "---\n\n"
-        )
+        # Format node relationships section
+        relationship_message = "# Node Relationships\n"
+        relationship_message += "<relationships>\n"
+        relationship_message += f"Current Node: {current_node.node_id}\n"
+        relationship_message += f"Parent Node: {current_node.parent.node_id if current_node.parent else 'None'}\n"
+        relationship_message += f"Sibling Nodes: {[n.node_id for n in current_node.get_sibling_nodes()]}\n"
+        relationship_message += f"Child Nodes: {[n.node_id for n in current_node.children]}\n"
+        relationship_message += "</relationships>\n\n"
         messages.append(UserMessage(content=relationship_message))
 
-        # Add the root message with node ID
+        # Format root task section
         root_node = current_node.get_root()
-        first_message = f"# Root Node {root_node.node_id}\n{root_node.message}"
+        first_message = "# Original Task\n"
+        first_message += "<task>\n"
+        first_message += f"Root Node {root_node.node_id}:\n{root_node.message}\n"
+        first_message += "</task>\n\n"
         messages.append(UserMessage(content=first_message))
 
-        # Generate message history showing the current state
+        # Format message history section
         message_generator = MessageHistoryGenerator(
             message_history_type=MessageHistoryType.SUMMARY,
             include_file_context=True,
@@ -219,46 +223,41 @@ class FeedbackAgent(FeedbackGenerator):
         for i, msg in enumerate(history_messages):
             if i < len(trajectory):
                 node = trajectory[i]
-                # Include parent ID in the message header
-                parent_id = node.parent.node_id if node.parent else "None"
-                msg.content = f"# Node {node.node_id} (Parent: {parent_id})\n{msg.content}"
+                parent_id = node.parent.node_id if node.parent else 'None'
+                msg.content = f"# Node {node.node_id} (Parent: {parent_id})\n<history>\n{msg.content}\n</history>\n"
         
         messages.extend(history_messages)
 
-        # Create analysis message for hypothetical attempts
-        analysis_message = "\n\n# Parallel Sibling Nodes Information\n\n"
+        # Format parallel attempts section
+        analysis_message = "# Parallel Solution Attempts\n"
         has_finish_attempt = False
 
         for sibling in sibling_nodes:
             if not sibling.action:
-                print(f"Sibling {sibling.node_id} has no action, skipping")
                 continue
 
             if sibling.action.name == "Finish":
                 has_finish_attempt = True
 
-            # Add node ID and parent ID to the sibling information
-            analysis_message += (
-                f"## Node {sibling.node_id} "
-                f"(Parent: {sibling.parent.node_id if sibling.parent else 'None'})\n"
-                f"Attempted Action: {sibling.action.name}\n"
-            )
+            analysis_message += f"<attempt_{sibling.node_id}>\n"
+            analysis_message += f"Node {sibling.node_id} (Parent: {sibling.parent.node_id if sibling.parent else 'None'})\n"
+            analysis_message += f"Action: {sibling.action.name}\n"
             analysis_message += sibling.action.to_prompt()
 
             if sibling.observation:
-                analysis_message += f"\n\n**Hypothetical observation**:\n{sibling.observation.message}\n\n"
-
-            analysis_message += "\n---\n\n"
+                analysis_message += "\nObservation:\n"
+                analysis_message += sibling.observation.message
+            
+            analysis_message += f"\n</attempt_{sibling.node_id}>\n\n"
 
         if has_finish_attempt:
-            analysis_message += (
-                "\n\n**WARNING: FINISH ACTION HAS ALREADY BEEN ATTEMPTED!**\n"
-                "- Trying to finish again would be ineffective\n"
-                "- Focus on exploring alternative solutions instead\n\n"
-            )
+            analysis_message += "<warning>\n"
+            analysis_message += "FINISH ACTION HAS ALREADY BEEN ATTEMPTED!\n"
+            analysis_message += "- Trying to finish again would be ineffective\n"
+            analysis_message += "- Focus on exploring alternative solutions instead\n"
+            analysis_message += "</warning>\n"
 
-        # Only add the analysis message if it's not empty
-        if analysis_message.strip() != "# Hypothetical Attempts":
+        if analysis_message != "# Parallel Solution Attempts\n":
             messages.append(UserMessage(content=analysis_message))
 
         return messages

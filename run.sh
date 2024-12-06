@@ -43,4 +43,4 @@ python ./moatless/benchmark/run_evaluation.py \
         --feedback_type agent \
         --use_testbed \
         --overwrite \
-        --instance_ids django__django-11179
+        --instance_ids $REPOS

@@ -62,28 +62,27 @@ class ValueFunction(BaseModel):
         messages = self.message_generator.generate(node)
         last_message = ""
 
-        # Add coding value function context if available
-        if coding_reward:
-            last_message += "\n## Coding Value Function Assessment:\n"
-            last_message += f"Value: {coding_reward.value}\n"
-            last_message += f"Explanation: {coding_reward.explanation}\n\n"
-
+        # Format the action section
         if node.action.name == "Finish":
+            last_message += "# Completion Reasoning\n"
             last_message += "<reasoning_for_completion>\n"
             last_message += node.action.finish_reason
-            last_message += "</reasoning_for_completion>\n"
+            last_message += "\n</reasoning_for_completion>\n\n"
         else:
-            last_message += "## Last Executed Action:\n"
-            last_message += "Here is the most recent action that was executed and its output. This is the subject of your evaluation.\n"
-            last_message += "\n<executed_action>\n"
+            last_message += "# Last Executed Action\n"
+            last_message += "The following action was executed and its output is the subject of your evaluation:\n\n"
+            last_message += "<executed_action>\n"
+            last_message += f"Action: {node.action.name}\n"
             last_message += node.action.to_prompt()
-            last_message += f"\n\n**Output:**\n{node.observation.message}"
+            last_message += "\n## Output\n"
+            last_message += node.observation.message
             last_message += "\n</executed_action>\n\n"
 
+        # Format the file context section
         if not node.parent.file_context.is_empty():
-            last_message += (
-                "The file context the agent had access to when executing the new action"
-            )
+            last_message += "# File Context\n"
+            last_message += "The following code context was available when executing the action:\n\n"
+            last_message += "<file_context>\n"
             last_message += node.file_context.create_prompt(
                 show_span_ids=False,
                 show_line_numbers=True,
@@ -91,16 +90,20 @@ class ValueFunction(BaseModel):
                 show_outcommented_code=True,
                 outcomment_code_comment="... rest of the code",
             )
+            last_message += "\n</file_context>\n\n"
 
+        # Format the git patch section
         full_patch = node.parent.file_context.generate_git_patch()
         if full_patch.strip():
-            last_message += "\n\nThe git diff of the already made changes before executing the action:\n"
+            last_message += "# Previous Changes\n"
+            last_message += "Git diff of changes made before this action:\n\n"
             last_message += "<git_patch>\n"
             last_message += full_patch
-            last_message += "\n</git_patch>\n"
+            last_message += "\n</git_patch>\n\n"
 
+        # Format the search tree section
         if self.include_search_tree:
-            last_message += "\n\nCurrent search tree state:\n"
+            last_message += "# Search Tree State\n"
             last_message += "<search_tree>\n"
             from moatless.node import generate_ascii_tree
             ascii_tree = generate_ascii_tree(
@@ -112,7 +115,15 @@ class ValueFunction(BaseModel):
                 include_file_context=False,
             )
             last_message += ascii_tree
-            last_message += "\n</search_tree>\n"
+            last_message += "\n</search_tree>\n\n"
+        
+        # Format the coding value function section
+        if coding_reward:
+            last_message += "# Coding Value Function Assessment\n"
+            last_message += "<coding_assessment>\n"
+            last_message += f"Value: {coding_reward.value}\n"
+            last_message += f"Explanation: {coding_reward.explanation}"
+            last_message += "\n</coding_assessment>\n"
 
         messages.append(UserMessage(content=last_message))
         system_prompt = self._create_system_prompt(node, coding_reward)
@@ -125,22 +136,29 @@ class ValueFunction(BaseModel):
         base_prompt = self._build_system_prompt(node)
         
         if coding_reward:
-            base_prompt += f"""
-# Coding Value Function Context:
+            base_prompt += """
+# Coding Value Function Context
+<coding_assessment>
 The automated coding value function has provided the following assessment:
 * Value: {coding_reward.value}
 * Explanation: {coding_reward.explanation}
 
-Please consider this assessment in your evaluation, but feel free to disagree if you have strong reasons to do so. Your evaluation should:
-1. Acknowledge the coding value function's assessment
+Evaluation Guidelines:
+1. Consider the automated assessment above
 2. Either reinforce its reasoning or explain why you disagree
 3. Provide your own comprehensive evaluation
-"""
+</coding_assessment>
+""".format(coding_reward=coding_reward)
+
         if self.include_search_tree:
             base_prompt += """
-# Search Tree Context:
-The search tree (<search_tree> ... </search_tree>) is provided below for context. Please consider it in your evaluation.
-If finished states are present, please consider them in your evaluation, and encourage the agent to take actions that lead to different finished states (e.g. by providing feedback on alternative approaches).
+# Search Tree Analysis
+<search_tree_guidelines>
+* Use the provided search tree visualization to understand the full solution space
+* Consider any existing finished states in your evaluation
+* Guide the agent toward novel solutions that differ from previous attempts
+* Discourage actions that would lead to duplicate or very similar outcomes
+</search_tree_guidelines>
 """
         
         return base_prompt
