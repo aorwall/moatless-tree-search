@@ -77,7 +77,7 @@ class FindCodeSnippet(SearchBaseAction):
             end_line = start_line + num_lines - 1
 
             search_result_context.add_line_span_to_context(
-                file_path, start_line, end_line
+                file_path, start_line, end_line, add_extra=False
             )
 
         return search_result_context, False

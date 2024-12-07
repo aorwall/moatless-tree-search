@@ -1,11 +1,12 @@
-import pytest
 from pathlib import Path
+
+import pytest
 
 from moatless.actions.edit import ClaudeEditTool, EditActionArguments
 from moatless.actions.model import Observation
 from moatless.file_context import FileContext
 from moatless.repository import FileRepository
-from moatless.repository.repository import Repository
+
 
 @pytest.fixture
 def repo(tmp_path):

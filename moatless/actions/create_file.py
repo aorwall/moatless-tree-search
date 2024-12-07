@@ -92,10 +92,13 @@ class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
             properties={"diff": diff, "success": True},
         )
 
-        self.run_tests(
+        test_summary = self.run_tests(
             file_path=str(path),
             file_context=file_context,
         )
+
+        if test_summary:
+            observation.message += f"\n\n{test_summary}"
 
         return observation
 

@@ -1,9 +1,9 @@
 import pytest
-from unittest.mock import Mock
 
 from moatless.actions.create_file import CreateFile, CreateFileArgs
 from moatless.file_context import FileContext
 from moatless.repository.repository import InMemRepository
+
 
 @pytest.fixture
 def repository():

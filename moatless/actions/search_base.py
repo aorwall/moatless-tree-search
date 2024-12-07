@@ -70,8 +70,8 @@ class IdentifiedSpans(BaseModel):
 class Identify(StructuredOutput):
     """Identify if the provided search result is relevant to the reported issue."""
 
-    thoughts: str = Field(
-        ...,
+    thoughts: Optional[str] = Field(
+        None,
         description="Your thoughts and analysis on the search results and how they relate to the reported issue.",
     )
 
@@ -140,8 +140,18 @@ class SearchBaseAction(Action):
         properties["search_hits"] = search_result_context.model_dump(exclude_none=True)
 
         completion = None
-        if (
-            search_result_context.context_size() > self.max_search_tokens
+
+        if search_result_context.span_count() == 1 and search_result_context.context_size() > self.max_identify_tokens:
+            logger.warning(
+                f"{self.name}: Conext for {search_result_context.create_summary()} is too large ({search_result_context.context_size()} tokens)."
+            )
+            properties["fail_reason"] = "search_too_large"
+            return Observation(
+                message="Search too large. Found a single code section that is too large to view. Please refine the search query.",
+                properties=properties
+            )
+        elif (
+            (search_result_context.context_size() > self.max_search_tokens and search_result_context.span_count() > 1)
             or search_result_context.span_count() > self.max_hits
         ):
             logger.info(

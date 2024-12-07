@@ -1,18 +1,18 @@
+import os
+import subprocess
+import tempfile
+import textwrap
+from unittest.mock import Mock
+
+import pytest
+from git import Repo
+
 from moatless.benchmark.swebench import setup_swebench_repo
 from moatless.benchmark.utils import get_moatless_instance
 from moatless.codeblocks import CodeBlock, CodeBlockType
 from moatless.codeblocks.module import Module
 from moatless.file_context import FileContext, ContextFile
-from moatless.repository import FileRepository
 from moatless.repository.repository import InMemRepository
-from moatless.schema import FileWithSpans
-import pytest
-from unittest.mock import Mock, patch
-import textwrap
-import os
-import tempfile
-import subprocess
-from git import Repo
 
 
 def test_file_context_to_dict():

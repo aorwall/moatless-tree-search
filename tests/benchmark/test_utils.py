@@ -1,4 +1,3 @@
-import pytest
 from moatless.benchmark.utils import get_missing_spans
 
 

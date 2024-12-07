@@ -31,11 +31,8 @@ class ListFiles(Action):
     args_schema = ListFilesArgs
 
     def execute(self, args: ListFilesArgs, file_context: FileContext) -> Observation:
-        if not file_context.repo:
-            return Observation(
-                message="No repository available",
-                expect_correction=False,
-            )
+        if not file_context._repo:
+            raise RuntimeError("Repository not available for listing files.")
 
         try:
             result = file_context._repo.list_directory(args.directory)

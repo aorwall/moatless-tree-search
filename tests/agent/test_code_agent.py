@@ -1,26 +1,26 @@
-from unittest.mock import Mock, MagicMock
 import json
-from pydantic import BaseModel
 from typing import List
-from moatless.actions.action import Action
+from unittest.mock import Mock
+
+from moatless.actions.request_context import RequestMoreContext
+
 from moatless.actions.code_change import RequestCodeChange
 from moatless.actions.find_class import FindClass
 from moatless.actions.find_code_snippet import FindCodeSnippet
 from moatless.actions.find_function import FindFunction
 from moatless.actions.finish import Finish
 from moatless.actions.reject import Reject
-from moatless.actions.request_context import RequestMoreContext
 from moatless.actions.run_tests import RunTests
 from moatless.actions.search_base import SearchBaseAction
 from moatless.actions.semantic_search import SemanticSearch
 from moatless.agent.code_agent import CodingAgent
 from moatless.completion.completion import CompletionModel
 from moatless.file_context import FileContext
+from moatless.index.code_index import CodeIndex
 from moatless.node import Node
 from moatless.repository.repository import InMemRepository
-from moatless.index.code_index import CodeIndex
-from moatless.runtime.runtime import TestResult
 from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.runtime.runtime import TestResult
 from moatless.templates import create_coding_actions
 
 

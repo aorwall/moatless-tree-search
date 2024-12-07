@@ -34,6 +34,10 @@ class MessageHistoryGenerator(BaseModel):
         default=20000,
         description="Maximum number of tokens allowed in message history"
     )
+    thoughts_in_action: bool = Field(
+        default=False,
+        description="Whether to include thoughts in the action or in the message"
+    )
 
     model_config = {
         "ser_json_timedelta": "iso8601",
@@ -42,6 +46,10 @@ class MessageHistoryGenerator(BaseModel):
         "json_schema_serialization_defaults": True,
         "json_encoders": None,  # Remove this as it's v1 syntax
     }
+
+    def __init__(self, **data: Any):
+        super().__init__(**data)
+
 
     @field_serializer('message_history_type')
     def serialize_message_history_type(self, message_history_type: MessageHistoryType) -> str:
@@ -70,17 +78,27 @@ class MessageHistoryGenerator(BaseModel):
         if len(previous_nodes) <= 1:
             return messages
 
-        node_messages = self.get_node_messages(node)
+        for i, previous_node in enumerate(previous_nodes):
+            if previous_node.message:
+                messages.append(UserMessage(content=previous_node.message))
 
-        for action, observation in node_messages:
-            thoughts = (
-                f"<thoughts>{action.thoughts}</thoughts>"
-                if hasattr(action, "thoughts")
-                else ""
-            )
+            if previous_node.action:
+                tool_call = previous_node.action.to_tool_call()
 
-            messages.append(AssistantMessage(tool_call=action.to_tool_call(thoughts_in_action=True)))
-            messages.append(UserMessage(content=f"<observation>\n{observation}\n</observation>"))
+                if not self.thoughts_in_action:
+                    if "thoughts" in tool_call.input:
+                        del tool_call.input["thoughts"]
+                    content = f"<thoughts>{previous_node.action.thoughts}</thoughts>"
+                else:
+                    content = None
+
+                messages.append(AssistantMessage(content=content, tool_call=previous_node.action.to_tool_call()))
+
+                observation = ""
+                if previous_node.observation:
+                    observation += previous_node.observation.message
+
+                messages.append(UserMessage(content=observation))
 
         tokens = count_tokens("".join([m.content for m in messages if m.content is not None]))
         logger.info(f"Generated {len(messages)} messages with {tokens} tokens")

@@ -1,20 +1,19 @@
 import json
-import logging
-import pytest
-from typing import List
 
-from moatless.actions.model import Observation, ActionArguments
-from moatless.actions.string_replace import StringReplaceArgs
-from moatless.node import Node
-from moatless.message_history import MessageHistoryGenerator, MessageHistoryType
-from moatless.completion.model import Message, UserMessage, AssistantMessage
+import pytest
+
+from moatless.actions.create_file import CreateFileArgs
 from moatless.actions.finish import FinishArgs
+from moatless.actions.model import Observation, ActionArguments
+from moatless.actions.run_tests import RunTestsArgs, TestResult, TestStatus
+from moatless.actions.string_replace import StringReplaceArgs
+from moatless.actions.view_code import CodeSpan, ViewCodeArgs
+from moatless.completion.model import UserMessage, AssistantMessage
 from moatless.file_context import FileContext
+from moatless.message_history import MessageHistoryGenerator, MessageHistoryType
+from moatless.node import Node
 from moatless.repository.repository import InMemRepository
 from moatless.utils.tokenizer import count_tokens
-from moatless.actions.view_code import CodeSpan, ViewCodeArgs
-from moatless.actions.run_tests import RunTestsArgs, TestResult, TestStatus
-from moatless.actions.create_file import CreateFileArgs
 
 
 class TestActionArguments(ActionArguments):

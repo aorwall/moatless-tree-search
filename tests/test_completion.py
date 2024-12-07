@@ -1,19 +1,18 @@
 import json
+from typing import Optional
+from unittest.mock import patch, MagicMock
+
 import anthropic.types
+import pytest
 from litellm.types.utils import ModelResponse
 
-from moatless.actions import FindFunction
 from moatless.actions.create_file import CreateFileArgs
 from moatless.actions.find_function import FindFunctionArgs
 from moatless.actions.model import ActionArguments
 from moatless.actions.string_replace import StringReplaceArgs
-from moatless.completion.model import Usage, Completion, StructuredOutput
-import pytest
 from moatless.completion.completion import CompletionModel, LLMResponseFormat
-from typing import Optional
+from moatless.completion.model import Usage, Completion, StructuredOutput
 from moatless.exceptions import CompletionRejectError
-
-from unittest.mock import patch, MagicMock
 
 
 class TestCompletion:

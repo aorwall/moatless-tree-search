@@ -1,6 +1,6 @@
 import os
 
-from moatless.benchmark.evaluation import Evaluation, TreeSearchSettings, ModelSettings
+from moatless.benchmark.evaluation import TreeSearchSettings, ModelSettings
 from moatless.benchmark.run_evaluation import evaluate_search_and_code
 
 repo_base_dir = "/tmp/repos"

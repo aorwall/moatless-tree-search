@@ -52,10 +52,9 @@ class CodingAgent(ActionAgent):
         code_index: CodeIndex | None = None,
         runtime: RuntimeEnvironment | None = None,
         edit_completion_model: CompletionModel | None = None,
-        message_history_type: MessageHistoryType = MessageHistoryType.REACT,
+        message_history_type: MessageHistoryType | None = None,
         **kwargs,
     ):
-
         if completion_model.supports_anthropic_computer_use:
             actions = create_claude_coding_actions(
                 repository=repository,
@@ -63,25 +62,48 @@ class CodingAgent(ActionAgent):
                 completion_model=completion_model,
             )
             system_prompt = CLAUDE_REACT_PROMPT
+            action_type = "Claude actions with computer use capability"
+            use_few_shots = False
         else:
             actions = create_edit_code_actions(
                 repository=repository,
                 code_index=code_index,
                 completion_model=completion_model,
             )
-
             system_prompt = SYSTEM_PROMPT
-        
+            action_type = "standard edit code actions"
+            use_few_shots = True
+
+        if message_history_type is None:
+            if completion_model.response_format == LLMResponseFormat.TOOLS:
+                message_history_type = MessageHistoryType.MESSAGES
+            else:
+                message_history_type = MessageHistoryType.REACT
+
         message_generator = MessageHistoryGenerator(
             message_history_type=message_history_type,
             include_file_context=True
         )
+
+        config = {
+            "completion_model": completion_model.__class__.__name__,
+            "code_index_enabled": code_index is not None,
+            "runtime_enabled": runtime is not None,
+            "edit_completion_model": edit_completion_model.__class__.__name__ if edit_completion_model else None,
+            "action_type": action_type,
+            "actions": [a.__class__.__name__ for a in actions],
+            "message_history_type": message_history_type.value,
+            "file_context_enabled": True
+        }
+        
+        logger.info(f"Created CodingAgent with configuration: {json.dumps(config, indent=2)}")
 
         return cls(
             completion=completion_model,
             actions=actions,
             system_prompt=system_prompt,
             message_generator=message_generator,
+            use_few_shots=use_few_shots,
             **kwargs,
         )
 
@@ -177,8 +199,11 @@ def create_claude_coding_actions(
 ) -> List[Action]:
     actions = create_base_actions(repository, code_index, completion_model)
     actions.append(
-        ClaudeEditTool(code_index=code_index, repository=repository)
+        ClaudeEditTool(code_index=code_index, repository=repository),
+
     )
+    actions.append(ListFiles())
+    actions.append(RunTests(repository=repository, code_index=code_index))
     actions.extend([Finish(), Reject()])
     return actions
 

@@ -4,8 +4,10 @@ from typing import Literal, Optional, List
 
 from pydantic import Field, PrivateAttr
 
-from moatless.actions import RunTests
+from moatless.actions import RunTests, CreateFile
 from moatless.actions.action import Action
+from moatless.actions.code_modification_mixin import CodeModificationMixin
+from moatless.actions.create_file import CreateFileArgs
 from moatless.actions.model import ActionArguments, Observation, RetryException
 from moatless.actions.run_tests import RunTestsArgs
 from moatless.actions.string_replace import StringReplace, StringReplaceArgs
@@ -56,7 +58,7 @@ class EditActionArguments(ActionArguments):
         )
 
 
-class ClaudeEditTool(Action):
+class ClaudeEditTool(Action, CodeModificationMixin):
     """
     An filesystem editor tool that allows the agent to view, create, and edit files.
     The tool parameters are defined by Anthropic and are not editable.
@@ -68,8 +70,8 @@ class ClaudeEditTool(Action):
         2000, description="Max tokens to view in one command"
     )
 
-    _runtime: RuntimeEnvironment | None = PrivateAttr(None)
-    _code_index: CodeIndex | None = PrivateAttr(None)
+    _str_replace: StringReplace = PrivateAttr()
+    _create_file: CreateFile = PrivateAttr()
     _repository: Repository | None = PrivateAttr(None)
 
     def __init__(
@@ -80,9 +82,20 @@ class ClaudeEditTool(Action):
         **data,
     ):
         super().__init__(**data)
-        self._runtime = runtime
-        self._code_index = code_index
-        self._repository = repository
+        object.__setattr__(self, "_runtime", runtime)
+        object.__setattr__(self, "_code_index", code_index)
+        object.__setattr__(self, "_repository", repository)
+
+        self._str_replace = StringReplace(
+            runtime=self._runtime,
+            code_index=self._code_index,
+            repository=self._repository,
+        )
+        self._create_file = CreateFile(
+            runtime=self._runtime,
+            code_index=self._code_index,
+            repository=self._repository,
+        )
 
     def execute(
         self, args: EditActionArguments, file_context: FileContext
@@ -115,19 +128,28 @@ class ClaudeEditTool(Action):
                     message="Parameter `file_text` is required for command: create",
                     action_args=args,
                 )
-            observation = self._create(file_context, path, args.file_text)
+            return self._create_file.execute(
+                CreateFileArgs(
+                    path=args.path,
+                    file_text=args.file_text,
+                    thoughts=args.thoughts,
+                ),
+                file_context,
+            )
         elif args.command == "str_replace":
             if not args.old_str:
                 raise RetryException(
                     message="Parameter `old_str` is required for command: str_replace",
                     action_args=args,
                 )
-            str_replace = StringReplace(
-                runtime=self._runtime,
-                code_index=self._code_index,
-                repository=self._repository,
-            )
-            return str_replace.execute(
+
+            if args.new_str is None:
+                raise RetryException(
+                    message="Parameter `new_str` cannot be null for command: str_replace",
+                    action_args=args,
+                )
+
+            return self._str_replace.execute(
                 StringReplaceArgs(
                     path=args.path,
                     old_str=args.old_str,
@@ -162,22 +184,13 @@ class ClaudeEditTool(Action):
         if not self._runtime:
             return observation
 
-        run_tests = RunTests(
-            fail_on_not_found=False,
-            repository=self._repository,
-            runtime=self._runtime,
-            code_index=self._code_index,
-        )
-        test_observation = run_tests.execute(
-            RunTestsArgs(
-                thoughts=args.thoughts,
-                test_files=[args.path],
-            ),
-            file_context,
+        test_summary = self.run_tests(
+            file_path=str(path),
+            file_context=file_context,
         )
 
-        observation.properties.update(test_observation.properties)
-        observation.message += "\n\n" + test_observation.message
+        if test_summary:
+            observation.message += f"\n\n{test_summary}"
 
         return observation
 
@@ -275,25 +288,6 @@ class ClaudeEditTool(Action):
         message = self._make_output(file_content, f"{path}", init_line)
 
         return Observation(message=message, properties=properties)
-
-    def _create(
-        self, file_context: FileContext, path: Path, file_text: str
-    ) -> Observation:
-        if file_context.file_exists(str(path)):
-            return Observation(
-                message=f"File already exists at: {path}",
-                properties={"fail_reason": "file_exists"},
-            )
-
-        context_file = file_context.add_file(str(path))
-        context_file.apply_changes(file_text)
-
-        diff = do_diff(str(path), "", file_text)
-
-        return Observation(
-            message=f"File created successfully at: {path}",
-            properties={"diff": diff},
-        )
 
     def _insert(
         self, file_context: FileContext, path: Path, insert_line: int, new_str: str

@@ -335,13 +335,34 @@ class FileRepository(Repository):
                 grep_pattern = "."
 
             cmd = ["grep", "-n", "-r", search_text, grep_pattern]
-
             logger.info(f"Executing grep command: {' '.join(cmd)}")
             logger.info(f"Search directory: {self.repo_path}")
 
             result = subprocess.run(
                 cmd, cwd=self.repo_path, capture_output=True, text=True
             )
+
+            # If grep fails with "Invalid regular expression", retry with escaped search text
+            if result.returncode not in (0, 1) and "Invalid regular expression" in result.stderr:
+                escaped_search_text = search_text.replace('[', '\\[') \
+                                               .replace(']', '\\]') \
+                                               .replace('(', '\\(') \
+                                               .replace(')', '\\)') \
+                                               .replace('.', '\\.') \
+                                               .replace('+', '\\+') \
+                                               .replace('*', '\\*') \
+                                               .replace('?', '\\?') \
+                                               .replace('|', '\\|') \
+                                               .replace('{', '\\{') \
+                                               .replace('}', '\\}') \
+                                               .replace('$', '\\$') \
+                                               .replace('^', '\\^')
+
+                cmd = ["grep", "-n", "-r", escaped_search_text, grep_pattern]
+                logger.info(f"Retrying with escaped search text: {' '.join(cmd)}")
+                result = subprocess.run(
+                    cmd, cwd=self.repo_path, capture_output=True, text=True
+                )
 
             if result.returncode not in (0, 1):  # grep returns 1 if no matches found
                 logger.info(

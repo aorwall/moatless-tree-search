@@ -18,19 +18,13 @@ _action_args: Dict[str, Type["ActionArguments"]] = {}
 
 
 class ActionArguments(StructuredOutput, ABC):
-    thoughts: str = Field(description="Your reasoning for the action.")
+    thoughts: str = Field(..., description="Your reasoning for the action.")
 
     class Config:
         title = "Action"
 
-    @classproperty
-    def name(cls):
-        return cls.Config.title if hasattr(cls.Config, "title") else cls.__name__
-
-    def to_tool_call(self, thoughts_in_action: bool = False) -> ToolCall:
+    def to_tool_call(self) -> ToolCall:
         tool_input = self.model_dump()
-        if not thoughts_in_action and "thoughts" in tool_input:
-            del tool_input["thoughts"]
 
         return ToolCall(name=self.name, input=tool_input)
 

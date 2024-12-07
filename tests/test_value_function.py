@@ -1,13 +1,13 @@
-import pytest
 from unittest.mock import Mock, patch
 
-from moatless.actions.model import RewardScaleEntry
-from moatless.value_function.base import ValueFunction
-from moatless.completion.completion import CompletionModel
-from moatless.node import Node, Reward
+import pytest
+
 from moatless.actions.finish import Finish, FinishArgs
+from moatless.actions.model import RewardScaleEntry
+from moatless.completion.completion import CompletionModel
 from moatless.file_context import FileContext
-from moatless.completion.model import Completion
+from moatless.node import Node
+from moatless.value_function.base import ValueFunction
 
 
 @pytest.fixture

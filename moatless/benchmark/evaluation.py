@@ -405,7 +405,7 @@ class Evaluation:
             }
 
         logger.info(f"Evaluating {instance_id}")
-        problem_statement = f"<task>\n{instance['problem_statement']}\n</task>"
+        problem_statement = f"task>\nSolve the following reported issue in the {instance['repo']} repository:\n\n{instance['problem_statement']}\n</task>"
 
         runtime = None
         repository = None
@@ -477,9 +477,6 @@ class Evaluation:
                         runtime=runtime,
                         message_history_type=self.settings.agent_message_history_type,
                     )
-
-                    agent_role = f"""You are an autonomous AI assistant and a core member of the development team for the {instance["repo"]} project. As a senior developer on the team, you have deep knowledge of the codebase and best practices."""
-                    agent.system_prompt = f"{agent_role}\n\n{agent.system_prompt}"
 
                     if self.selector:
                         selector = self.selector

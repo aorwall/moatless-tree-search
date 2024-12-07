@@ -1,17 +1,17 @@
+import json
 from unittest.mock import Mock
 
 import pytest
+
 from moatless.benchmark.swebench import setup_swebench_repo
 from moatless.benchmark.utils import get_moatless_instance
 from moatless.repository import FileRepository
 from moatless.runtime.runtime import TestStatus
 from moatless.runtime.testbed import TestbedEnvironment
+from testbeds.schema import TestRunResponse
+from testbeds.sdk import TestbedSDK
 from testbeds.swebench.test_spec import TestSpec
 from testbeds.swebench.utils import load_swebench_instance
-from testbeds.sdk import TestbedSDK
-from testbeds.schema import EvaluationResult, TraceItem, TestRunResponse, TestResult
-
-import json
 
 try:
     import testbeds
