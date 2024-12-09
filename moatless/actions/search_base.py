@@ -288,7 +288,7 @@ class SearchBaseAction(Action):
 
         MAX_RETRIES = 3
         for retry_attempt in range(MAX_RETRIES):
-            identified_code, completion = self.completion_model.create_completion(
+            completion_response = self.completion_model.create_completion(
                 messages=messages,
                 system_prompt=IDENTIFY_SYSTEM_PROMPT,
                 response_model=Identify,
@@ -297,6 +297,7 @@ class SearchBaseAction(Action):
                 f"Identifying relevant code sections. Attempt {retry_attempt + 1} of {MAX_RETRIES}.\n{identified_code.identified_spans}"
             )
 
+            identified_code = completion_response.structured_output
             view_context = FileContext(repo=self._repository)
             if identified_code.identified_spans:
                 for identified_spans in identified_code.identified_spans:
@@ -307,7 +308,7 @@ class SearchBaseAction(Action):
                         add_extra=True,
                     )
             else:
-                return view_context, completion
+                return view_context, completion_response.completion
 
             tokens = view_context.context_size()
 
@@ -330,7 +331,7 @@ class SearchBaseAction(Action):
                 logger.info(
                     f"Identified code sections are within the token limit ({tokens} tokens)."
                 )
-                return view_context, completion
+                return view_context, completion_response.completion
 
         # If we've exhausted all retries and still too large
         raise CompletionRejectError(

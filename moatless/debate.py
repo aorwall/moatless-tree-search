@@ -83,14 +83,14 @@ class MultiAgentDebate(BaseModel):
                     )
                     agent_context.append(debate_message)
 
-                action_request, completion = self.completion.create_completion(
+                completion_response = self.completion.create_completion(
                     messages=agent_context,
                     system_prompt=system_prompt,
                     actions=[output_format],
                 )
 
                 assistant_message = self.format_agent_message(
-                    action_request, completion
+                    completion_response.structured_output, completion_response.completion
                 )
                 agent_context.append(assistant_message)
 
@@ -176,26 +176,13 @@ class MultiAgentDebate(BaseModel):
             Message(role="user", content=conclusion_prompt),
         ]
 
-        action_request, completion = self.completion.create_completion(
+        completion_response = self.completion.create_completion(
             messages=conclusion_context,
             system_prompt="You are a highly capable AI assistant tasked with synthesizing information and reaching conclusions.",
-            actions=[output_format],
+            response_model=[output_format],
         )
 
-        if isinstance(completion, dict) and "choices" in completion:
-            choice = completion["choices"][0]
-            if "message" in choice and "tool_calls" in choice["message"]:
-                tool_call = choice["message"]["tool_calls"][0]
-                if (
-                    "function" in tool_call
-                    and "parsed_arguments" in tool_call["function"]
-                ):
-                    parsed_args = tool_call["function"]["parsed_arguments"]
-                    conclusion = output_format(**parsed_args)
-                    return action_request, completion, conclusion
-
-        # Fallback if the expected structure is not found
-        return action_request, completion, None
+        return completion_response.structured_output, completion_response.completion, None
 
     def format_agent_message(self, action_request, completion):
         if action_request:

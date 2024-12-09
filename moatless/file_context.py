@@ -18,13 +18,11 @@ from moatless.codeblocks.codeblocks import (
     SpanType,
 )
 from moatless.codeblocks.module import Module
-from moatless.index import CodeIndex
 from moatless.repository import FileRepository
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment, TestResult
 from moatless.schema import FileWithSpans
 from moatless.utils.tokenizer import count_tokens
-from testbeds.schema import TestStatus
 
 logger = logging.getLogger(__name__)
 
@@ -650,6 +648,8 @@ class ContextFile(BaseModel):
     def add_span(
         self,
         span_id: str,
+        start_line: Optional[int] = None,
+        end_line: Optional[int] = None,
         tokens: Optional[int] = None,
         pinned: bool = False,
         add_extra: bool = True,
@@ -667,7 +667,7 @@ class ContextFile(BaseModel):
             span = self.module.find_span_by_id(span_id)
             if span:
                 self.spans.append(
-                    ContextSpan(span_id=span_id, tokens=tokens, pinned=pinned)
+                    ContextSpan(span_id=span_id, start_line=start_line, end_line=start_line, tokens=tokens, pinned=pinned)
                 )
                 if add_extra:
                     self._add_class_span(span)
@@ -721,19 +721,14 @@ class ContextFile(BaseModel):
         )
 
         added_spans = []
-        tokens = 0
         for block in blocks:
             if (
                 block.belongs_to_span
                 and block.belongs_to_span.span_id not in self.span_ids
             ):
                 added_spans.append(block.belongs_to_span.span_id)
-                self.add_span(block.belongs_to_span.span_id, add_extra=add_extra)
-                tokens += block.belongs_to_span.tokens
+                self.add_span(block.belongs_to_span.span_id, start_line=start_line, end_line=end_line, add_extra=add_extra)
 
-        logger.info(
-            f"Added {added_spans} with {tokens} tokens on lines {start_line} - {end_line} to {self.file_path} to context"
-        )
         return added_spans
 
     def lines_is_in_context(self, start_line: int, end_line: int) -> bool:
@@ -1388,7 +1383,9 @@ class FileContext(BaseModel):
         all_results = []
         for test_file in self._test_files.values():
             all_results.extend(test_file.test_results)
-            
+
+        from testbeds.schema import TestStatus
+
         failure_count = sum(1 for r in all_results if r.status == TestStatus.FAILED)
         error_count = sum(1 for r in all_results if r.status == TestStatus.ERROR)
         passed_count = len(all_results) - failure_count - error_count
@@ -1508,10 +1505,12 @@ class FileContext(BaseModel):
         Returns:
             str: Summary string of test results
         """
+        from testbeds.schema import TestStatus
+
         all_results = []
         for test_file in self._test_files.values():
             all_results.extend(test_file.test_results)
-            
+
         failure_count = sum(1 for r in all_results if r.status == TestStatus.FAILED)
         error_count = sum(1 for r in all_results if r.status == TestStatus.ERROR)
         passed_count = len(all_results) - failure_count - error_count
@@ -1525,6 +1524,9 @@ class FileContext(BaseModel):
         Returns:
             str: Formatted string containing details of failed tests
         """
+
+        from testbeds.schema import TestStatus
+
         test_result_strings = []
         for test_file in self._test_files.values():
             for result in test_file.test_results:
@@ -1543,7 +1545,7 @@ class FileContext(BaseModel):
         
         return "\n".join(test_result_strings) if test_result_strings else ""
 
-    def get_test_status(self) -> Optional[TestStatus]:
+    def get_test_status(self) -> Optional["TestStatus"]:
         """
         Returns the overall test status based on all test results.
         Returns ERROR if any test has error status,
@@ -1554,6 +1556,9 @@ class FileContext(BaseModel):
         Returns:
             Optional[TestStatus]: The overall test status
         """
+
+        from testbeds.schema import TestStatus
+
         all_results = []
         for test_file in self._test_files.values():
             all_results.extend(test_file.test_results)

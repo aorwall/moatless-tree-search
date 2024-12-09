@@ -40,6 +40,29 @@ class LLMResponseFormat(str, Enum):
     ANTHROPIC_TOOLS = "anthropic_tools"
     REACT = "react"
 
+class CompletionResponse(BaseModel):
+    """Container for completion responses that can include multiple structured outputs and text"""
+    structured_outputs: List[StructuredOutput] = Field(default_factory=list)
+    text_response: Optional[str] = Field(default=None)
+    completion: Optional[Completion] = Field(default=None)
+
+    @classmethod 
+    def single(cls, output: StructuredOutput, completion: Optional[Completion] = None) -> 'CompletionResponse':
+        """Helper to create response with single output"""
+        return cls(structured_outputs=[output], completion=completion)
+
+    @classmethod
+    def text(cls, text: str, completion: Optional[Completion] = None) -> 'CompletionResponse':
+        """Helper to create text-only response"""
+        return cls(structured_outputs=[], text_response=text, completion=completion)
+
+    @property
+    def structured_output(self) -> Optional[StructuredOutput]:
+        """Get the first structured output"""
+        if len(self.structured_outputs) > 0:
+            logger.warning("Multiple structured outputs found in completion response, returning the first one")
+        return self.structured_outputs[0] if self.structured_outputs else None
+
 
 class CompletionModel(BaseModel):
 
@@ -112,16 +135,16 @@ class CompletionModel(BaseModel):
 
     def create_completion(
         self,
-        messages: List[Message],
+        messages: List[dict],
         system_prompt: str,
         response_model: List[type[StructuredOutput]]
         | type[StructuredOutput]
         | None = None,
-    ) -> Tuple[StructuredOutput, Completion]:
+    ) -> CompletionResponse:
         if not system_prompt:
             raise ValueError("System prompt is required")
 
-        completion_messages = self._map_completion_messages(messages)
+        completion_messages = messages
         completion_response = None
         try:
             if self.use_anthropic_client:
@@ -158,7 +181,7 @@ class CompletionModel(BaseModel):
         except Exception as e:
             if isinstance(e, APIError):
                 logger.error(
-                    f"Request failed. self.model: {self.model}, base_url: {self.model_base_url}. Model: {e.model}, Provider {e.llm_provider}. Litellm {e.litellm_debug_info}. Exception {e.message}"
+                    f"Request failed. self.model: {self.model}, base_url: {self.model_base_url}. Model: {e.model}, Provider {e.llm_provider}. Litellm {e.litellm_debug_info}. Exception {e.message}.  Input messages: {json.dumps(messages, indent=2)}"
                 )
                 if e.status_code >= 500:
                     raise CompletionRejectError(
@@ -168,7 +191,7 @@ class CompletionModel(BaseModel):
                     ) from e
 
             else:
-                logger.error(f"Failed to get completion response from litellm: {e}")
+                logger.exception(f"Failed to create completion. Input messages: {json.dumps(messages, indent=2)}")
 
             raise CompletionRuntimeError(
                 f"Failed to get completion response: {e}",
@@ -195,7 +218,7 @@ class CompletionModel(BaseModel):
                 last_completion=completion_response,
             )
 
-        return action_args, completion
+        return CompletionResponse.single(action_args, completion)
 
     def create_text_completion(self, messages: List[Message], system_prompt: str):
         completion_messages = self._map_completion_messages(messages)
@@ -226,7 +249,7 @@ class CompletionModel(BaseModel):
         messages: list[dict],
         system_prompt: str,
         structured_output: type[StructuredOutput] | list[type[StructuredOutput]],
-    ) -> Tuple[StructuredOutput, ModelResponse]:
+    ) -> Tuple[StructuredOutput | str, ModelResponse]:
         if not structured_output:
             raise CompletionRuntimeError(f"Response model is required for completion")
 
@@ -708,10 +731,9 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
         tools = []
         if actions:
             for action in actions:
-                schema = action.openai_schema()
                 tools.append(
                     openai.pydantic_function_tool(
-                        action, name=schema["name"], description=schema["description"]
+                        action, name=action.name, description=action.description
                     )
                 )
 
@@ -734,7 +756,6 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                     temperature=self.temperature,
                     stop=self.stop_words,
                     messages=messages,
-                    response_format=response_format,
                 )
         except LengthFinishReasonError as e:
             logger.error(
@@ -747,30 +768,8 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                 rejection_reason=f"Failed to generate action: {e}"
             ), e.completion
 
-        if not actions:
-            response = completion_response.choices[0].message.parsed
-            return response, completion_response
-
-        elif not completion_response.choices[0].message.tool_calls:
-            if is_retry:
-                logger.error(
-                    f"No tool call return on request with tools: {tools}.\n\nCompletion response: {completion_response}"
-                )
-                raise RuntimeError(f"No tool call in response from LLM.")
-
-            logger.warning(
-                f"No tool call return on request with tools: {tools}.\n\nCompletion response: {completion_response}. Will retry"
-            )
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": completion_response.choices[0].message.content,
-                }
-            )
-            messages.append(
-                {"role": "user", "content": "You must response with a tool call."}
-            )
-            return self._openai_completion(messages, actions, response_format, is_retry)
+        if not completion_response.choices[0].message.tool_calls:
+            return completion_response.choices[0].message.content, completion_response
         else:
             tool_call = completion_response.choices[0].message.tool_calls[0]
             action_request = tool_call.function.parsed_arguments

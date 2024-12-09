@@ -405,7 +405,7 @@ class Evaluation:
             }
 
         logger.info(f"Evaluating {instance_id}")
-        problem_statement = f"task>\nSolve the following reported issue in the {instance['repo']} repository:\n\n{instance['problem_statement']}\n</task>"
+        problem_statement = f"<task>\nSolve the following reported issue in the {instance['repo']} repository:\n\n{instance['problem_statement']}\n</task>"
 
         runtime = None
         repository = None

@@ -23,23 +23,27 @@ from moatless.value_function.model import Reward
 logger = logging.getLogger(__name__)
 
 
+class ActionStep(BaseModel):
+    action: ActionArguments
+    observation: Optional[Observation] = None
+    completion: Optional[Completion] = None
+
 
 class Node(BaseModel):
     node_id: int = Field(..., description="The unique identifier of the node")
     parent: Optional["Node"] = Field(None, description="The parent node")
     children: List["Node"] = Field(default_factory=list, description="The child nodes")
-
-    action: Optional[ActionArguments] = Field(
-        None, description="The action associated with the node"
+    
+    user_message: Optional[str] = Field(None, description="The user message for this node")
+    assistant_message: Optional[str] = Field(None, description="The assistant response for this node")
+    
+    action_steps: List[ActionStep] = Field(
+        default_factory=list,
+        description="The sequence of actions and observations for this node"
     )
-    observation: Optional[Observation] = Field(
-        None, description="The output of the action"
-    )
+    
     file_context: Optional[FileContext] = Field(
         None, description="The file context state associated with the node"
-    )
-    message: Optional[str] = Field(
-        None, description="The message associated with the node"
     )
     feedback: Optional[str] = Field(None, description="Feedback provided to the node")
     completions: Dict[str, Completion] = Field(
@@ -52,18 +56,60 @@ class Node(BaseModel):
         None, description="Flag to indicate if the node is a duplicate"
     )
     reward: Optional[Reward] = Field(None, description="The reward of the node")
-    visits: int = Field(
-        0, description="The number of times the node has been visited"
-    )
-    value: Optional[float] = Field(
-        None, description="The total value (reward) of the node"
-    )
-    max_expansions: Optional[int] = Field(
-        None, description="The maximum number of expansions"
-    )
+    visits: int = Field(0, description="The number of times the node has been visited")
+    value: Optional[float] = Field(None, description="The total value (reward) of the node")
+    max_expansions: Optional[int] = Field(None, description="The maximum number of expansions")
     agent_settings: Optional[AgentSettings] = Field(
         None, description="The agent settings associated with the node"
     )
+
+    @property
+    def action(self) -> Optional[ActionArguments]:
+        """Backward compatibility: Get action from the latest action step"""
+        if not self.action_steps:
+            return None
+        return self.action_steps[-1].action if self.action_steps else None
+
+    @action.setter
+    def action(self, value: Optional[ActionArguments]):
+        """Backward compatibility: Set action on the current/new action step"""
+
+        if not self.action_steps:
+            self.action_steps.append(ActionStep(action=value))
+        else:
+            self.action_steps[-1].action = value
+
+    @property 
+    def observation(self) -> Optional[Observation]:
+        """Backward compatibility: Get observation from the latest action step"""
+        if not self.action_steps:
+            return None
+        return self.action_steps[-1].observation if self.action_steps else None
+
+    @observation.setter
+    def observation(self, value: Optional[Observation]):
+        """Backward compatibility: Set observation on the current/new action step"""
+        if value is None:
+            return
+            
+        if not self.action_steps:
+            # Create new action step if setting observation on empty node
+            self.action_steps.append(ActionStep(
+                action=self.action,
+                observation=value
+            ))
+        else:
+            self.action_steps[-1].observation = value
+
+    @property
+    def message(self) -> Optional[str]:
+        """Backward compatibility: Get message maps to user_message"""
+        return self.user_message
+
+    @message.setter
+    def message(self, value: Optional[str]):
+        """Backward compatibility: Set message maps to user_message"""
+        self.user_message = value
 
     @classmethod
     def stub(cls, **kwargs):
@@ -83,10 +129,10 @@ class Node(BaseModel):
 
     def is_terminal(self) -> bool:
         """Determine if the current state is a terminal state."""
-        if self.observation and self.observation.terminal:
-            return True
-
-        return False
+        if not self.action_steps:
+            return False
+        last_step = self.action_steps[-1]
+        return last_step.observation.terminal if last_step.observation else False
 
     def is_finished(self) -> bool:
         """Determine if the node is succesfully finished"""
@@ -191,11 +237,12 @@ class Node(BaseModel):
 
     def total_usage(self) -> Usage:
         total_usage = Usage()
-
-        for completion in self.completions.values():
-            if completion:
-                total_usage += completion.usage
-
+        
+        # Sum usage across all action steps
+        for step in self.action_steps:
+            if step.completion:
+                total_usage += step.completion.usage
+                    
         return total_usage
 
 
@@ -213,17 +260,15 @@ class Node(BaseModel):
 
     def reset(self):
         """Reset the node state to be able to execute it again."""
-
-        self.action = None
+        self.action_steps = []
+        self.user_message = None
+        self.assistant_message = None
         self.visits = 0
         self.value = 0.0
-        self.observation = None
         self.feedback = None
-        self.completions = {}
         self.is_duplicate = False
         if self.parent and self.parent.file_context:
             self.file_context = self.parent.file_context.clone()
-
         self.children = []
 
     def clone_and_reset(self) -> "Node":
@@ -240,7 +285,7 @@ class Node(BaseModel):
             visits=self.visits,
             value=self.value,
             max_expansions=self.max_expansions,
-            message=self.message,
+            user_message=self.user_message,
             feedback=self.feedback,
             is_duplicate=self.is_duplicate,
             action=self.action,
@@ -309,19 +354,28 @@ class Node(BaseModel):
         repo: Repository | None = None,
         runtime: RuntimeEnvironment | None = None
     ) -> "Node":
-        if node_data.get("action"):
-            node_data["action"] = ActionArguments.model_validate(node_data["action"])
+        """Update reconstruction to handle both old and new formats"""
+        
+        # Handle legacy format conversion
+        if "action" in node_data and not "action_steps" in node_data:
+            action = node_data.get("action")
+            observation = node_data.get("output")
+            completions = node_data.get("completions", {})
+            
+            if action or observation or completions:
+                node_data["action_steps"] = [{
+                    "action": action,
+                    "observation": observation,
+                    "completions": completions
+                }]
 
-        if node_data.get("output"):
-            node_data["observation"] = Observation.model_validate(node_data["output"])
+        if "message" in node_data and not "user_message" in node_data:
+            node_data["user_message"] = node_data.pop("message")
 
-        if node_data.get("completions"):
-            for key, completion_data in node_data["completions"].items():
-                completion = Completion.model_validate(completion_data)
-                node_data["completions"][key] = completion
-
-        if node_data.get("reward"):
-            node_data["reward"] = Reward.model_validate(node_data["reward"])
+        if node_data.get("action_steps"):
+            node_data["action_steps"] = [
+                ActionStep.model_validate(step) for step in node_data["action_steps"]
+            ]
 
         if node_data.get("file_context"):
             node_data["file_context"] = FileContext.from_dict(

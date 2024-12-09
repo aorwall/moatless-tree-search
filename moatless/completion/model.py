@@ -189,8 +189,14 @@ class NameDescriptor:
         return cls.__name__
 
 
+class DescriptionDescriptor:
+    def __get__(self, obj, cls=None) -> str:
+        schema = cls.model_json_schema()
+        return schema.get("description", "")
+
 class StructuredOutput(BaseModel):
     name: ClassVar[NameDescriptor] = NameDescriptor()
+    description: ClassVar[DescriptionDescriptor] = DescriptionDescriptor()
 
     @classmethod
     def openai_schema(cls, thoughts_in_action: bool = False) -> dict[str, Any]:

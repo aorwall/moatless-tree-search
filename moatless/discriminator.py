@@ -119,11 +119,12 @@ Your task is to carefully evaluate each change and decide which one is the most 
                 output_format=AgentDiscriminatorChoice,
             )
         else:
-            response, completion = self.completion.create_completion(
+            completion_response = self.completion.create_completion(
                 messages,
                 system_prompt=SYSTEM_MESSAGE,
                 response_model=AgentDiscriminatorChoice,
             )
+            response = completion_response.structured_output
 
         return response.ID, response.EXPLANATION
 

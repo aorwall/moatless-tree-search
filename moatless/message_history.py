@@ -1,18 +1,17 @@
+import json
 import logging
-from enum import Enum
-from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field, field_serializer
+from typing import List, Any, Callable, Dict
+from pydantic import BaseModel, Field, field_serializer, PrivateAttr
 
 from moatless.actions.run_tests import RunTestsArgs
 from moatless.actions.view_code import ViewCodeArgs, CodeSpan
 from moatless.actions.view_diff import ViewDiffArgs
 from moatless.completion.model import Message, UserMessage, AssistantMessage
 from moatless.actions.model import ActionArguments
-from moatless.file_context import FileContext
+from moatless.exceptions import CompletionRuntimeError
 from moatless.node import Node
 from moatless.schema import MessageHistoryType
 from moatless.utils.tokenizer import count_tokens
-from testbeds.schema import TestStatus
 
 logger = logging.getLogger(__name__)
 
@@ -56,52 +55,74 @@ class MessageHistoryGenerator(BaseModel):
         return message_history_type.value
 
     def generate(self, node: "Node") -> List[Message]:  # type: ignore
-        previous_nodes = node.get_trajectory()[:-1]
-        if not previous_nodes:
-            return []
-
         logger.info(
             f"Generating message history for Node{node.node_id}: {self.message_history_type}"
         )
-
         generators = {
             MessageHistoryType.SUMMARY: self._generate_summary_history,
             MessageHistoryType.REACT: self._generate_react_history,
             MessageHistoryType.MESSAGES: self._generate_message_history
         }
-
+        previous_nodes = node.get_trajectory()[:-1]
         return generators[self.message_history_type](node, previous_nodes)
 
-    def _generate_message_history(self, node: "Node", previous_nodes: List["Node"]) -> List[Message]:
-        messages = [UserMessage(content=node.get_root().message)]
+    def _generate_message_history(self, node: Node, previous_nodes: List["Node"]) -> List[dict[str, Any]]:
+        messages = []
 
-        if len(previous_nodes) <= 1:
-            return messages
+        tool_idx = 0
+        tokens = 0
 
         for i, previous_node in enumerate(previous_nodes):
-            if previous_node.message:
-                messages.append(UserMessage(content=previous_node.message))
+            if previous_node.user_message:
+                messages.append({"role": "user", "content": previous_node.user_message})
+                tokens += count_tokens(previous_node.user_message)
 
-            if previous_node.action:
-                tool_call = previous_node.action.to_tool_call()
+            tool_calls = []
+            tool_responses = []
 
-                if not self.thoughts_in_action:
-                    if "thoughts" in tool_call.input:
-                        del tool_call.input["thoughts"]
-                    content = f"<thoughts>{previous_node.action.thoughts}</thoughts>"
-                else:
-                    content = None
+            if not previous_node.assistant_message and not previous_node.action_steps:
+                continue
 
-                messages.append(AssistantMessage(content=content, tool_call=previous_node.action.to_tool_call()))
+            for action_step in previous_node.action_steps:
+                tool_idx += 1
+                tool_call_id = f"tool_{tool_idx}"
 
-                observation = ""
-                if previous_node.observation:
-                    observation += previous_node.observation.message
+                tool_calls.append({
+                    "id": tool_call_id,
+                    "type": "function",
+                    "function": {
+                        "name": action_step.action.name,
+                        "arguments": action_step.action.model_dump_json(),
+                    },
+                })
 
-                messages.append(UserMessage(content=observation))
+                tokens += count_tokens(action_step.action.model_dump_json())
 
-        tokens = count_tokens("".join([m.content for m in messages if m.content is not None]))
+                tool_responses.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": previous_node.observation.message,
+                })
+
+                tokens += count_tokens(previous_node.observation.message)
+
+            assistant_message = {
+                "role": "assistant"
+            }
+
+            if tool_calls:
+                assistant_message["tool_calls"] = tool_calls
+
+            if previous_node.assistant_message:
+                assistant_message["content"] = previous_node.assistant_message
+                tokens += count_tokens(previous_node.assistant_message)
+
+            messages.append(assistant_message)
+            messages.extend(tool_responses)
+
         logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
+
+        logger.info(json.dumps(messages, indent=2))
         return messages
 
     def _generate_react_history(self, node: "Node", previous_nodes: List["Node"]) -> List[Message]:

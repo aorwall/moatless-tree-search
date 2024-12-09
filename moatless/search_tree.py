@@ -372,7 +372,7 @@ class SearchTree(BaseModel):
             root = Node(
                 node_id=0,
                 max_expansions=max_expansions,
-                message=message,
+                user_message=message,
                 reward=Reward(value=100),
                 file_context=file_context,
             )

@@ -15,6 +15,7 @@ class TestStatus(str, Enum):
 
 
 class TestResult(BaseModel):
+    name: Optional[str] = None
     status: TestStatus
     message: Optional[str] = None
     file_path: Optional[str] = None

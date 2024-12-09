@@ -278,32 +278,15 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                 expect_correction=True,
             )
 
-        match = exact_matches[0]
-        # Split content into lines for targeted replacement
-        content_lines = file_content.splitlines()
-        
-        if not context_file.lines_is_in_context(match["start_line"], match["end_line"]):
+        start_line = exact_matches[0]["start_line"]
+        end_line = exact_matches[0]["end_line"]
+        if not context_file.lines_is_in_context(start_line, end_line):
             properties["flags"] = ["lines_not_in_context"]
             logger.warning(
-                f"Lines {match['start_line']}-{match['end_line']} are not in context for {path}"
+                f"Lines {start_line}-{end_line} are not in context for {path}"
             )
-        
-        start_line = match["start_line"] - 1  # Convert to 0-based index
-        end_line = match["end_line"] 
 
-        # Replace only the specific lines we matched
-        old_content = "\n".join(content_lines[start_line:end_line])
-        if old_content != old_str:
-            logger.error(f"Content mismatch at lines {match['start_line']}-{match['end_line']}")
-            raise ValueError(f"Content mismatch at lines {match['start_line']}-{match['end_line']}")
-
-        # Create new content with targeted replacement
-        new_content_lines = (
-            content_lines[:start_line] +
-            new_str.splitlines() +
-            content_lines[end_line:]
-        )
-        new_file_content = "\n".join(new_content_lines)
+        new_file_content = file_content.replace(args.old_str, args.new_str)
         
         # Generate diff and apply changes
         diff = do_diff(str(path), file_content, new_file_content)
@@ -586,21 +569,27 @@ def find_potential_matches(old_str, new_content):
 
 def find_exact_matches(old_str: str, file_content: str) -> list[dict]:
     """Find exact matches of old_str in file_content, preserving line numbers."""
-    file_lines = file_content.splitlines()
-    old_str_lines = old_str.splitlines()
     matches = []
+    start_pos = 0
 
-    # Check each possible starting position in the file
-    for i in range(len(file_lines) - len(old_str_lines) + 1):
-        potential_match = "\n".join(file_lines[i : i + len(old_str_lines)])
-        if potential_match == old_str:
-            matches.append(
-                {
-                    "start_line": i + 1,
-                    "end_line": i + len(old_str_lines),
-                    "content": potential_match,
-                    "diff_reason": "exact_match",
-                }
-            )
+    while True:
+        # Find the start position of the match
+        start_pos = file_content.find(old_str, start_pos)
+        if start_pos == -1:
+            break
+
+        # Count newlines before the match to get line number
+        start_line = file_content.count('\n', 0, start_pos) + 1
+        end_line = start_line + old_str.count('\n')
+
+        matches.append({
+            "start_line": start_line,
+            "end_line": end_line,
+            "content": old_str,
+            "diff_reason": "exact_match"
+        })
+
+        # Move start_pos forward to find subsequent matches
+        start_pos += len(old_str)
 
     return matches

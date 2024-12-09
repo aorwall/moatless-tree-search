@@ -124,7 +124,8 @@ class RewardScaleEntry(BaseModel):
 
 
 class Observation(BaseModel):
-    message: str = Field(
+    message: Optional[str] = Field(
+        None,
         description="The message returned to the agent, will be displayed in message history."
     )
     summary: Optional[str] = Field(
