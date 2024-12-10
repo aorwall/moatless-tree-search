@@ -54,7 +54,11 @@ class Expander(BaseModel):
         if search_tree.feedback_generator:
             child_node.message = search_tree.feedback_generator.generate_feedback(
                 child_node, 
-                search_tree.agent.actions
+                search_tree.agent.actions,
+                include_parent_info=True,
+                persist_path=search_tree.persist_path,
+                include_tree=True,
+                include_node_suggestion=True
             )
             child_node.feedback = child_node.message
             logger.info(f"Generated feedback for Node{child_node.node_id}")

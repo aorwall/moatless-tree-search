@@ -36,9 +36,11 @@ from moatless.feedback.feedback_agent import FeedbackAgent
 from moatless.feedback.reward_feedback import RewardFeedbackGenerator
 from moatless.schema import MessageHistoryType
 from moatless.search_tree import SearchTree
-from moatless.selector import BestFirstSelector, SoftmaxSelector, Selector, LLMSelector
+from moatless.selector import BestFirstSelector, SoftmaxSelector, Selector, LLMSelector, FeedbackSelector
 from moatless.value_function.base import ValueFunction
 from moatless.value_function.coding import CodingValueFunction
+from moatless.benchmark.instance_collections import sampled_50_instances
+
 logger = logging.getLogger(__name__)
 
 
@@ -80,8 +82,8 @@ class TreeSearchSettings(BaseModel):
     )
     
     selector: str = Field(
-        "llm_selector",
-        options=["best_first", "softmax", "llm_selector"],
+        "best_first",
+        options=["best_first", "softmax", "llm_selector", "feedback"],
         description="The selector to use for the tree search.",
     )
 
@@ -356,6 +358,13 @@ class Evaluation:
             logger.info(
                 f"Running evaluation for {len(instances)} instances filtered by max_resolved <= {max_resolved}"
             )
+        
+        if split == "sampled_50_instances":
+            instances = [
+                instance for instance in instances 
+                if instance["instance_id"] in sampled_50_instances
+            ]
+            logger.info(f"Running evaluation for {len(instances)} instances from sampled_50_instances")
 
         if repos:
             instances = [
@@ -520,6 +529,8 @@ class Evaluation:
                             debate=self.settings.debate,
                             provide_feedback=self.settings.provide_feedback,
                         )
+                    elif self.settings.selector == "feedback":
+                        selector = FeedbackSelector()
                     else:
                         raise ValueError(f"Unknown selector: {self.settings.selector}")
                     

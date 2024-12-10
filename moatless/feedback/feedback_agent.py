@@ -132,9 +132,6 @@ class FeedbackAgent(FeedbackGenerator):
                         node.completions = {}
                     node.completions["feedback"] = completion
                     
-                    # Store the feedback text directly in the node
-                    node.feedback = feedback_response.feedback
-                    
                     # Save the feedback to file if requested
                     if persist_path:
                         self.save_feedback(
@@ -146,7 +143,7 @@ class FeedbackAgent(FeedbackGenerator):
                             raw_completion=completion_content
                         )
                     
-                    return feedback_response.feedback
+                    return feedback_response.analysis
                     
                 else:
                     logger.error("No JSON structure found in completion response")
@@ -228,8 +225,8 @@ class FeedbackAgent(FeedbackGenerator):
         
         messages.extend(history_messages)
 
-        # Format parallel attempts section
-        analysis_message = "# Parallel Solution Attempts\n"
+        # Format alternative attempts section
+        analysis_message = "# alternative Solution Attempts\n"
         has_finish_attempt = False
 
         for sibling in sibling_nodes:
@@ -257,7 +254,7 @@ class FeedbackAgent(FeedbackGenerator):
             analysis_message += "- Focus on exploring alternative solutions instead\n"
             analysis_message += "</warning>\n"
 
-        if analysis_message != "# Parallel Solution Attempts\n":
+        if analysis_message != "# alternative Solution Attempts\n":
             messages.append(UserMessage(content=analysis_message))
 
         return messages
@@ -271,7 +268,7 @@ class FeedbackAgent(FeedbackGenerator):
         # Store the JSON format based on whether node suggestion is included
         json_format = '''
 {
-    "analysis": "Brief analysis of parent state and lessons from parallel attempts",
+    "analysis": "Brief analysis of parent state and lessons from alternative attempts",
     "feedback": "Clear, actionable guidance for your next action"''' + ('''
     "suggested_node_id": null  // Optional: ID of the node that should be expanded next''' if include_node_suggestion else '') + '''
 }'''
@@ -282,11 +279,16 @@ class FeedbackAgent(FeedbackGenerator):
         # Build the prompt using f-strings instead of .format()
         base_prompt = f"""You are a feedback agent that guides an AI assistant's next action.
 
+**Important Note About Line Numbers:**
+While line numbers may be referenced in the initial problem description, they can shift as changes are made to the file. 
+Focus on whether the agent is modifying the correct logical parts of the code, rather than strictly matching the initially 
+mentioned line numbers. What matters is that the right section of code is being modified, even if its current line numberslightly differs from what was originally specified.
+
 **Input Structure:**"""
 
         if include_tree:
             base_prompt += """
-1. Tree Visualization: ASCII representation of the entire search tree showing:
+1. Tree Visualization: ASCII representation of the entire seaxrch tree showing:
    - Node IDs and their relationships
    - Action types taken at each node
    - Rewards and visit counts
@@ -303,10 +305,10 @@ class FeedbackAgent(FeedbackGenerator):
 {start_num + 2}. Tree Structure:
    - Parent Node: Your current starting point - the last successfully executed action
    - Current Node: Your branch from the parent, waiting for your next action
-   - Parallel Sibling Nodes: Other independent solution attempts branching from the same parent
+   - alternative Sibling Nodes: Other independent solution attempts branching from the same parent
      (These are from different trajectories and have not happened in your current path)
 
-{start_num + 3}. Parallel Sibling Node Information: Details about other solution attempts, including:
+{start_num + 3}. alternative Sibling Node Information: Details about other solution attempts, including:
    - Their proposed actions and parameters
    - Their outcomes (from separate, independent trajectories)
    - Warning flags for previously attempted approaches
@@ -314,9 +316,10 @@ class FeedbackAgent(FeedbackGenerator):
 **Your Task:**
 1. Analyze the situation:
    - Start from your parent node's current state
-   - Consider what other sibling nodes have tried (but remember these are parallel universes, not your history)
+   - Consider what other sibling nodes have tried (but remember these are alternative universes, not your history)
    - Learn from their outcomes to avoid repeating unsuccessful approaches
    - Contextualize the feedback based on the entire tree structure and outcomes
+   - When referring to previous attempts in alternative trajectories, provide information about what was tried as the agent does not have access to any alternative node information
 2. Suggest the next action for your branch
 3. Optionally suggest which node to expand next by setting suggested_node_id in your response
    - This can help guide the search towards promising branches
@@ -324,7 +327,8 @@ class FeedbackAgent(FeedbackGenerator):
 
 **Required JSON Response Format:**""" + json_format + """
 
-Note: Focus on novel solutions and avoid approaches that were unsuccessful in other branches."""
+Note: Focus on novel solutions and avoid approaches that were unsuccessful in other branches.
+**Always clearly articulate which of the Nodes/Actions you refere to are within the current node's trajectory (current trajectory), and which are not (alternative), and therefore have no effect on the current node's state.**"""
 
         # Add available actions if provided
         if actions:
@@ -339,7 +343,7 @@ Note: Focus on novel solutions and avoid approaches that were unsuccessful in ot
         # Only add node suggestion task if requested
         tasks = """1. Analyze the situation:
    - Start from your parent node's current state
-   - Consider what other sibling nodes have tried (but remember these are parallel universes, not your history)
+   - Consider what other sibling nodes have tried (but remember these are alternative universes, not your history)
    - Learn from their outcomes to avoid repeating unsuccessful approaches
    - Contextualize the feedback based on the entire tree structure and outcomes
 2. Suggest the next action for your branch"""

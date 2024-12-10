@@ -14,6 +14,8 @@
 # django__django-11179 \
 # astropy__astropy-14365 \
 
+# --split sampled_50_instances
+
 REPOS="""
 django__django-11179
 astropy__astropy-14365
@@ -30,17 +32,14 @@ python ./moatless/benchmark/run_evaluation.py \
         --model $MODEL \
         --repo_base_dir "$CWD/repos" \
         --eval_dir "$CWD/evaluations" \
-        --eval_name debug/fin_bef_reexpand/1_feedback/$MODEL \
+        --eval_name debug/coding_value_function/10_feedback_tests_fin_bef/$MODEL \
         --temp 0.7 \
         --num_workers 5 \
         --format react \
-        --max_iterations 250 \
+        --max_iterations 200 \
         --max_expansions 10 \
-        --min_resolved 1 \
-        --max_resolved 100 \
         --use_edit_actions \
         --feedback \
         --feedback_type agent \
         --use_testbed \
-        --overwrite \
-        --instance_ids $REPOS
+        --instance_ids "pydata__xarray-5131"

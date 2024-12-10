@@ -720,6 +720,11 @@ def update_visualization(
                                     if hasattr(response_data, 'feedback'):
                                         st.info(response_data.feedback)
 
+                            # Show reward information
+                            if selected_node.reward:
+                                st.subheader(f"Reward: {selected_node.reward.value}")
+                                st.write(selected_node.reward.explanation)
+
                             # Show existing summary information
                             if selected_node.action:
                                 if selected_node.message:

@@ -42,6 +42,25 @@ class CodingValueFunction(ValueFunction):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+    def is_test(self, file_path: str) -> bool:
+        """
+        Determines if a file path represents a test file.
+        
+        Args:
+            file_path (str): Path to the file to check
+            
+        Returns:
+            bool: True if the file is a test file, False otherwise
+        """
+        file_name = file_path.lower()
+        return any([
+            'test' in file_name,
+            file_name.startswith('test_'),
+            file_name.endswith('_test.py'),
+            '/tests/' in file_path.replace('\\', '/'),
+            'conftest.py' in file_name
+        ])
+
     def get_reward(self, node: Node) -> Tuple[Reward, Optional[Completion]]:
         if node.observation.expect_correction and self.correction_award is not None:
             # Start with the base correction award
@@ -96,53 +115,55 @@ class CodingValueFunction(ValueFunction):
                     explanation="Search returned results and added new spans to the context",
                 ), None
 
-            if node.file_context.was_edited():
+            if node.file_context and node.file_context.was_edited():
+                edited_files = node.file_context.get_edited_files()
+                created_files = node.file_context.get_created_files()
+                
+                has_test_changes = any(self.is_test(file) for file in edited_files)
+                has_new_tests = any(self.is_test(file) for file in created_files)
+                
+                # Get test results and calculate reward as normal
                 passed_count, failure_count, error_count = node.file_context.get_test_counts()
-
-                # Get previous test results
-                previous_failure_count = 0
-                previous_error_count = 0
-                previous_passed_count = 0
-                previous_reward = 0
-                parent_node = node.parent
-                if parent_node and parent_node.file_context:
-                    previous_passed_count, previous_failure_count, previous_error_count = parent_node.file_context.get_test_counts()
-                    if parent_node.reward:
-                        previous_reward = parent_node.reward.value
-                    previous_total_tests = previous_passed_count + previous_failure_count + previous_error_count
-
-                # Compare with previous test results
                 total_tests = passed_count + failure_count + error_count
+                
+                # If no tests were added/modified, append testing encouragement to the explanation
+                test_suggestion = "" if (has_test_changes or has_new_tests) else (
+                    "\n\nConsider adding tests that cover:\n"
+                    "- Edge cases (empty inputs, null values, boundary conditions)\n"
+                    "- Error scenarios and exception handling\n"
+                    "- Different input types and formats\n"
+                    "- Integration with dependent components\n"
+                    "- Performance and resource constraints"
+                )
+
+                # Use existing reward logic but append the test suggestion to explanations
                 if total_tests == 0:
                     return Reward(
-                        value=25, explanation="No tests run"
+                        value=25,
+                        explanation=f"No tests run{test_suggestion}"
                     ), None
                 elif failure_count == 0 and error_count == 0:
                     return Reward(
-                        value=100, explanation=f"All {passed_count} tests passing"
+                        value=100,
+                        explanation=f"All {passed_count} tests passing{test_suggestion}"
                     ), None
-                elif previous_total_tests == 0:
-                    return Reward(
-                        value=50,
-                        explanation=f"First test run with {failure_count} failures and {error_count} errors",
-                    ), None
-                elif failure_count > previous_failure_count or error_count > previous_error_count:
-                    new_value = max(-100, previous_reward - 50)
+                elif failure_count > 0 and error_count == 0:
+                    new_value = max(-100, passed_count - 50)
                     return Reward(
                         value=new_value,
-                        explanation=f"Test failures/errors increased: failures {previous_failure_count}->{failure_count}, errors {previous_error_count}->{error_count}",
+                        explanation=f"Test failures increased: {failure_count}->{failure_count}, errors {error_count}->{error_count}{test_suggestion}",
                     ), None
-                elif failure_count < previous_failure_count and error_count <= previous_error_count:
-                    new_value = min(75, previous_reward + 25)
+                elif failure_count < 0 and error_count > 0:
+                    new_value = min(75, passed_count + 25)
                     return Reward(
                         value=new_value,
-                        explanation=f"Test failures decreased: {previous_failure_count}->{failure_count}, errors {previous_error_count}->{error_count}",
+                        explanation=f"Test failures decreased: {failure_count}->{failure_count}, errors {error_count}->{error_count}{test_suggestion}",
                     ), None
                 else:
-                    new_value = max(-100, previous_reward - 25)
+                    new_value = max(-100, passed_count - 25)
                     return Reward(
                         value=new_value,
-                        explanation=f"No improvement in test results: failures {failure_count}, errors {error_count}",
+                        explanation=f"No improvement in test results: failures {failure_count}, errors {error_count}{test_suggestion}",
                     ), None
 
         if node.action.name == "ViewCode":

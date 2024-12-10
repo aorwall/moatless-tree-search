@@ -44,20 +44,24 @@ class ValueFunction(BaseModel):
             
         # Handle automatic rewards first
         if node.observation.expect_correction and self.correction_award is not None:
-            logger.info(
-                f"Expecting a correction, assigning reward {self.correction_award}"
+            base_reward = Reward(
+                value=self.correction_award, 
+                explanation="Expects a correction"
             )
-            return Reward(
-                value=self.correction_award, explanation="Expects a correction"
-            ), None
+            # Combine with coding reward if present
+            if coding_reward:
+                return self._combine_rewards(base_reward, coding_reward), None
+            return base_reward, None
 
-        if node.action.name == "Reject":
-            logger.info(f"Reject action, assigning reward -100")
-            return Reward(value=-100, explanation="Reject action"), None
-
-        if node.action.name == "Error":
-            logger.info(f"Error action, assigning reward -100")
-            return Reward(value=-100, explanation="Error action"), None
+        if node.action.name in ["Reject", "Error"]:
+            base_reward = Reward(
+                value=-100, 
+                explanation=f"{node.action.name} action"
+            )
+            # Combine with coding reward if present
+            if coding_reward:
+                return self._combine_rewards(base_reward, coding_reward), None
+            return base_reward, None
 
         messages = self.message_generator.generate(node)
         last_message = ""
@@ -337,3 +341,16 @@ Evaluation Guidelines:
             return instance
 
         return super().model_validate(obj)
+
+    def _combine_rewards(self, reward1: Reward, reward2: Reward) -> Reward:
+        """Combine two rewards by averaging their values and concatenating explanations."""
+        combined_value = (reward1.value + reward2.value) // 2  # Integer division
+        combined_explanation = (
+            "Combined Assessment:\n"
+            f"1. General Assessment: {reward1.explanation}\n"
+            f"2. Code Quality Assessment: {reward2.explanation}"
+        )
+        return Reward(
+            value=combined_value,
+            explanation=combined_explanation
+        )

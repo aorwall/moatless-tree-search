@@ -85,9 +85,12 @@ class ContextFile(BaseModel):
 
     _cache_valid: bool = PrivateAttr(False)
 
+    # Add is_new as a private attribute
+    _is_new: bool = PrivateAttr(False)
+
     def __init__(
         self,
-        repo: Repository,
+        repo: Optional[Repository],
         file_path: str,
         initial_patch: Optional[str] = None,
         **data,
@@ -96,17 +99,16 @@ class ContextFile(BaseModel):
         Initializes the ContextFile instance.
 
         Args:
-            repo (Repository): The repository instance.
-            file_path (str): The path to the file within the repository.
-            initial_patch (Optional[str]): A Git-formatted patch representing accumulated changes from the original content.
-            **data: Arbitrary keyword arguments. Must include '_repo'.
-
-        Raises:
-            ValueError: If '_repo' is not provided in the initialization data.
+            repo (Optional[Repository]): The repository instance, can be None when reconstructing from dict
+            file_path (str): The path to the file within the repository
+            initial_patch (Optional[str]): A Git-formatted patch representing accumulated changes
+            **data: Additional keyword arguments
         """
         super().__init__(file_path=file_path, **data)
         self._repo = repo
         self._initial_patch = initial_patch
+        # Set is_new based on whether the file exists in repo, default to False if no repo
+        self._is_new = False if repo is None else not repo.file_exists(file_path)
 
     def _add_import_span(self):
         # TODO: Initiate module or add this lazily?
@@ -801,6 +803,16 @@ class ContextFile(BaseModel):
         Get all patches associated with this ContextFile.
         """
         return self.patches
+
+    @property 
+    def is_new(self) -> bool:
+        """
+        Returns whether this file is newly created in the context.
+        
+        Returns:
+            bool: True if the file is new, False otherwise
+        """
+        return self._is_new
 
 
 class TestFile(BaseModel):
@@ -1566,5 +1578,32 @@ class FileContext(BaseModel):
             bool: True if any file has been edited, False otherwise
         """
         return any(file.was_edited for file in self._files.values())
+
+    def get_edited_files(self) -> List[str]:
+        """
+        Returns a list of file paths that have been edited in the context.
+        A file is considered edited if it has changes (patch) but is not new.
+        
+        Returns:
+            List[str]: List of edited file paths
+        """
+        return [
+            file_path 
+            for file_path, file in self._files.items() 
+            if file.was_edited and not file.is_new
+        ]
+
+    def get_created_files(self) -> List[str]:
+        """
+        Returns a list of file paths that have been newly created in the context.
+        
+        Returns:
+            List[str]: List of created file paths
+        """
+        return [
+            file_path 
+            for file_path, file in self._files.items() 
+            if file.is_new
+        ]
 
     

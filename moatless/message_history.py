@@ -71,7 +71,7 @@ class MessageHistoryGenerator(BaseModel):
             return messages
 
         node_messages = self.get_node_messages(node)
-
+        
         for action, observation in node_messages:
             thoughts = (
                 f"<thoughts>{action.thoughts}</thoughts>"
@@ -81,6 +81,25 @@ class MessageHistoryGenerator(BaseModel):
 
             messages.append(AssistantMessage(tool_call=action.to_tool_call(thoughts_in_action=True)))
             messages.append(UserMessage(content=f"<observation>\n{observation}\n</observation>"))
+
+        # Add latest feedback with explanation at the end if available
+        if node.feedback:
+            feedback_message = (
+                "Based on analysis of your previous actions and alternative solution attempts, "
+                "here is the feedback to guide your next steps:\n\n"
+                "<feedback>\n"
+                f"{node.feedback}\n"
+                "</feedback>\n\n"
+                "Please consider this feedback when deciding your next action. "
+                "The feedback aims to help you avoid repeating unsuccessful approaches "
+                "and guide you towards more promising solutions.\n\n"
+                "Note: Your current trajectory only includes the actions you've taken directly - "
+                "alternative attempts mentioned in the feedback are from separate branches and "
+                "have not affected your current state. However, you should learn from these "
+                "alternative attempts to avoid repeating unsuccessful approaches and to combine "
+                "successful elements into an improved solution."
+            )
+            messages.append(UserMessage(content=feedback_message))
 
         tokens = count_tokens("".join([m.content for m in messages if m.content is not None]))
         logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
@@ -94,7 +113,6 @@ class MessageHistoryGenerator(BaseModel):
 
         node_messages = self.get_node_messages(node)
         
-        # Convert node messages to react format
         for action, observation in node_messages:
             # Add thought and action message
             thought = (
@@ -110,9 +128,22 @@ class MessageHistoryGenerator(BaseModel):
                 assistant_content += f"\n{action_input}"
             
             messages.append(AssistantMessage(content=assistant_content))
-            
-            # Add observation message
             messages.append(UserMessage(content=f"Observation: {observation}"))
+
+        # Add latest feedback with explanation at the end if available
+        if node.feedback:
+            feedback_message = (
+                "System Analysis: I've analyzed your previous actions and alternative attempts. "
+                "Here's strategic guidance for your next steps:\n\n"
+                f"Feedback: {node.feedback}\n\n"
+                "Note: This feedback is based on the outcomes of various solution attempts. "
+                "While alternative attempts mentioned are from separate branches and "
+                "have not affected your current state, you should carefully consider their "
+                "outcomes to inform your decisions. Learn from both successful and failed "
+                "approaches to craft an improved solution that avoids known pitfalls and "
+                "combines effective strategies."
+            )
+            messages.append(UserMessage(content=feedback_message))
 
         tokens = count_tokens("".join([m.content for m in messages if m.content is not None]))
         logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
@@ -170,6 +201,21 @@ class MessageHistoryGenerator(BaseModel):
                 content += "```diff\n"
                 content += git_patch
                 content += "\n```"
+
+        # Add latest feedback with explanation at the end if available
+        if node.feedback:
+            content += (
+                "\n\n# Strategic Feedback\n"
+                "The following feedback is based on analysis of previous actions, "
+                "alternative solution attempts, and the overall search tree. It's designed "
+                "to guide you towards more effective solutions:\n\n"
+                "<feedback>\n"
+                f"{node.feedback}\n"
+                "</feedback>\n\n"
+                "Please incorporate this feedback into your problem-solving approach. "
+                "It reflects lessons learned from various solution attempts and aims to "
+                "help you avoid repeating unsuccessful strategies."
+            )
 
         return [UserMessage(content=content)]
 

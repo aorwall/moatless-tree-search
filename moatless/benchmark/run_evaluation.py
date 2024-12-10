@@ -264,7 +264,7 @@ def main():
     instance_group.add_argument(
         "--split",
         type=str,
-        choices=["lite", "combo", "random"],
+        choices=["lite", "combo", "random", "sampled_50_instances"],
         default="lite",
         help="Dataset split to use (lite, combo, or random)",
     )

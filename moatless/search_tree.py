@@ -18,7 +18,8 @@ from moatless.file_context import FileContext
 from moatless.index.code_index import CodeIndex
 from moatless.node import Node, generate_ascii_tree
 from moatless.repository.repository import Repository
-from moatless.selector import BestFirstSelector, Selector, SoftmaxSelector, LLMSelector
+from moatless.selector import BestFirstSelector, Selector, SoftmaxSelector, LLMSelector, FeedbackSelector
+from moatless.selector.feedback_selector import FeedbackSelector
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.value_function.base import ValueFunction
 from moatless.value_function.model import Reward
@@ -29,7 +30,9 @@ logger = logging.getLogger(__name__)
 
 class SearchTree(BaseModel):
     root: Node = Field(..., description="The root node of the search tree.")
-    selector: Union[BestFirstSelector, SoftmaxSelector, LLMSelector] = Field(..., description="Selector for node selection.")
+    selector: Union[BestFirstSelector, SoftmaxSelector, LLMSelector, FeedbackSelector] = Field(
+        ..., description="Selector for node selection."
+    )
     agent: ActionAgent = Field(..., description="Agent for generating actions.")
     agent_settings: Optional[AgentSettings] = Field(
         None, description="Agent settings for the search tree."
@@ -162,6 +165,8 @@ class SearchTree(BaseModel):
                     obj["selector"] = SoftmaxSelector.model_validate(obj["selector"])
                 elif selector_type == "LLMSelector":
                     obj["selector"] = LLMSelector.model_validate(obj["selector"])
+                elif selector_type == "feedback":
+                    obj["selector"] = FeedbackSelector.model_validate(obj["selector"])
                 else:
                     raise ValueError(f"Unknown selector type: {selector_type}")
 
@@ -281,23 +286,31 @@ class SearchTree(BaseModel):
         if not expandable_nodes:
             self.log(logger.info, "No expandable nodes found.")
             return None
-            
+        
         if expandable_nodes:
             # Sort by node_id to get the most recently created node
             latest_node = max(expandable_nodes, key=lambda n: n.node_id)
-            # Check if we've reached a finish state or exceeded the depth limit
-            if (not latest_node.is_finished() and 
-                (self.finish_before_reexpanding_depth is None or 
-                    latest_node.get_depth() < self.finish_before_reexpanding_depth)):
+            
+            # Check if any node in the tree has reached a finished state
+            all_nodes = node.get_all_nodes()
+            has_finished_node = any(n.is_finished() for n in all_nodes)
+            
+            # Check if any node has exceeded the depth limit
+            max_depth_exceeded = any(
+                n.get_depth() >= self.finish_before_reexpanding_depth 
+                for n in all_nodes
+            ) if self.finish_before_reexpanding_depth is not None else False
+            
+            # Continue linear expansion only if no finished nodes exist and depth never exceeded
+            if not has_finished_node and not max_depth_exceeded:
                 return latest_node
             else:
                 self.log(
                     logger.info, 
-                    f"Breaking linear path at depth {latest_node.get_depth()}: {'finished state reached' if latest_node.is_finished() else 'depth limit exceeded'}"
+                    f"Breaking linear path: {'finished state exists' if has_finished_node else 'depth limit exceeded'}"
                 )
         
-        # If no nodes in current path, latest node is finished, depth limit exceeded, 
-        # or finish_before_reexpanding is False, proceed with normal selection
+        # If we have a finished node or exceeded depth, use normal selection
         return self.selector.select(expandable_nodes)
 
     def _expand(self, node: Node) -> Node:
@@ -309,11 +322,6 @@ class SearchTree(BaseModel):
             return node
 
         child_node = self.expander.expand(node, self)
-
-        if self.feedback_generator:
-            child_node.message = self.feedback_generator.generate_feedback(child_node, self.agent.actions)
-            print(f"feedback\n{child_node.message}")
-            child_node.feedback = child_node.message
 
         self.log(logger.info, f"Expanded Node{node.node_id} to new Node{child_node.node_id}")
         return child_node
@@ -575,8 +583,12 @@ class SearchTree(BaseModel):
                     obj["selector"] = BestFirstSelector.model_validate(obj["selector"])
                 elif selector_type == "SoftmaxSelector":
                     obj["selector"] = SoftmaxSelector.model_validate(obj["selector"])
-            else:
-                obj["selector"] = BestFirstSelector()
+                elif selector_type == "LLMSelector":
+                    obj["selector"] = LLMSelector.model_validate(obj["selector"])
+                elif selector_type == "feedback":
+                    obj["selector"] = FeedbackSelector.model_validate(obj["selector"])
+                else:
+                    raise ValueError(f"Unknown selector type: {selector_type}")
 
             if "agent" in obj and isinstance(obj["agent"], dict):
                 obj["agent"] = ActionAgent.model_validate(obj["agent"])
