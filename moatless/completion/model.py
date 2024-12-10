@@ -1,7 +1,7 @@
 import hashlib
 import json
 import logging
-from typing import Optional, Any, Union, Self
+from typing import Optional, Any, Union, Self, ClassVar
 from docstring_parser import parse
 
 import litellm
@@ -9,6 +9,7 @@ from instructor import OpenAISchema
 from instructor.utils import classproperty
 from litellm import cost_per_token, NotFoundError
 from pydantic import BaseModel, model_validator, Field, ValidationError
+from pydantic_core.core_schema import ValidationInfo
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +182,15 @@ class Completion(BaseModel):
         )
 
 
-class StructuredOutput(OpenAISchema):
+class NameDescriptor:
+    def __get__(self, obj, cls=None) -> str:
+        if hasattr(cls, "Config") and hasattr(cls.Config, "title") and cls.Config.title:
+            return cls.Config.title
+        return cls.__name__
+
+
+class StructuredOutput(BaseModel):
+    name: ClassVar[NameDescriptor] = NameDescriptor()
 
     @classmethod
     def openai_schema(cls, thoughts_in_action: bool = False) -> dict[str, Any]:
@@ -223,10 +232,30 @@ class StructuredOutput(OpenAISchema):
         return {
             "type": "function",
             "function": {
-                "name": schema["title"],
+                "name": cls.name,
                 "description": schema["description"],
                 "parameters": parameters,
             }
+        }
+
+    @classmethod
+    def anthropic_schema(cls) -> dict[str, Any]:
+        schema = cls.model_json_schema()
+
+        description = schema["description"]
+        del schema["description"]
+        del schema["title"]
+
+        # Exclude thoughts field from properties and required if it exists
+        if "thoughts" in schema.get("properties", {}):
+            del schema["properties"]["thoughts"]
+            if "required" in schema and "thoughts" in schema["required"]:
+                schema["required"].remove("thoughts")
+
+        return {
+            "name": cls.name,
+            "description": description,
+            "input_schema": schema,
         }
 
     @classmethod

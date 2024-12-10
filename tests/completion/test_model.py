@@ -1,9 +1,9 @@
 import pytest
 from pydantic import ValidationError
 
-from moatless.actions.model import ActionArguments
-from moatless.actions.string_replace import StringReplaceArgs
 from moatless.actions.create_file import CreateFileArgs
+from moatless.actions.string_replace import StringReplaceArgs
+
 
 def test_string_replace_xml_validation():
     # Test valid XML format

@@ -1,7 +1,6 @@
 from moatless.benchmark.swebench import create_repository
 from moatless.benchmark.utils import get_moatless_instance
 from moatless.codeblocks.codeblocks import CodeBlockTypeGroup
-from moatless.codeblocks.parser.python import PythonParser
 
 
 def test_find_by_line_numbers():

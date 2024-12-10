@@ -731,12 +731,17 @@ def update_visualization(
                                     st.subheader("Feedback")
                                     st.write(selected_node.message)
 
-                                if hasattr(selected_node.action, "thoughts") and selected_node.action.thoughts:
+                                if (
+                                    hasattr(selected_node.action, "thoughts")
+                                    and selected_node.action.thoughts
+                                ):
                                     st.subheader("Thoughts")
                                     st.write(selected_node.action.thoughts)
 
                                 st.subheader(f"Action: {selected_node.action.name}")
-                                st.json(selected_node.action.model_dump(exclude={"thoughts"}))
+                                st.json(
+                                    selected_node.action.model_dump(exclude={"thoughts"})
+                                )
 
                                 if selected_node.observation:
                                     st.subheader("Output")

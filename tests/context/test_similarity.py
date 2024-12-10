@@ -1,8 +1,8 @@
 import pytest
 
-from moatless.selector.similarity import FileContextSimilarity
 from moatless.file_context import FileContext
 from moatless.repository.repository import InMemRepository
+from moatless.selector.similarity import FileContextSimilarity
 
 
 @pytest.fixture

@@ -1,5 +1,4 @@
 import pytest
-from unittest.mock import Mock
 
 from moatless.actions.string_replace import StringReplace, StringReplaceArgs, find_potential_matches, \
     find_exact_matches, find_match_when_ignoring_indentation

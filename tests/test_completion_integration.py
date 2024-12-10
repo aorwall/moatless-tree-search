@@ -1,8 +1,9 @@
 import pytest
+
+from moatless.actions.finish import FinishArgs
+from moatless.actions.reject import RejectArgs
 from moatless.completion.completion import CompletionModel, LLMResponseFormat
 from moatless.completion.model import AssistantMessage, UserMessage, Usage
-from moatless.actions.reject import Reject, RejectArgs
-from moatless.actions.finish import Finish, FinishArgs
 from tests.conftest import TEST_MODELS
 
 

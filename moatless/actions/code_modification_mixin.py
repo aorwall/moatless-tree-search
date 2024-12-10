@@ -72,7 +72,7 @@ class CodeModificationMixin:
         self,
         file_path: str,
         file_context: FileContext,
-    ):
+    ) -> str:
         if file_context.file_exists(file_path) and is_test(file_path):
             file_context.add_test_file(file_path)
         elif self._code_index:
@@ -85,10 +85,22 @@ class CodeModificationMixin:
                  file_context.add_test_file(search_result.file_path)
         else:
             logger.warning(f"No code index cannot find test files for {file_path}")
-            return
+            return ""
 
         file_context.run_tests()
 
+        response_msg = f"Running tests for the following files:\n"
+        for test_file in file_context.test_files:
+            response_msg += f"* {test_file.file_path}\n"
+
+        failure_details = file_context.get_test_failure_details()
+        if failure_details:
+            response_msg += f"\n{failure_details}"
+
+        summary = f"\n{file_context.get_test_summary()}"
+        response_msg += summary
+
+        return response_msg
 
     def format_snippet_with_lines(self, snippet: str, start_line: int) -> str:
         """Format a code snippet with line numbers"""

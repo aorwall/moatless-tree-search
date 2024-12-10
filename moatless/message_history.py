@@ -34,6 +34,10 @@ class MessageHistoryGenerator(BaseModel):
         default=20000,
         description="Maximum number of tokens allowed in message history"
     )
+    thoughts_in_action: bool = Field(
+        default=False,
+        description="Whether to include thoughts in the action or in the message"
+    )
 
     model_config = {
         "ser_json_timedelta": "iso8601",
@@ -42,6 +46,10 @@ class MessageHistoryGenerator(BaseModel):
         "json_schema_serialization_defaults": True,
         "json_encoders": None,  # Remove this as it's v1 syntax
     }
+
+    def __init__(self, **data: Any):
+        super().__init__(**data)
+
 
     @field_serializer('message_history_type')
     def serialize_message_history_type(self, message_history_type: MessageHistoryType) -> str:
@@ -73,13 +81,21 @@ class MessageHistoryGenerator(BaseModel):
         node_messages = self.get_node_messages(node)
         
         for action, observation in node_messages:
-            thoughts = (
-                f"<thoughts>{action.thoughts}</thoughts>"
-                if hasattr(action, "thoughts")
-                else ""
-            )
+            # Handle thoughts based on configuration
+            if self.thoughts_in_action:
+                content = None
+                tool_call = action.to_tool_call(thoughts_in_action=True)
+            else:
+                content = (
+                    f"<thoughts>{action.thoughts}</thoughts>"
+                    if hasattr(action, "thoughts")
+                    else None
+                )
+                tool_call = action.to_tool_call()
+                if "thoughts" in tool_call.input:
+                    del tool_call.input["thoughts"]
 
-            messages.append(AssistantMessage(tool_call=action.to_tool_call(thoughts_in_action=True)))
+            messages.append(AssistantMessage(content=content, tool_call=tool_call))
             messages.append(UserMessage(content=f"<observation>\n{observation}\n</observation>"))
 
         # Add latest feedback with explanation at the end if available
@@ -201,21 +217,6 @@ class MessageHistoryGenerator(BaseModel):
                 content += "```diff\n"
                 content += git_patch
                 content += "\n```"
-
-        # Add latest feedback with explanation at the end if available
-        if node.feedback:
-            content += (
-                "\n\n# Strategic Feedback\n"
-                "The following feedback is based on analysis of previous actions, "
-                "alternative solution attempts, and the overall search tree. It's designed "
-                "to guide you towards more effective solutions:\n\n"
-                "<feedback>\n"
-                f"{node.feedback}\n"
-                "</feedback>\n\n"
-                "Please incorporate this feedback into your problem-solving approach. "
-                "It reflects lessons learned from various solution attempts and aims to "
-                "help you avoid repeating unsuccessful strategies."
-            )
 
         return [UserMessage(content=content)]
 

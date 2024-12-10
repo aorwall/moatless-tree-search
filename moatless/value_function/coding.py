@@ -122,11 +122,22 @@ class CodingValueFunction(ValueFunction):
                 has_test_changes = any(self.is_test(file) for file in edited_files)
                 has_new_tests = any(self.is_test(file) for file in created_files)
                 
-                # Get test results and calculate reward as normal
+                # Get current test results
                 passed_count, failure_count, error_count = node.file_context.get_test_counts()
                 total_tests = passed_count + failure_count + error_count
-                
-                # If no tests were added/modified, append testing encouragement to the explanation
+
+                # Get previous test results
+                previous_failure_count = 0
+                previous_error_count = 0
+                previous_passed_count = 0
+                previous_reward = 0
+                parent_node = node.parent
+                if parent_node and parent_node.file_context:
+                    previous_passed_count, previous_failure_count, previous_error_count = parent_node.file_context.get_test_counts()
+                    if parent_node.reward:
+                        previous_reward = parent_node.reward.value
+
+                # If no tests were added/modified, append testing encouragement
                 test_suggestion = "" if (has_test_changes or has_new_tests) else (
                     "\n\nConsider adding tests that cover:\n"
                     "- Edge cases (empty inputs, null values, boundary conditions)\n"
@@ -136,7 +147,6 @@ class CodingValueFunction(ValueFunction):
                     "- Performance and resource constraints"
                 )
 
-                # Use existing reward logic but append the test suggestion to explanations
                 if total_tests == 0:
                     return Reward(
                         value=25,
@@ -147,17 +157,17 @@ class CodingValueFunction(ValueFunction):
                         value=100,
                         explanation=f"All {passed_count} tests passing{test_suggestion}"
                     ), None
-                elif failure_count > 0 and error_count == 0:
-                    new_value = max(-100, passed_count - 50)
+                elif failure_count > previous_failure_count or error_count > previous_error_count:
+                    new_value = max(-100, previous_reward - 50)
                     return Reward(
                         value=new_value,
-                        explanation=f"Test failures increased: {failure_count}->{failure_count}, errors {error_count}->{error_count}{test_suggestion}",
+                        explanation=f"Test failures increased: {previous_failure_count}->{failure_count}, errors {previous_error_count}->{error_count}{test_suggestion}",
                     ), None
-                elif failure_count < 0 and error_count > 0:
-                    new_value = min(75, passed_count + 25)
+                elif failure_count < previous_failure_count and error_count <= previous_error_count:
+                    new_value = min(75, previous_reward + 25)
                     return Reward(
                         value=new_value,
-                        explanation=f"Test failures decreased: {failure_count}->{failure_count}, errors {error_count}->{error_count}{test_suggestion}",
+                        explanation=f"Test failures decreased: {previous_failure_count}->{failure_count}, errors {previous_error_count}->{error_count}{test_suggestion}",
                     ), None
                 else:
                     new_value = max(-100, passed_count - 25)

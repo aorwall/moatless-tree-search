@@ -3,9 +3,7 @@ from moatless.benchmark.swebench import create_repository
 from moatless.benchmark.utils import get_moatless_instance
 from moatless.completion.completion import CompletionModel
 from moatless.file_context import FileContext
-import pytest
-from moatless.actions.code_change import RequestCodeChangeArgs, ChangeType
-from moatless.repository.repository import Repository, InMemRepository
+from moatless.repository.repository import InMemRepository
 
 
 class MockCompletionModel:

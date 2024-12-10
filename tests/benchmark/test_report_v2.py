@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-import pandas as pd
 
 import pytest
 
@@ -9,7 +8,6 @@ from moatless.benchmark.report import (
     StateStats,
     to_result,
     BenchmarkResult,
-    to_dataframe,
     CodingStats,
 )
 from moatless.benchmark.utils import get_moatless_instance

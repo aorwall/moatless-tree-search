@@ -1,7 +1,8 @@
-import os
-import pytest
-from moatless.repository.file import FileRepository
 from pathlib import Path
+
+import pytest
+
+from moatless.repository.file import FileRepository
 
 
 @pytest.fixture

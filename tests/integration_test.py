@@ -1,24 +1,13 @@
-import json
-import logging
 import os
-import tempfile
-from datetime import datetime
 
 import pytest
 from dotenv import load_dotenv
 
 from moatless.agent.code_agent import CodingAgent
-from moatless.agent.code_prompts import CLAUDE_PROMPT
 from moatless.benchmark.swebench import load_instance, create_repository
-from moatless.benchmark.utils import get_moatless_instance
-from moatless.codeblocks import CodeBlockType
 from moatless.completion.completion import CompletionModel
-from moatless.file_context import FileContext
 from moatless.index import CodeIndex
-from moatless.node import MessageHistoryType
-from moatless.repository import FileRepository
 from moatless.search_tree import SearchTree
-from moatless.templates import create_basic_coding_tree, create_claude_coding_actions
 
 load_dotenv()
 moatless_dir = os.getenv("MOATLESS_DIR", "/tmp/moatless")
@@ -39,9 +28,9 @@ pytest.mark.llm_integration = pytest.mark.skipif(
 @pytest.mark.parametrize(
     "model",
     [
-        "claude-3-5-sonnet-20241022",
+        # "claude-3-5-sonnet-20241022",
         # "claude-3-5-haiku-20241022",
-        # "anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "anthropic.claude-3-5-sonnet-20241022-v2:0",
         # "claude-3-5-sonnet-20241022",
         # "gpt-4o-mini-2024-07-18",
         # "gpt-4o-2024-08-06",
@@ -81,18 +70,8 @@ def test_basic_coding_tree(model):
     node = search_tree.run_search()
     print(node.message)
     search_tree.maybe_persist()
+    assert node.action
+    assert node.action.name == "Finish"
     assert search_tree.is_finished()
     # print(json.dumps(search_tree.root.model_dump(), indent=2))
 
-@pytest.mark.parametrize(
-    "model",
-    [
-        "claude-3-5-sonnet-20241022",
-        # "claude-3-5-haiku-20241022",
-        # "anthropic.claude-3-5-sonnet-20241022-v2:0",
-        # "claude-3-5-sonnet-20241022",
-        # "gpt-4o-mini-2024-07-18",
-        # "gpt-4o-2024-08-06",
-        # "deepseek/deepseek-chat"
-    ],
-)

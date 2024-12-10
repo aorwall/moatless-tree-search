@@ -1037,7 +1037,7 @@ class FileContext(BaseModel):
         add_extra: bool = True,
     ) -> List[str]:
         if not self.has_file(file_path):
-            context_file = self.add_file(file_path)
+            context_file = self.add_file(file_path, add_extra=add_extra)
         else:
             context_file = self.get_context_file(file_path)
 

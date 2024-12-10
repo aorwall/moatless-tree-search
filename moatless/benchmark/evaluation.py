@@ -289,7 +289,6 @@ class Evaluation:
         min_resolved: Optional[int] = None,
         max_resolved: Optional[int] = None,
     ):
-        # First load the appropriate dataset
         if split == "combo":
             # Load both lite and verified datasets
             lite_path = os.path.join(os.path.dirname(__file__), "swebench_lite_all_evaluations.json")
@@ -309,10 +308,13 @@ class Evaluation:
             instances = [instance for instance in lite_instances if instance["instance_id"] in common_ids]
             logger.info(f"Found {len(instances)} instances that exist in both lite and verified datasets")
         else:
-            file_path = os.path.join(os.path.dirname(__file__), f"swebench_lite_all_evaluations.json")
+            file_path = os.path.join(os.path.dirname(__file__), f"swebench_{split}_all_evaluations.json")
             with open(file_path) as f:
                 instances = json.load(f)
             logger.info(f"Loaded {len(instances)} instances from {file_path}")
+
+        random.shuffle(instances)
+
 
         # Apply all filters
         if instance_ids:
@@ -440,7 +442,7 @@ class Evaluation:
         }
 
         logger.info(f"Evaluating {instance_id}")
-        problem_statement = f"<task>\n{instance['problem_statement']}\n</task>"
+        problem_statement = f"task>\nSolve the following reported issue in the {instance['repo']} repository:\n\n{instance['problem_statement']}\n</task>"
 
         runtime = None
         repository = None
@@ -512,9 +514,6 @@ class Evaluation:
                         runtime=runtime,
                         message_history_type=self.settings.agent_message_history_type,
                     )
-
-                    agent_role = f"""You are an autonomous AI assistant and a core member of the development team for the {instance["repo"]} project. As a senior developer on the team, you have deep knowledge of the codebase and best practices."""
-                    agent.system_prompt = f"{agent_role}\n\n{agent.system_prompt}"
 
                     if self.selector:
                         selector = self.selector

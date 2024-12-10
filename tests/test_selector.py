@@ -1,11 +1,8 @@
-import logging
-
 import pytest
 
-from moatless.actions.action import Action
 from moatless.actions.model import Observation, ActionArguments
-from moatless.selector import Selector, BestFirstSelector, SoftmaxSelector
 from moatless.node import Node, Reward
+from moatless.selector import Selector, BestFirstSelector, SoftmaxSelector
 
 
 @pytest.fixture
