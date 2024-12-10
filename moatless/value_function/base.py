@@ -53,14 +53,16 @@ class ValueFunction(BaseModel):
                 return self._combine_rewards(base_reward, coding_reward), None
             return base_reward, None
 
-        if node.action.name == "Reject":
-            logger.info(f"Reject action, assigning reward -100")
-            return Reward(value=-100, explanation="Reject action"), None
-
-        if node.action.name == "Error":
-            logger.info(f"Error action, assigning reward -100")
-            return Reward(value=-100, explanation="Error action"), None
-
+        if node.action.name in ["Reject", "Error"]:
+            logger.info(f"{node.action.name} action, assigning reward -100")
+            base_reward = Reward(
+                value=-100, 
+                explanation=f"{node.action.name} action"
+            )
+            # Combine with coding reward if present
+            if coding_reward:
+                return self._combine_rewards(base_reward, coding_reward), None
+            return base_reward, None
 
         messages = self.message_generator.generate(node)
 
