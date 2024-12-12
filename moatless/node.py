@@ -3,6 +3,8 @@ import logging
 from enum import Enum
 from typing import Optional, List, Dict, Any, Union
 
+from moatless.artifacts.artifact import ArtifactChange
+from moatless.workspace import Workspace
 from moatless.actions.view_code import ViewCodeArgs, CodeSpan
 from pydantic import BaseModel, Field
 
@@ -31,9 +33,13 @@ class ActionStep(BaseModel):
 
 class Node(BaseModel):
     node_id: int = Field(..., description="The unique identifier of the node")
+    
     parent: Optional["Node"] = Field(None, description="The parent node")
     children: List["Node"] = Field(default_factory=list, description="The child nodes")
     
+    workspace: Optional[Workspace] = Field(None, description="The workspace associated with the node")
+    artifact_changes: List[ArtifactChange] = Field(default_factory=list, description="The artifact changes associated with the node")
+
     user_message: Optional[str] = Field(None, description="The user message for this node")
     assistant_message: Optional[str] = Field(None, description="The assistant response for this node")
     
@@ -146,6 +152,12 @@ class Node(BaseModel):
         child_node.parent = self
         self.children.append(child_node)
 
+    def set_parent(self, parent: "Node"):
+        if self.node_id == parent.node_id:
+            raise ValueError(f"Node can't have same id {self.node_id} parent")
+        self.parent = parent
+        parent.add_child(self)
+
     def get_depth(self) -> int:
         depth = 0
         node = self
@@ -208,10 +220,18 @@ class Node(BaseModel):
         return expanded_nodes
 
     def get_all_nodes(self) -> List["Node"]:
+        if self.parent:
+            node = self.get_root()
+        else:
+            node = self
+
+        return node._get_all_nodes()
+
+    def _get_all_nodes(self) -> List["Node"]:
         nodes = []
         nodes.append(self)
         for child in self.children:
-            nodes.extend(child.get_all_nodes())
+            nodes.extend(child._get_all_nodes())
         return nodes
 
     def get_root(self) -> "Node":

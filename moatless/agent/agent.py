@@ -1,6 +1,7 @@
 import importlib
 import json
 import logging
+from platform import node
 from typing import List, Type, Dict, Any, Optional
 
 from pydantic import BaseModel, Field, PrivateAttr, model_validator, ValidationError
@@ -145,31 +146,12 @@ class ActionAgent(BaseModel):
             return
 
         logger.info(f"Node{node.node_id}: Execute {len(node.action_steps)} actions")
-
         for action_step in node.action_steps:
-            try:
-                action_step.observation = self._execute(node)
-                if action_step.observation.execution_completion:
-                    action_step.completion = node.observation.execution_completion
-
-                logger.info(
-                    f"Node{node.node_id}: Executed action: {node.action.name}. "
-                    f"Terminal: {node.observation.terminal if node.observation else False}. "
-                    f"Output: {node.observation.message if node.observation else None}"
-                )
-
-            except CompletionRejectError as e:
-                logger.warning(f"Node{node.node_id}: Action rejected: {e.message}")
-                action_step.completion = e.last_completion
-                action_step.observation = Observation(
-                    message=e.message,
-                    is_terminal=True,
-                )
+            self._execute(node, action_step)
 
 
-
-    def _execute(self, node: Node):
-        action = self._action_map.get(type(node.action))
+    def _execute(self, node: Node, action_step: ActionStep):
+        action = self._action_map.get(type(action_step.action))
         if not action:
             logger.error(
                 f"Node{node.node_id}: Action {node.action.name} not found in action map. "
@@ -177,7 +159,24 @@ class ActionAgent(BaseModel):
             )
             raise RuntimeError(f"Action {type(node.action)} not found in action map.")
 
-        return action.execute(node.action, node.file_context)
+        try:
+            action_step.observation = action.execute(action_step.action, node.file_context, node.workspace)
+            if action_step.observation.execution_completion:
+                action_step.completion = node.observation.execution_completion
+
+            logger.info(
+                f"Executed action: {action_step.action.name}. "
+                f"Terminal: {action_step.observation.terminal if node.observation else False}. "
+                f"Output: {action_step.observation.message if node.observation else None}"
+            )
+
+        except CompletionRejectError as e:
+            logger.warning(f"Node{node.node_id}: Action rejected: {e.message}")
+            action_step.completion = e.last_completion
+            action_step.observation = Observation(
+                message=e.message,
+                is_terminal=True,
+            )
 
 
     def generate_system_prompt(self) -> str:

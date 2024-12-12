@@ -1,5 +1,6 @@
+import json
 import logging
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Dict, Any, Callable, List
 
 from pydantic import BaseModel, Field
 
@@ -9,16 +10,23 @@ from moatless.exceptions import RuntimeError
 from moatless.file_context import FileContext
 from moatless.node import Node
 from moatless.repository.repository import Repository
+from moatless.schema import Attachment, Message, UserMessage, ActionView, AssistantMessage
+from moatless.artifacts.artifact import ArtifactChange, ArtifactHandler, Artifact
+from moatless.artifacts.file import FileArtifact
+
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
 
 class Chat(BaseModel):
-    root: Node = Field(..., description="The root node of the chat sequence.")
+    current_node: Optional[Node] = Field(None, description="The root node of the chat sequence.")
     agent: ActionAgent = Field(..., description="Agent for generating responses.")
+    artifact_handlers: List[ArtifactHandler] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(
         default_factory=dict, description="Additional metadata for the chat."
     )
+    identifier_index: int = Field(0, description="")
     persist_path: Optional[str] = Field(
         None, description="Path to persist the chat sequence."
     )
@@ -26,57 +34,78 @@ class Chat(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
-    @classmethod
-    def create(
-        cls,
-        message: str | None = None,
-        file_context: Optional[FileContext] = None,
-        repository: Repository | None = None,
-        agent: Optional[ActionAgent] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        persist_path: Optional[str] = None,
-    ) -> "Chat":
-        """Create a new Chat instance."""
-        if not file_context:
-            file_context = FileContext(repo=repository)
+    def send_message(self, message: str, attachments: Optional[List[Attachment]] = None) -> str:
+        """Send a message with optional attachments and get a response."""
 
-        root = Node(
-            node_id=0,
-            user_message=message,
-            file_context=file_context,
-        )
+        if not self.current_node:
+            workspace = Workspace(artifact_handlers=self.artifact_handlers)
+        else:
+            workspace = self.current_node.workspace.copy(deep=True)
 
-        return cls(
-            root=root,
-            agent=agent,
-            metadata=metadata or {},
-            persist_path=persist_path,
-        )
-
-    def send_message(self, message: str) -> str:
-        """Send a message and get a response."""
-        self.assert_runnable()
-
-        current_node = self._create_next_node(self.get_last_node())
-        current_node.message = message
+        child_node = self._create_node(workspace, message, attachments)
+        if self.current_node:
+            child_node.set_parent(self.current_node)
+        self.current_node = child_node
 
         try:
-            self.agent.run(current_node)
+            self.agent.run(self.current_node)
             self.maybe_persist()
-            return current_node.action or ""
+            return self.current_node.action or ""
         except RuntimeError as e:
             self.log(logger.error, f"Runtime error: {e.message}")
             return f"Error: {e.message}"
 
-    def _create_next_node(self, parent: Node) -> Node:
-        """Create a new node as a child of the parent node."""
-        child_node = Node(
+    def _create_node(self, workspace: Workspace, message: str, attachments: Optional[List[Attachment]] = None) -> Node:
+        artifact_changes = []
+        if attachments:
+            for attachment in attachments:
+                artifact = FileArtifact(
+                    id=attachment.file_name,
+                    type="file",
+                    name=attachment.file_name,
+                    file_path=attachment.file_name,
+                    content=attachment.content,
+                    mime_type=attachment.mime_type
+                )
+
+                workspace.add_artifact(artifact)
+                artifact_changes.append(ArtifactChange(
+                    artifact_id=artifact.id,
+                    change_type="added",
+                    actor="user",
+                ))
+
+        return Node(
             node_id=self._generate_unique_id(),
-            parent=parent,
-            file_context=parent.file_context.clone() if parent.file_context else None,
+            workspace=workspace,
+            artifact_changes=artifact_changes,
+            user_message=message
         )
-        parent.add_child(child_node)
-        return child_node
+
+    def get_messages(self) -> List[Message]:
+        messages = []
+        for node in self.current_node.get_trajectory():
+            user_artifacts = [change.artifact_id for change in node.artifact_changes if change.actor == "user"]
+
+            if user_artifacts or node.user_message:
+                messages.append(UserMessage(
+                    content=node.user_message,
+                    artifact_ids=user_artifacts
+                ))
+
+            if node.action_steps or node.assistant_message:
+                action_views = [ActionView(name=action_step.action.name) for action_step in node.action_steps]
+                messages.append(
+                    AssistantMessage(
+                        content=node.assistant_message,
+                        actions=action_views
+                    )
+                )
+
+        return messages
+
+    def get_artifacts(self) -> List[Artifact]:
+        return self.current_node.workspace.artifacts
 
     def get_last_node(self) -> Node:
         """Get the last node in the chat sequence."""
@@ -94,33 +123,44 @@ class Chat(BaseModel):
         if self.persist_path:
             self.persist(self.persist_path)
 
+    def model_dump(self, **kwargs) -> Dict[str, Any]:
+        """
+        Generate a dictionary representation of the Chat.
+
+        Returns:
+            Dict[str, Any]: A dictionary representation of the chat.
+        """
+        # Get all fields except the ones we'll handle separately
+        data = {}
+        data["metadata"] = self.metadata
+        data["identifier_index"] = self.identifier_index
+        data["agent"] = self.agent.model_dump(**kwargs)
+
+        data["artifact_handlers"] = []
+        for artifact_handler in self.artifact_handlers:
+            data["artifact_handlers"].append(artifact_handler.model_dump(**kwargs))
+
+        if self.current_node:
+            data["nodes"] = self.current_node.dump_as_list(**kwargs)
+            data["current_node_id"] = self.current_node.node_id
+
+        return data
+
     def persist(self, file_path: str):
         """Persist the chat state to a file."""
-        tree_data = self.model_dump(exclude_none=True)
+        data = self.model_dump(exclude_none=True)
         with open(file_path, "w") as f:
             import json
-            json.dump(tree_data, f, indent=2)
+            json.dump(data, f, indent=2)
 
     def _generate_unique_id(self) -> int:
         """Generate a unique ID for a new node."""
-        return len(self.root.get_all_nodes())
-
-    def assert_runnable(self):
-        """Verify that the chat is properly configured to run."""
-        if self.root is None:
-            raise ValueError("Chat must have a root node.")
-
-        if self.root.file_context is None:
-            raise ValueError("Chat root node must have a file context.")
-
-        if self.agent is None:
-            raise ValueError("Chat must have an agent.")
-
-        return True
+        self.identifier_index += 1
+        return self.identifier_index
 
     def log(self, logger_fn: Callable, message: str, **kwargs):
         """Log a message with metadata."""
         metadata = {**self.metadata, **kwargs}
         metadata_str = " ".join(f"{k}: {str(v)[:20]}" for k, v in metadata.items())
         log_message = f"[{metadata_str}] {message}" if metadata else message
-        logger_fn(log_message) 
+        logger_fn(log_message)

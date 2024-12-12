@@ -24,8 +24,11 @@ from litellm.exceptions import (
     AuthenticationError,
     APIError,
 )
+from litellm.llms.prompt_templates.factory import anthropic_messages_pt
+from litellm.types.llms.anthropic import AnthropicMessagesUserMessageParam, AnthopicMessagesAssistantMessageParam
 from litellm.types.utils import ModelResponse
 from openai import AzureOpenAI, OpenAI, LengthFinishReasonError
+from pyarrow import system_memory_pool
 from pydantic import BaseModel, Field, model_validator, ValidationError
 
 from moatless.completion.model import Message, Completion, StructuredOutput
@@ -46,15 +49,19 @@ class CompletionResponse(BaseModel):
     text_response: Optional[str] = Field(default=None)
     completion: Optional[Completion] = Field(default=None)
 
-    @classmethod 
-    def single(cls, output: StructuredOutput, completion: Optional[Completion] = None) -> 'CompletionResponse':
-        """Helper to create response with single output"""
-        return cls(structured_outputs=[output], completion=completion)
-
     @classmethod
-    def text(cls, text: str, completion: Optional[Completion] = None) -> 'CompletionResponse':
-        """Helper to create text-only response"""
-        return cls(structured_outputs=[], text_response=text, completion=completion)
+    def create(cls,
+               text: str | None = None,
+               output: List[StructuredOutput] | StructuredOutput | None = None,
+               completion: Completion | None = None) -> 'CompletionResponse':
+        if isinstance(output, StructuredOutput):
+            outputs = [output]
+        elif isinstance(output, list):
+            outputs = output
+        else:
+            outputs = None
+
+        return cls(text_response=text, structured_outputs=outputs, completion=completion)
 
     @property
     def structured_output(self) -> Optional[StructuredOutput]:
@@ -137,9 +144,7 @@ class CompletionModel(BaseModel):
         self,
         messages: List[dict],
         system_prompt: str,
-        response_model: List[type[StructuredOutput]]
-        | type[StructuredOutput]
-        | None = None,
+        response_model: List[type[StructuredOutput]] | type[StructuredOutput]
     ) -> CompletionResponse:
         if not system_prompt:
             raise ValueError("System prompt is required")
@@ -151,25 +156,14 @@ class CompletionModel(BaseModel):
                 action_args, completion_response = self._anthropic_completion(
                     completion_messages, system_prompt, response_model
                 )
-            elif response_model is None:
-                completion_messages.insert(
-                    0, {"role": "system", "content": system_prompt}
-                )
-                action_args, completion_response = self._litellm_text_completion(
-                    completion_messages,
-                )
             elif self.response_format == LLMResponseFormat.REACT and isinstance(
                 response_model, list
             ):
                 action_args, completion_response = self._litellm_react_completion(
                     completion_messages, system_prompt, response_model
                 )
-            elif self.use_openai_client:
-                action_args, completion_response = self._openai_completion(
-                    completion_messages, system_prompt, response_model
-                )
             elif self.response_format == LLMResponseFormat.TOOLS:
-                action_args, completion_response = self._litellm_tool_completion(
+                return self._litellm_tool_completion(
                     completion_messages, system_prompt, response_model
                 )
             else:
@@ -220,36 +214,110 @@ class CompletionModel(BaseModel):
 
         return CompletionResponse.single(action_args, completion)
 
-    def create_text_completion(self, messages: List[Message], system_prompt: str):
-        completion_messages = self._map_completion_messages(messages)
+    def _litellm_tool_completion(
+            self,
+            messages: list[dict],
+            system_prompt: str,
+            response_model: type[StructuredOutput] | List[type[StructuredOutput]] | None,
+    ) -> CompletionResponse:
+        litellm.drop_params = True
+        messages.insert(0, {"role": "system", "content": system_prompt})
 
-        if (
-            self.supports_anthropic_computer_use
-            or self.supports_anthropic_prompt_caching
-        ):
-            response, completion_response = self._anthropic_completion(
-                completion_messages, system_prompt
-            )
+        if isinstance(response_model, list):
+            tools = [r.openai_schema(thoughts_in_action=True) for r in response_model]
+        elif response_model:
+            tools = [response_model.openai_schema()]
         else:
-            completion_messages.insert(0, {"role": "system", "content": system_prompt})
-            response, completion_response = self._litellm_text_completion(
-                completion_messages
-            )
+            tools = None
 
-        completion = Completion.from_llm_completion(
-            input_messages=completion_messages,
-            completion_response=completion_response,
-            model=self.model,
+        retries = tenacity.Retrying(
+            retry=tenacity.retry_if_not_exception_type(
+                (APIError, BadRequestError, NotFoundError, AuthenticationError)
+            ),
+            stop=tenacity.stop_after_attempt(3),
         )
 
-        return response, completion
+        def _do_completion():
+            llm_completion_response = None
+            try:
+                llm_completion_response = litellm.completion(
+                    model=self.model,
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                    api_base=self.model_base_url,
+                    api_key=self.model_api_key,
+                    stop=self.stop_words,
+                    tools=tools,
+                    tool_choice="required",
+                    messages=messages,
+                    metadata=self.metadata or {},
+                )
+
+                if not llm_completion_response or not llm_completion_response.choices:
+                    raise CompletionRuntimeError("No completion response or choices returned")
+
+                content = llm_completion_response.choices[0].message.content
+
+                def get_response_model(tool_name: str):
+                    if isinstance(response_model, list):
+                        for r in response_model:
+                            if r.name == tool_name:
+                                return r
+                    else:
+                        return response_model
+
+                response_objects = []
+
+                invalid_function_names = []
+                for tool_call in llm_completion_response.choices[0].message.tool_calls:
+                    tool_args = json.loads(tool_call.function.arguments)
+                    action = get_response_model(tool_call.function.name)
+
+                    if not action:
+                        invalid_function_names.append(tool_call.function.name)
+
+                    response_object = action.model_validate(tool_args)
+                    response_objects.append(response_object)
+
+                if invalid_function_names:
+                    available_actions = [r.name for r in response_model]
+                    raise ValueError(f"Unknown functions {invalid_function_names}. Available functions: {available_actions}")
+
+                completion = Completion.from_llm_completion(
+                    input_messages=messages,
+                    completion_response=llm_completion_response,
+                    model=self.model,
+                )
+
+                return CompletionResponse.create(text=content, output=response_objects, completion=completion)
+
+            except ValidationError as e:
+                logger.warning(
+                    f"Completion attempt failed with error: {e}. Will retry."
+                )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"The response was invalid. Fix the errors, exceptions found\n{e}",
+                    }
+                )
+                raise CompletionRejectError(
+                    message=str(e),
+                    last_completion=llm_completion_response,
+                    messages=messages,
+                )
+
+        try:
+            return retries(_do_completion)
+        except tenacity.RetryError as e:
+            raise e.reraise()
 
     def _litellm_completion(
         self,
         messages: list[dict],
         system_prompt: str,
         structured_output: type[StructuredOutput] | list[type[StructuredOutput]],
-    ) -> Tuple[StructuredOutput | str, ModelResponse]:
+    ) -> CompletionResponse:
         if not structured_output:
             raise CompletionRuntimeError(f"Response model is required for completion")
 
@@ -418,7 +486,7 @@ Make sure to return an instance of the JSON, not the schema itself.""")
         messages: list[dict],
         system_prompt: str,
         actions: list[type[StructuredOutput]],
-    ) -> Tuple[StructuredOutput, ModelResponse]:
+    ) -> CompletionResponse:
         action_input_schemas = []
 
         for action in actions:
@@ -526,263 +594,14 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
         except tenacity.RetryError as e:
             raise e.reraise()
 
-    def _litellm_text_completion(self, messages: list[dict]) -> Tuple[str, ModelResponse]:
-        litellm.drop_params = True
-        
-        completion_kwargs = {
-            "model": self.model,
-            "max_tokens": self.max_tokens,
-            "temperature": self.temperature,
-            "messages": messages,
-            "metadata": self.metadata or {},  # Always pass at least an empty dict
-        }
-        
-        if self.model_base_url:
-            completion_kwargs["api_base"] = self.model_base_url
-        if self.model_api_key:
-            completion_kwargs["api_key"] = self.model_api_key
-        if self.stop_words:
-            completion_kwargs["stop"] = self.stop_words
-
-        completion_response = litellm.completion(**completion_kwargs)
-        return completion_response.choices[0].message.content, completion_response
-
-    def _litellm_tool_completion(
-        self,
-        messages: list[dict],
-        system_prompt: str,
-        response_model: type[StructuredOutput]| List[type[StructuredOutput]],
-        is_retry: bool = False,
-    ) -> Tuple[StructuredOutput, ModelResponse]:
-        litellm.drop_params = True
-        messages.insert(0, {"role": "system", "content": system_prompt})
-
-        if isinstance(response_model, list):
-            tools = [r.openai_schema(thoughts_in_action=True) for r in response_model]
-        else:
-            tools = [response_model.openai_schema()]
-
-        completion_response = litellm.completion(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-            api_base=self.model_base_url,
-            api_key=self.model_api_key,
-            stop=self.stop_words,
-            tools=tools,
-            tool_choice="required",
-            messages=messages,
-            metadata=self.metadata or {},
-        )
-
-        tool_args, tool_name, retry_message = None, None, None
-        if (
-            not completion_response.choices[0].message.tool_calls
-            and completion_response.choices[0].message.content
-        ):
-            if "```json" in completion_response.choices[0].message.content:
-                logger.info(
-                    f"Found no tool call but JSON in completion response, will try to parse"
-                )
-
-                try:
-                    action_request = self.action_type().from_response(
-                        completion_response, mode=instructor.Mode.TOOLS
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to parse JSON as tool call, will try to parse as JSON "
-                    )
-
-                    try:
-                        action_request = self.action_type().from_response(
-                            completion_response, mode=instructor.Mode.JSON
-                        )
-                    except Exception as e:
-                        logger.exception(
-                            f"Failed to parse JSON as tool call from completion response: {completion_response.choices[0].message.content}"
-                        )
-                        raise e
-
-                return action_request, completion_response
-            elif completion_response.choices[0].message.content.startswith("{"):
-                tool_args = json.loads(completion_response.choices[0].message.content)
-
-            if tool_args:
-                if "name" in tool_args:
-                    tool_name = tool_args.get("name")
-
-                if "parameters" in tool_args:
-                    tool_args = tool_args["parameters"]
-
-        elif completion_response.choices[0].message.tool_calls[0]:
-            tool_call = completion_response.choices[0].message.tool_calls[0]
-            tool_args = json.loads(tool_call.function.arguments)
-            tool_name = tool_call.function.name
-
-        if not tool_args:
-            if is_retry:
-                logger.error(
-                    f"No tool call return on request with tools: {tools}.\n\nCompletion response: {completion_response}"
-                )
-                raise ValueError(f"No tool call in response from LLM.")
-
-            logger.warning(
-                f"No tool call return on request with tools: {tools}.\n\nCompletion response: {completion_response}. Will retry"
-            )
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": completion_response.choices[0].message.content,
-                }
-            )
-            if not retry_message:
-                retry_message = "You must response with a tool call."
-            messages.append({"role": "user", "content": retry_message})
-            return self._litellm_tool_completion(messages, system_prompt, response_model, is_retry=True)
-
-        action = None
-        if isinstance(response_model, list):
-            for r in response_model:
-                if r.model_json_schema()["title"] == tool_name:
-                    action = r
-                    break
-        else:
-            action = response_model
-
-        if not action:
-            available_actions = [r.model_json_schema()["title"] for r in response_model]
-            raise ValueError(f"Unknown action {tool_name}. Available acitons: {available_actions}")
-
-        action_args = action.model_validate(tool_args)
-
-        if (
-                hasattr(action_args, "thoughts")
-                and completion_response.choices[0].message.content
-                and not action_args.thoughts
-        ):
-            action_args.thoughts = completion_response.choices[0].message.content
-
-        return action_args, completion_response
-
-    def input_messages(
-        self, content: str, completion: Completion | None, feedback: str | None = None
-    ):
-        messages = []
-        tool_call_id = None
-
-        if completion:
-            messages = completion.input
-
-            response_message = completion.response["choices"][0]["message"]
-            if response_message.get("tool_calls"):
-                tool_call_id = response_message.get("tool_calls")[0]["id"]
-                last_response = {
-                    "role": response_message["role"],
-                    "tool_calls": response_message["tool_calls"],
-                }
-            else:
-                last_response = {
-                    "role": response_message["role"],
-                    "content": response_message["content"],
-                }
-            messages.append(last_response)
-
-            if response_message.get("tool_calls"):
-                tool_call_id = response_message.get("tool_calls")[0]["id"]
-
-        if tool_call_id:
-            new_message = {
-                "role": "tool",
-                "tool_call_id": tool_call_id,
-                "content": content,
-            }
-        else:
-            new_message = {
-                "role": "user",
-                "content": content,
-            }
-
-        if feedback:
-            new_message["content"] += "\n\n" + feedback
-
-        messages.append(new_message)
-        return messages
-
-    def _openai_completion(
-        self,
-        messages: list[dict],
-        system_prompt: str,
-        actions: List[type[StructuredOutput]] | None = None,
-        response_format: type[StructuredOutput] | None = None,
-        is_retry: bool = False,
-    ):
-        if os.getenv("AZURE_API_KEY"):
-            client = AzureOpenAI(
-                api_key=os.getenv("AZURE_API_KEY"),
-                api_version="2024-07-01-preview",
-                azure_endpoint=os.getenv("AZURE_API_BASE"),
-            )
-        else:
-            client = OpenAI()
-
-        messages.insert(0, {"role": "system", "content": system_prompt})
-
-        tools = []
-        if actions:
-            for action in actions:
-                tools.append(
-                    openai.pydantic_function_tool(
-                        action, name=action.name, description=action.description
-                    )
-                )
-
-        try:
-            if actions:
-                completion_response = client.beta.chat.completions.parse(
-                    model=self.model,
-                    max_tokens=self.max_tokens,
-                    temperature=self.temperature,
-                    stop=self.stop_words,
-                    messages=messages,
-                    # tool_choice="required",
-                    tools=tools,
-                    parallel_tool_calls=True,
-                )
-            else:
-                completion_response = client.beta.chat.completions.parse(
-                    model=self.model,
-                    max_tokens=self.max_tokens,
-                    temperature=self.temperature,
-                    stop=self.stop_words,
-                    messages=messages,
-                )
-        except LengthFinishReasonError as e:
-            logger.error(
-                f"Failed to parse completion response. Completion: {e.completion.model_dump_json(indent=2)}"
-            )
-            from moatless.actions.reject import Reject
-
-            # TODO: Raise exception instead?
-            return Reject(
-                rejection_reason=f"Failed to generate action: {e}"
-            ), e.completion
-
-        if not completion_response.choices[0].message.tool_calls:
-            return completion_response.choices[0].message.content, completion_response
-        else:
-            tool_call = completion_response.choices[0].message.tool_calls[0]
-            action_request = tool_call.function.parsed_arguments
-            return action_request, completion_response
-
     def _anthropic_completion(
         self,
         messages: list[dict],
-        system_prompt: str | None = None,
+        system_prompt: str,
         response_model: type[StructuredOutput]
         | List[type[StructuredOutput]]
         | None = None,
-    ) -> Tuple[StructuredOutput | str, Any]:
+    ) -> CompletionResponse:
         tools = []
         tool_choice = {"type": "any"}
 
@@ -820,8 +639,14 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
             anthropic_client = Anthropic()
             extra_headers = {}
 
+        anthropic_messages = anthropic_messages_pt(
+            model=self.model,
+            messages=messages,
+            llm_provider="anthropic",
+        )
+
         betas = ["computer-use-2024-10-22", "prompt-caching-2024-07-31"]
-        _inject_prompt_caching(messages)
+        _inject_prompt_caching(anthropic_messages)
         system_message["cache_control"] = {"type": "ephemeral"}
 
         completion_response = None
@@ -840,7 +665,7 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                     system=[system_message],
                     # tool_choice=tool_choice,
                     tools=tools,
-                    messages=messages,
+                    messages=anthropic_messages,
                     betas=betas,
                     extra_headers=extra_headers
                 )
@@ -857,11 +682,22 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                     messages=messages,
                 ) from e
 
+            def get_response_format(name: str):
+                if len(actions) == 1:
+                    return actions[0]
+                else:
+                    for check_action in actions:
+                        if check_action.name == block.name:
+                            return check_action
+                return None
+
             tool_call_id = None
             try:
                 text = None
+
                 if not actions:
-                    return completion_response.content[0].text, completion_response
+                    return CompletionResponse(text=completion_response.content[0].text, completion_response=completion_response)
+
                 for block in completion_response.content:
                     if isinstance(block, ToolUseBlock) or isinstance(
                         block, BetaToolUseBlock
@@ -1105,7 +941,7 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
 
 
 def _inject_prompt_caching(
-    messages: list[BetaMessageParam],
+    messages: list[Union[AnthropicMessagesUserMessageParam, AnthopicMessagesAssistantMessageParam]],
 ):
     """
     Set cache breakpoints for the 3 most recent turns

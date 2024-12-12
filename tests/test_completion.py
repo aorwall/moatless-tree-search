@@ -138,21 +138,22 @@ Action Input: {"query": "2 + 2 = 4"}"""
 
         # Mock _litellm_text_completion
         with patch.object(completion, '_litellm_text_completion', return_value=(mock_content, mock_response)):
-            action_request, response = completion._litellm_react_completion(
+            result = completion._litellm_react_completion(
                 messages=[{"role": "user", "content": "What is 2+2?"}],
                 system_prompt="You are a helpful assistant",
                 actions=[TestAction]
             )
 
-            # Verify the parsed output
-            assert isinstance(action_request, TestAction)
-            assert action_request.query == "2 + 2 = 4"
-            assert action_request.scratch_pad == (
+            # Verify the parsed output is now a CompletionResponse
+            assert isinstance(result, CompletionResponse)
+            assert isinstance(result.structured_output, TestAction)
+            assert result.structured_output.query == "2 + 2 = 4"
+            assert result.structured_output.scratch_pad == (
                 "I need to calculate the sum of 2 and 2.\n"
                 "This is a simple arithmetic operation.\n"
                 "The answer is 4."
             )
-            assert response == mock_response
+            assert result.completion == mock_response
 
     def test_litellm_react_completion_invalid_format(self):
         class TestAction(StructuredOutput):
@@ -426,17 +427,18 @@ Action Input:
         )
 
         with patch.object(completion, '_litellm_text_completion', return_value=(mock_content, mock_response)):
-            action_request, response = completion._litellm_react_completion(
+            result = completion._litellm_react_completion(
                 messages=[{"role": "user", "content": "Update the error message"}],
                 system_prompt="You are a helpful assistant",
                 actions=[StringReplaceArgs]
             )
 
-            assert isinstance(action_request, StringReplaceArgs)
-            assert action_request.path == "auth/validator.py"
-            assert action_request.old_str == "    if not user.is_active:\n        raise ValueError(\"Invalid user\")"
-            assert action_request.new_str == "    if not user.is_active:\n        raise ValueError(f\"User {user.username} is not active\")"
-            assert action_request.scratch_pad == "I need to update the error message in the validation function."
+            assert isinstance(result, CompletionResponse)
+            assert isinstance(result.structured_output, StringReplaceArgs)
+            assert result.structured_output.path == "auth/validator.py"
+            assert result.structured_output.old_str == "    if not user.is_active:\n        raise ValueError(\"Invalid user\")"
+            assert result.structured_output.new_str == "    if not user.is_active:\n        raise ValueError(f\"User {user.username} is not active\")"
+            assert result.structured_output.scratch_pad == "I need to update the error message in the validation function."
 
     def test_litellm_react_completion_with_create_file_xml(self):
         mock_content = """Thought: I need to create a new configuration file.
@@ -561,3 +563,55 @@ Action Input:
             )
             assert action_request.new_str == ""
             assert action_request.scratch_pad == "I need to remove this comment block."
+
+    def test_litellm_tool_completion(self):
+        # Mock action class
+        class TestAction(ActionArguments):
+            query: str
+
+            @classmethod
+            def openai_schema(cls):
+                return {
+                    "name": "TestAction",
+                    "description": "Test action",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string"}
+                        },
+                        "required": ["query"]
+                    }
+                }
+
+        mock_response = ModelResponse(
+            choices=[{
+                "message": {
+                    "tool_calls": [{
+                        "function": {
+                            "name": "TestAction",
+                            "arguments": '{"query": "test query"}'
+                        }
+                    }]
+                }
+            }],
+            model="gpt-3.5-turbo",
+            usage={"prompt_tokens": 10, "completion_tokens": 20}
+        )
+
+        completion = CompletionModel(
+            model="gpt-3.5-turbo",
+            temperature=0.7,
+            response_format=LLMResponseFormat.TOOLS
+        )
+
+        with patch('litellm.completion', return_value=mock_response):
+            result = completion._litellm_tool_completion(
+                messages=[{"role": "user", "content": "Test query"}],
+                system_prompt="You are a helpful assistant",
+                response_model=TestAction
+            )
+
+            assert isinstance(result, CompletionResponse)
+            assert isinstance(result.structured_output, TestAction)
+            assert result.structured_output.query == "test query"
+            assert result.completion == mock_response
