@@ -302,25 +302,6 @@ def main():
         help="Use average reward across trajectory instead of node reward"
     )
 
-    selector_group = parser.add_argument_group("selector settings")
-    selector_group.add_argument(
-        "--high_value_threshold",
-        type=float,
-        default=50.0,
-        help="Threshold for considering a node's reward as high value"
-    )
-    selector_group.add_argument(
-        "--high_value_leaf_bonus_constant",
-        type=float,
-        default=50.0,
-        help="Bonus constant for high-value leaf nodes"
-    )
-    selector_group.add_argument(
-        "--use_average_reward",
-        action="store_true",
-        help="Use average reward across trajectory instead of node reward"
-    )
-
     args = parser.parse_args()
 
     # Verify environment variables

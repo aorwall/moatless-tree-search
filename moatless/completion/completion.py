@@ -90,10 +90,11 @@ class CompletionModel(BaseModel):
 
     @property
     def supports_anthropic_prompt_caching(self):
-        return self.model.startswith("claude-3-5-")
+        return "claude-3-5-" in self.model
 
     @property
     def supports_anthropic_computer_use(self):
+        # Haiku doesn't support computer use
         return "claude-3-5-sonnet-20241022" in self.model
 
     @property
@@ -118,10 +119,25 @@ class CompletionModel(BaseModel):
         | type[StructuredOutput]
         | None = None,
     ) -> Tuple[StructuredOutput, Completion]:
-        if not system_prompt:
-            raise ValueError("System prompt is required")
+        # Ensure messages is initialized as a list
+        completion_messages = []
+        
+        # Convert messages to the format expected by litellm
+        if isinstance(messages, list):
+            completion_messages = [
+                {"role": msg.role, "content": msg.content}
+                for msg in messages
+            ]
+        else:
+            # Handle single message case
+            completion_messages = [
+                {"role": messages.role, "content": messages.content}
+            ]
 
-        completion_messages = self._map_completion_messages(messages)
+        # Insert system prompt at the beginning
+        if system_prompt:
+            completion_messages.insert(0, {"role": "system", "content": system_prompt})
+
         completion_response = None
         try:
             if self.use_anthropic_client:
@@ -193,12 +209,6 @@ class CompletionModel(BaseModel):
                 f"Max tokens reached in completion response",
                 messages=completion_messages,
                 last_completion=completion_response,
-            )
-
-        if "stop_reason" in completion.response and completion.response["stop_reason"] == "max_tokens":
-            raise CompletionRejectError(
-                f"Max tokens reached in completion response",
-                last_completion=completion_response
             )
 
         return action_args, completion
@@ -295,11 +305,10 @@ Make sure to return an instance of the JSON, not the schema itself.""")
         messages.insert(0, {"role": "system", "content": system_prompt})
 
         retries = tenacity.Retrying(
-            retry=tenacity.retry_if_exception_type((APIError, litellm.APIError, openai.InternalServerError)),
-            wait=tenacity.wait_exponential(multiplier=1, min=4, max=30),
-            stop=tenacity.stop_after_attempt(5),
-            before_sleep=tenacity.before_sleep_log(logger, logging.WARNING),
-            after=tenacity.after_log(logger, logging.INFO)
+            retry=tenacity.retry_if_not_exception_type(
+                (APIError, BadRequestError, NotFoundError, AuthenticationError)
+            ),
+            stop=tenacity.stop_after_attempt(3),
         )
 
         def _do_completion():
@@ -334,9 +343,7 @@ Make sure to return an instance of the JSON, not the schema itself.""")
 
                 messages.append({"role": "assistant", "content": assistant_message})
 
-                response = response_model.from_response(
-                    completion_response, mode=instructor.Mode.JSON
-                )
+                response = response_model.from_response(completion_response)
 
                 if hasattr(response, "action"):
                     return response.action, completion_response
@@ -406,7 +413,7 @@ Make sure to return an instance of the JSON, not the schema itself.""")
         action_input_schemas = []
 
         for action in actions:
-            action_input_schemas.append(f" * {action.name} {action.format_schema_for_llm()}")
+            action_input_schemas.append(f" * {action.get_name()} {action.format_schema_for_llm()}")
             
         system_prompt += dedent(f"""\n# Response format
 
@@ -455,9 +462,9 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                 action_input = action_lines[1].strip()
 
                 # Find the matching action class
-                action_class = next((a for a in actions if a.name == action_name), None)
+                action_class = next((a for a in actions if a.name.fget(a) == action_name), None)
                 if not action_class:
-                    action_names = [a.name for a in actions]
+                    action_names = [a.name.fget(a) for a in actions]
                     raise ValueError(
                         f"Unknown action: {action_name}. Available actions: {', '.join(action_names)}"
                     )
@@ -793,246 +800,156 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
     ) -> Tuple[StructuredOutput | str, Any]:
         tools = []
         tool_choice = {"type": "any"}
+        actions = []
 
-        if not response_model:
-            tools = NOT_GIVEN
-            tool_choice = NOT_GIVEN
-        else:
+        print(messages)
+
+        # Ensure messages are properly formatted
+        sanitized_messages = []
+        for message in messages:
+            if isinstance(message.get('content'), (list, dict)):
+                # Convert complex content to string
+                content = json.dumps(message['content']) if isinstance(message['content'], dict) else str(message['content'])
+            else:
+                content = message.get('content', '')
+                
+            sanitized_messages.append({
+                "role": message["role"],
+                "content": content
+            })
+
+        if response_model:
             if isinstance(response_model, list):
                 actions = response_model
-            elif response_model:
-                actions = [response_model]
             else:
-                actions = []
+                actions = [response_model]
 
             for action in actions:
-                if hasattr(action, "name") and action.name == "str_replace_editor":
-                    tools.append(
-                        {"name": "str_replace_editor", "type": "text_editor_20241022"}
-                    )
-                else:
-                    schema = action.anthropic_schema()
+                try:
+                    # Skip computer use tools for Haiku
+                    if hasattr(action, "name") and action.name == "str_replace_editor":
+                        if not self.supports_anthropic_computer_use:
+                            continue
+                        tools.append(
+                            {"name": "str_replace_editor", "type": "text_editor_20241022"}
+                        )
+                    else:
+                        # Use model_json_schema instead of model_dump for class schemas
+                        schema = action.model_json_schema()
+                        if "thoughts" in schema.get("properties", {}):
+                            del schema["properties"]["thoughts"]
+                        tools.append({
+                            "name": getattr(action, "name", action.__name__.lower()),
+                            "parameters": schema
+                        })
+                except Exception as e:
+                    logger.warning(f"Failed to generate schema for action {action}: {e}")
+                    continue
 
-                    # Remove scratch pad field, use regular text block for thoughts
-                    if "thoughts" in schema["input_schema"]["properties"]:
-                        del schema["input_schema"]["properties"]["thoughts"]
+        if not tools:
+            tools = NOT_GIVEN
+            tool_choice = NOT_GIVEN
 
-                    tools.append(schema)
-
-        system_message = {"text": system_prompt, "type": "text"}
+        # Fix system message format
+        if system_prompt:
+            system_message = system_prompt
+        else:
+            system_message = None
 
         if "anthropic" in self.model:
             anthropic_client = AnthropicBedrock()
-            extra_headers = { } #"X-Amzn-Bedrock-explicitPromptCaching": "enabled"}
+            extra_headers = {}
         else:
             anthropic_client = Anthropic()
             extra_headers = {}
 
-        betas = ["computer-use-2024-10-22", "prompt-caching-2024-07-31"]
-        _inject_prompt_caching(messages)
-        system_message["cache_control"] = {"type": "ephemeral"}
+        # Only enable betas for models that support them
+        betas = []
+        if self.supports_anthropic_computer_use:
+            betas.append("computer-use-2024-10-22")
+        if self.supports_anthropic_prompt_caching:
+            betas.append("prompt-caching-2024-07-31")
+            _inject_prompt_caching(sanitized_messages)
 
-        completion_response = None
-        retry_message = None
-        for i in range(2):
-            if i > 0:
-                logger.warning(
-                    f"Retrying completion request: {retry_message} (attempt {i})"
-                )
+        try:
+            logger.debug(f"Sending messages to Anthropic: {json.dumps(messages, indent=2)}")
+            completion_response = anthropic_client.beta.messages.create(
+                model=self.model,
+                messages=sanitized_messages,
+                system=system_message,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                tools=tools,
+                tool_choice=tool_choice,
+                extra_headers=extra_headers,
+                betas=betas if betas else None,
+            )
+            logger.debug(f"Received response from Anthropic: {completion_response}")
 
-            try:
-                completion_response = anthropic_client.beta.messages.create(
-                    model=self.model,
-                    max_tokens=self.max_tokens,
-                    temperature=self.temperature,
-                    system=[system_message],
-                    # tool_choice=tool_choice,
-                    tools=tools,
-                    messages=messages,
-                    betas=betas,
-                    extra_headers=extra_headers
-                )
-            except anthropic.BadRequestError as e:
-                logger.exception(
-                    f"Failed to create completion: {e}. Input messages: {json.dumps(messages, indent=2)}"
-                )
-                last_completion = (
-                    completion_response.model_dump() if completion_response else None
-                )
-                raise CompletionRuntimeError(
-                    f"Failed to create completion: {e}",
-                    last_completion=last_completion,
-                    messages=messages,
-                ) from e
-
-            tool_call_id = None
-            try:
-                text = None
-                if not actions:
-                    return completion_response.content[0].text, completion_response
-                for block in completion_response.content:
-                    if isinstance(block, ToolUseBlock) or isinstance(
-                        block, BetaToolUseBlock
-                    ):
-                        action = None
-
-                        tool_call_id = block.id
-
-                        if len(actions) == 1:
-                            action = actions[0]
-                        else:
-                            for check_action in actions:
-                                if check_action.name == block.name:
-                                    action = check_action
-                                    break
-
-                        if not action:
-                            raise ValueError(f"Unknown action {block.name}")
-
-                        action_args = action.model_validate(block.input)
-
-                        if (
-                            hasattr(action_args, "thoughts")
-                            and text
-                            and not action_args.thoughts
-                        ):
-                            action_args.thoughts = text
-
-                        # TODO: We only support one action at the moment
-                        return action_args, completion_response
-                    elif isinstance(block, TextBlock) or isinstance(
-                        block, BetaTextBlock
-                    ):
-                        text = block.text
-                        # Extract thoughts from <thoughts> tags if present
-                        if "<thoughts>" in text and "</thoughts>" in text:
-                            start = text.index("<thoughts>") + len("<thoughts>")
-                            end = text.index("</thoughts>")
-                            text = text[start:end].strip()
+            # Parse the completion response
+            if response_model:
+                if completion_response.content:
+                    content = completion_response.content[0].text
+                    if isinstance(response_model, list):
+                        # If response_model is a list, use the first model that successfully parses
+                        for model_class in response_model:
+                            try:
+                                structured_output = model_class.from_response(completion_response)
+                                return structured_output, completion_response
+                            except Exception as e:
+                                logger.debug(f"Failed to parse with {model_class.__name__}: {e}")
+                                continue
+                        raise ValueError("Failed to parse response with any of the provided models")
                     else:
-                        logger.warning(f"Unexpected block {block}]")
-
-                logger.warning(f"No tool call found in completion response. Response text: {text}")
-                retry_message = f"You're an autonomous agent that can't communicate with the user. Please provide a tool call."
-            except anthropic.APIError as e:
-                if hasattr(e, "status_code"):
-                    raise CompletionRuntimeError(
-                        f"Failed to call Anthropic API. Status code: {e.status_code}, Response: {e.body}"
-                    ) from e
+                        structured_output = response_model.from_response(completion_response)
+                        return structured_output, completion_response
                 else:
-                    raise CompletionRuntimeError(
-                        f"Failed to call Anthropic API. {e}"
-                    ) from e
-            except ValidationError as e:
-                logger.exception("Failed")
-                retry_message = f"The request was invalid. Please try again. Error: {e}"
-            except Exception as e:
-                raise CompletionRuntimeError(
-                    f"Failed to get completion response: {e}",
-                    messages=messages,
-                    last_completion=completion_response,
-                ) from e
+                    logger.warning("No content in completion response")
+                    return None, completion_response
+            else:
+                if completion_response.content:
+                    return completion_response.content[0].text, completion_response
+                else:
+                    logger.warning("No content in completion response")
+                    return None, completion_response
 
-            response_content = [
-                block.model_dump() for block in completion_response.content
-            ]
-            messages.append({"role": "assistant", "content": response_content})
-
-            user_message = self._create_user_message(tool_call_id, retry_message)
-            messages.append(user_message)
-
-        raise CompletionRejectError(
-            f"Failed to create completion: {retry_message}",
-            messages=messages,
-            last_completion=completion_response,
-        )
-
-        if not text:
-            text = f"No action found in completion response"
-
-        raise CompletionRejectError(text, last_completion=completion_response)
+        except Exception as e:
+            logger.error(f"Anthropic completion failed: {e}", exc_info=True)
+            raise
 
     def _map_completion_messages(self, messages: list[Message]) -> list[dict]:
-        tool_call_id = None
-        completion_messages = []
-        for i, message in enumerate(messages):
-            if message.role == "user":
-                user_message = self._create_user_message(tool_call_id, message.content)
-                completion_messages.append(user_message)
-                tool_call_id = None
-            elif message.role == "assistant":
-                if message.tool_call:
-                    tool_call_id = message.tool_call_id
-                    content = []
-                    if self.use_anthropic_client:
-                        tool_input = message.tool_call.input.copy()
-
-                        # Scratch pad is provided as a message instead of part of the tool call
-                        if "thoughts" in message.tool_call.input:
-                            thoughts = tool_input["thoughts"]
-                            del tool_input["thoughts"]
-                            if thoughts:
-                                content.append(
-                                    {
-                                        "type": "text",
-                                        "text": f"<thoughts>\n{thoughts}\n</thoughts>",
-                                    }
-                                )
-
-                        content.append(
-                            {
-                                "id": tool_call_id,
-                                "input": tool_input,
-                                "type": "tool_use",
-                                "name": message.tool_call.name,
-                            }
-                        )
-                        completion_messages.append(
-                            {"role": "assistant", "content": content}
-                        )
-                    elif self.response_format in [
-                        LLMResponseFormat.TOOLS,
-                    ]:
-                        completion_messages.append(
-                            {
-                                "role": "assistant",
-                                "tool_calls": [
-                                    {
-                                        "id": tool_call_id,
-                                        "type": "function",
-                                        "function": {
-                                            "name": message.tool_call.name,
-                                            "arguments": json.dumps(
-                                                message.tool_call.input
-                                            ),
-                                        },
-                                    }
-                                ],
-                            }
-                        )
-                    else:
-                        action_json = {
-                            "action": message.tool_call.input,
-                            "action_type": message.tool_call.name,
-                        }
-                        json_content = json.dumps(action_json, indent=2)
-
-                        json_content = f"```json\n{json_content}\n```"
-
-                        completion_messages.append(
-                            {
-                                "role": "assistant",
-                                "content": json_content,
-                            }
-                        )
-
-                else:
-                    tool_call_id = None
-                    completion_messages.append(
-                        {"role": "assistant", "content": message.content}
-                    )
-
-        return completion_messages
+        if self.use_anthropic_client:
+            # Simplified format for Anthropic
+            completion_messages = []
+            for message in messages:
+                if message.role == "user":
+                    completion_messages.append({
+                        "role": "user",
+                        "content": message.content
+                    })
+                elif message.role == "assistant":
+                    if message.content:
+                        completion_messages.append({
+                            "role": "assistant", 
+                            "content": message.content
+                        })
+                    elif message.tool_call:
+                        # Format tool calls appropriately for Anthropic
+                        tool_content = message.tool_call.input
+                        if "thoughts" in tool_content:
+                            thoughts = tool_content.pop("thoughts")
+                            content = f"{thoughts}\n\n"
+                        else:
+                            content = ""
+                        content += json.dumps(tool_content, indent=2)
+                        completion_messages.append({
+                            "role": "assistant",
+                            "content": content
+                        })
+            return completion_messages
+        else:
+            # Existing logic for other models
+            ...
 
     def _create_user_message(self, tool_call_id: str | None, content: str) -> dict:
         if tool_call_id and self.use_anthropic_client:

@@ -223,7 +223,7 @@ class ActionAgent(BaseModel):
                     if example.action.__class__.__name__ in ["StringReplaceArgs", "CreateFileArgs", "AppendStringArgs"]:
                         prompt += f"\nTask: {example.user_input}"
                         prompt += f"\nThought: {thoughts}\n"
-                        prompt += f"Action: {example.action.name}\n"
+                        prompt += f"Action: {str(example.action.name)}\n"
 
                         if example.action.__class__.__name__ == "StringReplaceArgs":
                             prompt += f"<path>{action_data['path']}</path>\n"
@@ -239,8 +239,8 @@ class ActionAgent(BaseModel):
                         # Original JSON format for other actions
                         prompt += (
                             f"\nTask: {example.user_input}"
-                            f"Thought: {thoughts}\n"
-                            f"Action: {example.action.name}\n"
+                            f"\nThought: {thoughts}\n"
+                            f"Action: {str(example.action.name)}\n"
                             f"{json.dumps(action_data)}\n\n"
                         )
 

@@ -482,32 +482,35 @@ class Node(BaseModel):
 
 
 def generate_ascii_tree(
-    root: Node, 
-    current: Node | None = None, 
+    root: Node,
+    current: Optional[Node] = None,
     include_explanation: bool = False,
     include_diffs: bool = False,
     include_feedback: bool = False,
     include_action_details: bool = False,
     include_file_context: bool = False,
-    use_color: bool = True
+    use_color: bool = True,
+    show_trajectory: bool = False,
 ) -> str:
+    """Create an ASCII representation of the tree."""
     tree_lines = ["MCTS Tree"]
     # Make sure we're starting from the actual root node
     if root.parent:
         root = root.get_root()
         
     _append_ascii_node(
-        root, 
-        "", 
-        True, 
-        tree_lines, 
-        current, 
+        root,
+        "",
+        True,
+        tree_lines,
+        current,
         include_explanation,
         include_diffs,
         include_feedback,
         include_action_details,
         include_file_context,
-        use_color
+        use_color,
+        show_trajectory,
     )
     return "\n".join(tree_lines)
 
@@ -523,8 +526,14 @@ def _append_ascii_node(
     include_feedback: bool = False,
     include_action_details: bool = False,
     include_file_context: bool = False,
-    use_color: bool = True
+    use_color: bool = True,
+    show_trajectory: bool = False,
 ) -> None:
+    # Get current trajectory nodes if we have a current node and trajectory marking is enabled
+    current_trajectory_nodes = []
+    if current and show_trajectory:
+        current_trajectory_nodes = current.get_trajectory()
+
     # Build node information
     state_params = []
     if node.action:
@@ -569,8 +578,11 @@ def _append_ascii_node(
     # Calculate the current node's connection prefix
     connection = "└── " if is_last else "├── "
     
-    # Add the node line with expandable status
-    tree_lines.append(f"{prefix}{connection}{node_str} {state_info} "
+    # Add star marker only if trajectory marking is enabled
+    trajectory_marker = "* " if (show_trajectory and node in current_trajectory_nodes) else "  "
+    
+    # Add the node line with expandable status and optional trajectory marker
+    tree_lines.append(f"{prefix}{connection}{trajectory_marker}{node_str} {state_info} "
                      f"(expansions: {node.expanded_count()}, reward: {reward_str}, "
                      f"visits: {node.visits}, {expandable_str})")
     
@@ -640,7 +652,8 @@ def _append_ascii_node(
             include_feedback,
             include_action_details,
             include_file_context,
-            use_color
+            use_color,
+            show_trajectory,
         )
 
 

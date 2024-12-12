@@ -231,6 +231,11 @@ class FileRepository(Repository):
             pattern_parts = file_pattern.split("/")
             filename = pattern_parts[-1]
 
+            # Fix invalid ** patterns in filename (e.g. **.py -> **/*.py)
+            if "**." in filename:
+                filename = filename.replace("**.", "**/*.")
+                pattern_parts[-1] = filename
+
             # If filename doesn't contain wildcards, it should be an exact match
             has_wildcards = any(c in filename for c in "*?[]")
             if not has_wildcards:
@@ -253,6 +258,10 @@ class FileRepository(Repository):
                     and "**/" not in file_pattern
                 ):
                     file_pattern = f"**/{file_pattern}"
+
+            # Reconstruct pattern if it was modified
+            if pattern_parts[-1] != filename:
+                file_pattern = "/".join(pattern_parts)
 
             repo_path = Path(self.repo_path)
             matched_files = []

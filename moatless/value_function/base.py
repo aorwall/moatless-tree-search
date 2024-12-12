@@ -8,7 +8,7 @@ from moatless.actions.action import Action, RewardScaleEntry
 from moatless.completion.completion import CompletionModel, Message
 from moatless.completion.model import UserMessage, Completion
 from moatless.message_history import MessageHistoryGenerator
-from moatless.node import Node
+from moatless.node import Node, generate_ascii_tree
 from moatless.schema import MessageHistoryType
 from moatless.value_function.model import Reward
 
@@ -42,32 +42,20 @@ class ValueFunction(BaseModel):
         if self.coding_value_function:
             coding_reward, _ = self.coding_value_function.get_reward(node)
             
-        # Handle automatic rewards first
+        messages = self.message_generator.generate(node)
+        if messages is None:
+            messages = []  # Ensure we have a valid list
+        
+        last_message = ""
+
+        # Handle automatic reward cases by adding them to the message
         if node.observation.expect_correction and self.correction_award is not None:
-            base_reward = Reward(
-                value=self.correction_award, 
-                explanation="Expects a correction"
-            )
-            # Combine with coding reward if present
-            if coding_reward:
-                return self._combine_rewards(base_reward, coding_reward), None
-            return base_reward, None
+            last_message += "# Automatic Reward Assessment\n"
+            last_message += f"Action expects a correction. Suggested value: {self.correction_award}\n\n"
 
         if node.action.name in ["Reject", "Error"]:
-            logger.info(f"{node.action.name} action, assigning reward -100")
-            base_reward = Reward(
-                value=-100, 
-                explanation=f"{node.action.name} action"
-            )
-            # Combine with coding reward if present
-            if coding_reward:
-                return self._combine_rewards(base_reward, coding_reward), None
-            return base_reward, None
-
-        messages = self.message_generator.generate(node)
-
-        messages = self.message_generator.generate(node)
-        last_message = ""
+            last_message += "# Automatic Reward Assessment\n"
+            last_message += f"{node.action.name} action detected. Suggested value: -100\n\n"
 
         # Format the action section
         if node.action.name == "Finish":
@@ -112,7 +100,6 @@ class ValueFunction(BaseModel):
         if self.include_search_tree:
             last_message += "# Search Tree State\n"
             last_message += "<search_tree>\n"
-            from moatless.node import generate_ascii_tree
             ascii_tree = generate_ascii_tree(
                 node.get_root(),
                 include_explanation=True,
@@ -123,20 +110,21 @@ class ValueFunction(BaseModel):
             )
             last_message += ascii_tree
             last_message += "\n</search_tree>\n\n"
-        
-        # Format the coding value function section
-        if coding_reward:
-            last_message += "# Coding Value Function Assessment\n"
-            last_message += "<coding_assessment>\n"
-            last_message += f"Value: {coding_reward.value}\n"
-            last_message += f"Explanation: {coding_reward.explanation}"
-            last_message += "\n</coding_assessment>\n"
 
-        messages.append(UserMessage(content=last_message))
+        # Ensure we append the message only if we have content
+        if last_message:
+            messages.append(UserMessage(content=last_message))
+        
         system_prompt = self._create_system_prompt(node, coding_reward)
         
+        # Add defensive check
+        if not messages:
+            messages = [UserMessage(content="No message history available")]
+        
         return self.completion_model.create_completion(
-            messages=messages, system_prompt=system_prompt, response_model=Reward
+            messages=messages, 
+            system_prompt=system_prompt, 
+            response_model=Reward
         )
 
     def _create_system_prompt(self, node: Node, coding_reward: Optional[Reward] = None) -> str:
@@ -149,6 +137,7 @@ class ValueFunction(BaseModel):
 The automated coding value function has provided the following assessment:
 * Value: {coding_reward.value}
 * Explanation: {coding_reward.explanation}
+It's based on coding heuristics, and may not be perfect.
 
 Evaluation Guidelines:
 1. Consider the automated assessment above
@@ -262,7 +251,7 @@ Evaluation Guidelines:
 
 * **Explanation**: Offer a detailed explanation and reasoning behind your decision, focusing on the **last executed action**, its relation to previous actions and its impact.
 * **Feedback to Alternative Branch**: Offer guidance for a parallel problem-solving branch. Suggest conceptual alternative approaches or strategies without providing actual code implementations. Use the search tree to guide your feedback, particularly by avoiding to suggest actions that would lead to the same or very similar previous outcomes.
-* **Reward**: Assign a single integer value between {min_value} and {max_value} based on your confidence in the correctness of the action and its likelihood of resolving the issue.
+* **Reward**: Assign a single integer value between {min_value} and {max_value} based on your confidence in the correctness of the action and its likelihood of eventually leading to resolving the issue.
 """
 
         if node.possible_actions:

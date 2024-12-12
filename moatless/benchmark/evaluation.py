@@ -308,7 +308,7 @@ class Evaluation:
             instances = [instance for instance in lite_instances if instance["instance_id"] in common_ids]
             logger.info(f"Found {len(instances)} instances that exist in both lite and verified datasets")
         else:
-            file_path = os.path.join(os.path.dirname(__file__), f"swebench_{split}_all_evaluations.json")
+            file_path = os.path.join(os.path.dirname(__file__), f"swebench_lite_all_evaluations.json")
             with open(file_path) as f:
                 instances = json.load(f)
             logger.info(f"Loaded {len(instances)} instances from {file_path}")

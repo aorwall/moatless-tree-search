@@ -45,7 +45,13 @@ class Action(BaseModel, ABC):
 
     @property
     def name(self) -> str:
+        """Returns the name of the action class as a string."""
         return self.__class__.__name__
+
+    @classmethod
+    def get_name(cls) -> str:
+        """Returns the name of the action class as a string."""
+        return cls.__name__
 
     @classmethod
     def get_evaluation_criteria(cls, trajectory_length: int | None = None) -> List[str]:
@@ -54,6 +60,7 @@ class Action(BaseModel, ABC):
                 "Exploratory Actions: Recognize that initial searches and information-gathering steps are essential and should not be heavily penalized if they don't yield immediate results.",
                 "Appropriateness of Action: Evaluate if the action is logical given the agent's current knowledge and the early stage of problem-solving.",
             ]
+        
         else:
             return [
                 "Solution Quality: Assess the logical changes, contextual fit, and overall improvement without introducing new issues.",

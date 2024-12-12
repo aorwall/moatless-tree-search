@@ -185,6 +185,7 @@ class FeedbackAgent(FeedbackGenerator):
                 include_diffs=True,
                 include_action_details=False,
                 include_file_context=False,
+                show_trajectory=True
             )
             tree_message += "\n</search_tree>\n\n"
             messages.append(UserMessage(content=tree_message))
@@ -308,7 +309,7 @@ mentioned line numbers. What matters is that the right section of code is being 
    - alternative Sibling Nodes: Other independent solution attempts branching from the same parent
      (These are from different trajectories and have not happened in your current path)
 
-{start_num + 3}. alternative Sibling Node Information: Details about other solution attempts, including:
+{start_num + 3}. alternative Node Information: Details about other solution attempts, including:
    - Their proposed actions and parameters
    - Their outcomes (from separate, independent trajectories)
    - Warning flags for previously attempted approaches
@@ -318,8 +319,12 @@ mentioned line numbers. What matters is that the right section of code is being 
    - Start from your parent node's current state
    - Consider what other sibling nodes have tried (but remember these are alternative universes, not your history)
    - Learn from their outcomes to avoid repeating unsuccessful approaches
+   - Do not assume that a "finish" state means the issue was resolved succesfully, even if the feedback assumes so, since we can never actually be completely certain.
    - Contextualize the feedback based on the entire tree structure and outcomes
+   - Constantly inform the agent about alternative approaches that have been tried (files viewed, tests, git diffs) in order to avoid repeating the same actions and learn from them to improve in this trajectory.
    - When referring to previous attempts in alternative trajectories, provide information about what was tried as the agent does not have access to any alternative node information
+   - Nodes in the Current Trajectory are marked with a *.
+
 2. Suggest the next action for your branch
 3. Optionally suggest which node to expand next by setting suggested_node_id in your response
    - This can help guide the search towards promising branches
@@ -327,8 +332,8 @@ mentioned line numbers. What matters is that the right section of code is being 
 
 **Required JSON Response Format:**""" + json_format + """
 
-Note: Focus on novel solutions and avoid approaches that were unsuccessful in other branches.
-**Always clearly articulate which of the Nodes/Actions you refere to are within the current node's trajectory (current trajectory), and which are not (alternative), and therefore have no effect on the current node's state.**"""
+Note: Focus on encouraging the agent to achieve new, novel solutions and avoid approaches that were tried in other branches. 
+**Always clearly articulate which of the Nodes/Actions you refer to are within the current node's trajectory (current trajectory), and which are not (alternative), and therefore have no effect on the current node's state.**"""
 
         # Add available actions if provided
         if actions:

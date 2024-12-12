@@ -258,8 +258,8 @@ def create_graph_figure(G_subset, G, pos, is_linear=False):
         if node_info.get("type") == "node":
             badge = decide_badge(node_info)
             if badge:
-                badge_x.append(x + 0.04)
-                badge_y.append(y + 0.04)
+                badge_x.append(x + 0.08)
+                badge_y.append(y + 0.08)
                 badge_symbols.append(badge[0])
                 badge_colors.append(badge[1])
 
