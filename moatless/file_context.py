@@ -808,6 +808,16 @@ class ContextFile(BaseModel):
         """
         return self.patches
 
+    @property
+    def is_new(self) -> bool:
+        """
+        Returns whether this file is newly created in the context.
+
+        Returns:
+            bool: True if the file is new, False otherwise
+        """
+        return self._is_new
+
 
 class TestFile(BaseModel):
     file_path: str = Field(..., description="The path to the test file.")

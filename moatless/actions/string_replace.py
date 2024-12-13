@@ -18,6 +18,7 @@ from moatless.index.code_index import CodeIndex
 from moatless.repository.file import do_diff
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
         object.__setattr__(self, "_repository", repository)
 
     def execute(
-        self, args: StringReplaceArgs, file_context: FileContext
+        self, args: StringReplaceArgs, file_context: FileContext | None = None, workspace: Workspace | None = None
     ) -> Observation:
         path_str = self.normalize_path(args.path)
         path, error = self.validate_file_access(path_str, file_context)

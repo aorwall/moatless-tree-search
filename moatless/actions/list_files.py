@@ -10,6 +10,7 @@ from moatless.actions.model import (
     RewardScaleEntry,
 )
 from moatless.file_context import FileContext
+from moatless.workspace import Workspace
 
 
 class ListFilesArgs(ActionArguments):
@@ -30,7 +31,7 @@ class ListFilesArgs(ActionArguments):
 class ListFiles(Action):
     args_schema = ListFilesArgs
 
-    def execute(self, args: ListFilesArgs, file_context: FileContext) -> Observation:
+    def execute(self, args: ListFilesArgs, file_context: FileContext | None = None, workspace: Workspace | None = None) -> Observation:
         if not file_context._repo:
             raise RuntimeError("Repository not available for listing files.")
 

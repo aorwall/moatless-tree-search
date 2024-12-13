@@ -16,7 +16,7 @@ from moatless.actions.model import (
 from moatless.actions.respond import MessageArgs
 from moatless.agent.settings import AgentSettings
 from moatless.completion.completion import CompletionModel, LLMResponseFormat
-from moatless.completion.model import AssistantMessage, UserMessage, Completion
+from moatless.completion.model import Completion
 from moatless.exceptions import RuntimeError, CompletionRejectError
 from moatless.index.code_index import CodeIndex
 from moatless.node import Node, ActionStep

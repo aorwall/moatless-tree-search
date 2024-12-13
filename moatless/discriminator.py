@@ -1,10 +1,11 @@
 import logging
 from typing import List
 
+from litellm.types.llms.openai import ChatCompletionUserMessage
 from pydantic import Field, BaseModel
 
 from moatless.completion.completion import CompletionModel
-from moatless.completion.model import UserMessage, StructuredOutput
+from moatless.completion.model import StructuredOutput
 from moatless.debate import MultiAgentDebate
 from moatless.node import Node
 
@@ -110,7 +111,7 @@ Your task is to carefully evaluate each change and decide which one is the most 
         SYSTEM_MESSAGE = f"{ROLE_PROMPT}\n{FORMAT_PROMPT}"
         USER_MESSAGE = f"<Problem Statement>\n{problem_statement}</Problem Statement>\n<Solutions>\n{solutions}\n</Solutions>"
 
-        messages = [UserMessage(content=USER_MESSAGE)]
+        messages = [ChatCompletionUserMessage(role="user", content=USER_MESSAGE)]
 
         if debate:
             response, completion, messages = self.debate.conduct_debate(

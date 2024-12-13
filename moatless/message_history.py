@@ -144,7 +144,6 @@ class MessageHistoryGenerator(BaseModel):
 
         logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
 
-        logger.info(json.dumps(messages, indent=2))
         return messages
 
     def _generate_react_history(self, node: "Node", previous_nodes: List["Node"]) -> List[AllMessageValues]:

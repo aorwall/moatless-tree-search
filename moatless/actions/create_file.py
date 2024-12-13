@@ -14,6 +14,7 @@ from moatless.index import CodeIndex
 from moatless.repository.file import do_diff
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,7 @@ class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
         object.__setattr__(self, "_code_index", code_index)
         object.__setattr__(self, "_repository", repository)
 
-    def execute(self, args: CreateFileArgs, file_context: FileContext) -> Observation:
+    def execute(self, args: CreateFileArgs, file_context: FileContext | None = None, workspace: Workspace | None = None) -> Observation:
         if args.path.startswith("/repo"):
             args.path = args.path[5:]
         if args.path.startswith("/"):

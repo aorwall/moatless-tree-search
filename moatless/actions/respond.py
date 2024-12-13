@@ -3,6 +3,7 @@ from pydantic import Field
 from moatless.actions.action import Action
 from moatless.actions.model import ActionArguments, Observation
 from moatless.file_context import FileContext
+from moatless.workspace import Workspace
 
 
 class MessageArgs(ActionArguments):
@@ -26,5 +27,5 @@ class MessageAction(Action):
 
     args_schema = MessageArgs
 
-    def execute(self, args: MessageArgs, file_context: FileContext) -> Observation:
+    def execute(self, args: MessageArgs, file_context: FileContext | None = None, workspace: Workspace | None = None) -> Observation:
         return Observation()

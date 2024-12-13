@@ -12,6 +12,9 @@ from moatless.runtime.runtime import RuntimeEnvironment
 from datetime import datetime, timezone
 import re
 
+from moatless.workspace import Workspace
+
+
 class AppendStringArgs(ActionArguments):
     """
     Append text content to the end of a file.
@@ -73,7 +76,7 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
         object.__setattr__(self, "_code_index", code_index)
         object.__setattr__(self, "_repository", repository)
 
-    def execute(self, args: AppendStringArgs, file_context: FileContext) -> Observation:
+    def execute(self, args: AppendStringArgs, file_context: FileContext | None = None, workspace: Workspace | None = None) -> Observation:
         path_str = self.normalize_path(args.path)
         path, error = self.validate_file_access(path_str, file_context)
         if error:

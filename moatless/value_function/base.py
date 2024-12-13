@@ -2,14 +2,14 @@ import importlib
 import logging
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from litellm.types.llms.openai import ChatCompletionUserMessage
 from pydantic import BaseModel, PrivateAttr, Field
 
 from moatless.actions.action import Action, RewardScaleEntry
 from moatless.completion.completion import CompletionModel, Message
-from moatless.completion.model import UserMessage, Completion
+from moatless.completion.model import Completion
 from moatless.message_history import MessageHistoryGenerator
 from moatless.node import Node, generate_ascii_tree
-from moatless.schema import MessageHistoryType
 from moatless.value_function.model import Reward
 
 logger = logging.getLogger(__name__)
@@ -113,19 +113,21 @@ class ValueFunction(BaseModel):
 
         # Ensure we append the message only if we have content
         if last_message:
-            messages.append(UserMessage(content=last_message))
+            messages.append(ChatCompletionUserMessage(role="user", content=last_message))
         
         system_prompt = self._create_system_prompt(node, coding_reward)
         
         # Add defensive check
         if not messages:
-            messages = [UserMessage(content="No message history available")]
+            messages = [ChatCompletionUserMessage(role="user", content="No message history available")]
         
-        return self.completion_model.create_completion(
+        completion_response = self.completion_model.create_completion(
             messages=messages, 
             system_prompt=system_prompt, 
             response_model=Reward
         )
+
+        return completion_response.structured_output, completion_response.completion
 
     def _create_system_prompt(self, node: Node, coding_reward: Optional[Reward] = None) -> str:
         base_prompt = self._build_system_prompt(node)
@@ -225,7 +227,7 @@ Evaluation Guidelines:
             message += "No changes made yet."
             message += "\n</git_patch>\n\n"
 
-        return UserMessage(content=message)
+        return ChatCompletionUserMessage(role="user", content=message)
 
     def _build_system_prompt(self, node: Node):
         action = Action.get_action_by_args_class(type(node.action))

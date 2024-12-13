@@ -13,9 +13,6 @@ from moatless.agent.settings import AgentSettings
 from moatless.completion.model import (
     Usage,
     Completion,
-    Message,
-    UserMessage,
-    AssistantMessage,
 )
 from moatless.file_context import FileContext
 from moatless.repository.repository import Repository
@@ -29,6 +26,11 @@ class ActionStep(BaseModel):
     action: ActionArguments
     observation: Optional[Observation] = None
     completion: Optional[Completion] = None
+
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+        data["action"] = self.action.model_dump(**kwargs)
+        return data
 
 class FeedbackData(BaseModel):
     """Structured feedback data model"""
@@ -301,7 +303,6 @@ class Node(BaseModel):
         self.assistant_message = None
         self.visits = 0
         self.value = 0.0
-        self.feedback = None
         self.is_duplicate = False
         if self.parent and self.parent.file_context:
             self.file_context = self.parent.file_context.clone()
@@ -327,7 +328,6 @@ class Node(BaseModel):
             value=self.value,
             max_expansions=self.max_expansions,
             user_message=self.user_message,
-            feedback=self.feedback,
             is_duplicate=self.is_duplicate,
             action=self.action,
             possible_actions=self.possible_actions.copy() if self.possible_actions else []

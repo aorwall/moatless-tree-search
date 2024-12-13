@@ -11,6 +11,7 @@ from moatless.actions.model import (
     FewShotExample,
 )
 from moatless.file_context import FileContext
+from moatless.workspace import Workspace
 
 
 class FinishArgs(ActionArguments):
@@ -34,7 +35,7 @@ class FinishArgs(ActionArguments):
 class Finish(Action):
     args_schema: ClassVar[Type[ActionArguments]] = FinishArgs
 
-    def execute(self, args: FinishArgs, file_context: FileContext | None = None):
+    def execute(self, args: FinishArgs, file_context: FileContext | None = None, workspace: Workspace | None = None):
         return Observation(message=args.finish_reason, terminal=True)
 
     @classmethod

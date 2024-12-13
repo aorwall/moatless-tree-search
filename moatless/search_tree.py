@@ -323,6 +323,12 @@ class SearchTree(BaseModel):
 
         child_node = self.expander.expand(node, self)
 
+        if self.feedback_generator:
+            child_node.user_message = self.feedback_generator.generate_feedback(
+                child_node,
+                self.agent.actions,
+            )
+
         self.log(logger.info, f"Expanded Node{node.node_id} to new Node{child_node.node_id}")
         return child_node
 
@@ -332,12 +338,6 @@ class SearchTree(BaseModel):
         if node.observation:
             logger.info(f"Node{node.node_id}: Action already executed. Skipping.")
         else:
-            if self.agent:
-                agent = self.agent
-            elif node.agent_settings:
-                agent = ActionAgent(agent_settings=node.agent_settings)
-            
-
             self.agent.run(node)
 
         if self.value_function and not node.is_duplicate and node.observation:

@@ -253,6 +253,8 @@ class CompletionModel(BaseModel):
                     metadata=self.metadata or {},
                 )
 
+                logger.info(json.dumps(messages, indent=2))
+                logger.info(json.dumps(llm_completion_response.model_dump(), indent=2))
                 if not llm_completion_response or not llm_completion_response.choices:
                     raise CompletionRuntimeError("No completion response or choices returned")
 
@@ -390,6 +392,7 @@ Make sure to return an instance of the JSON, not the schema itself.""")
 
         def _do_completion():
             completion_response = None
+
             try:
                 completion_response = litellm.completion(
                     model=self.model,
@@ -402,7 +405,8 @@ Make sure to return an instance of the JSON, not the schema itself.""")
                     response_format={"type": "json_object"},
                     metadata=self.metadata or {},
                 )
-
+                logger.info(json.dumps(messages, indent=2))
+                logger.info(json.dumps(completion_response.model_dump(), indent=2))
                 if not completion_response or not completion_response.choices:
                     raise CompletionRuntimeError("No completion response or choices returned")
 
