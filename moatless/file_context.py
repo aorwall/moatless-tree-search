@@ -23,6 +23,7 @@ from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment, TestResult
 from moatless.schema import FileWithSpans
 from moatless.utils.tokenizer import count_tokens
+from moatless.runtime.runtime import TestStatus
 
 logger = logging.getLogger(__name__)
 
@@ -83,9 +84,11 @@ class ContextFile(BaseModel):
 
     _cache_valid: bool = PrivateAttr(False)
 
+    _is_new: bool = PrivateAttr(False)
+
     def __init__(
         self,
-        repo: Repository,
+        repo: Optional[Repository],
         file_path: str,
         initial_patch: Optional[str] = None,
         **data,
@@ -94,17 +97,15 @@ class ContextFile(BaseModel):
         Initializes the ContextFile instance.
 
         Args:
-            repo (Repository): The repository instance.
-            file_path (str): The path to the file within the repository.
-            initial_patch (Optional[str]): A Git-formatted patch representing accumulated changes from the original content.
-            **data: Arbitrary keyword arguments. Must include '_repo'.
-
-        Raises:
-            ValueError: If '_repo' is not provided in the initialization data.
+            repo (Optional[Repository]): The repository instance, can be None when reconstructing from dict
+            file_path (str): The path to the file within the repository
+            initial_patch (Optional[str]): A Git-formatted patch representing accumulated changes
+            **data: Additional keyword arguments
         """
         super().__init__(file_path=file_path, **data)
         self._repo = repo
         self._initial_patch = initial_patch
+        self._is_new = False if repo is None else not repo.file_exists(file_path)
 
     def _add_import_span(self):
         # TODO: Initiate module or add this lazily?
@@ -286,7 +287,7 @@ class ContextFile(BaseModel):
         """
         content_lines = content.splitlines(keepends=True)
         new_content_lines = []
-        line_no = 0  # 0-based index
+        line_no = 0
 
         for hunk in patched_file:
             try:
@@ -1383,9 +1384,7 @@ class FileContext(BaseModel):
         all_results = []
         for test_file in self._test_files.values():
             all_results.extend(test_file.test_results)
-
-        from testbeds.schema import TestStatus
-
+            
         failure_count = sum(1 for r in all_results if r.status == TestStatus.FAILED)
         error_count = sum(1 for r in all_results if r.status == TestStatus.ERROR)
         passed_count = len(all_results) - failure_count - error_count
@@ -1453,7 +1452,7 @@ class FileContext(BaseModel):
                 status_counts[result.status] += 1
             test_summary.append(f" - {test_file.file_path}: {len(test_file.test_results)} tests. {status_counts}")
         
-        logger.info(f"Test summary by file:\n{'\n'.join(test_summary)}")
+        logger.info(f"Test summary by file:{chr(10)}{chr(10).join(test_summary)}")
         
         return list(self._test_files.values())
 
@@ -1510,7 +1509,7 @@ class FileContext(BaseModel):
         all_results = []
         for test_file in self._test_files.values():
             all_results.extend(test_file.test_results)
-
+            
         failure_count = sum(1 for r in all_results if r.status == TestStatus.FAILED)
         error_count = sum(1 for r in all_results if r.status == TestStatus.ERROR)
         passed_count = len(all_results) - failure_count - error_count
@@ -1524,7 +1523,6 @@ class FileContext(BaseModel):
         Returns:
             str: Formatted string containing details of failed tests
         """
-
         from testbeds.schema import TestStatus
 
         test_result_strings = []
@@ -1556,9 +1554,6 @@ class FileContext(BaseModel):
         Returns:
             Optional[TestStatus]: The overall test status
         """
-
-        from testbeds.schema import TestStatus
-
         all_results = []
         for test_file in self._test_files.values():
             all_results.extend(test_file.test_results)
@@ -1582,4 +1577,30 @@ class FileContext(BaseModel):
         """
         return any(file.was_edited for file in self._files.values())
 
-    
+    def get_edited_files(self) -> List[str]:
+        """
+        Returns a list of file paths that have been edited in the context.
+        A file is considered edited if it has changes (patch) but is not new.
+
+        Returns:
+            List[str]: List of edited file paths
+        """
+        return [
+            file_path
+            for file_path, file in self._files.items()
+            if file.was_edited and not file.is_new
+        ]
+
+    def get_created_files(self) -> List[str]:
+        """
+        Returns a list of file paths that have been newly created in the context.
+
+        Returns:
+            List[str]: List of created file paths
+        """
+        return [
+            file_path
+            for file_path, file in self._files.items()
+            if file.is_new
+        ]
+

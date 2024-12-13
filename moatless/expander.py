@@ -19,7 +19,8 @@ class Expander(BaseModel):
         description="The settings for the agent model",
     )
 
-    def expand(self, node: Node) -> None | Node:
+    def expand(self, node: Node, search_tree) -> None | Node:
+        """Handle all node expansion logic in one place"""
         if node.is_fully_expanded():
             return None
 
@@ -34,45 +35,56 @@ class Expander(BaseModel):
             logger.info(f"Max expansions reached for node {node.node_id}")
             return None
 
-        # Get single agent setting for this expansion
+        # Get agent settings for this expansion
         settings_to_use = self._get_agent_settings(node)
         
+        # Create the new node
         child_node = Node(
-            node_id=self._generate_unique_id(node),
+            node_id=search_tree._generate_unique_id(),
             parent=node,
             file_context=node.file_context.clone() if node.file_context else None,
             max_expansions=self.max_expansions,
             agent_settings=settings_to_use[0] if settings_to_use else None,
         )
+        
+        # Add child to parent
         node.add_child(child_node)
+
+        # Handle feedback if available
+        if search_tree.feedback_generator:
+            child_node.message = search_tree.feedback_generator.generate_feedback(
+                child_node, 
+                search_tree.agent.actions,
+                include_parent_info=True,
+                persist_path=search_tree.persist_path,
+                include_tree=True,
+                include_node_suggestion=True
+            )
+            child_node.feedback = child_node.message
+            logger.info(f"Generated feedback for Node{child_node.node_id}")
+
+        logger.info(f"Expanded Node{node.node_id} to new Node{child_node.node_id}")
         return child_node
 
     def _get_agent_settings(self, node: Node) -> List[AgentSettings]:
-        """
-        Get agent settings for a single expansion.
-        Returns a list with one item (or empty list if no settings available).
-        """
+        """Get agent settings for a single expansion."""
         if not self.agent_settings:
             return []
         
         if self.random_settings:
-            # Get settings already used by siblings
             used_settings = {
                 child.agent_settings for child in node.children 
                 if child.agent_settings is not None
             }
             
-            # Try to find unused settings first
             available_settings = [
                 setting for setting in self.agent_settings 
                 if setting not in used_settings
             ]
             
-            # If all settings have been used, use any setting
             settings_pool = available_settings or self.agent_settings
             return [random.choice(settings_pool)]
         else:
-            # Original cyclic selection
             num_children = len(node.children)
             return [self.agent_settings[num_children % len(self.agent_settings)]]
 

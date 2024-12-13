@@ -27,7 +27,6 @@ class CreateFileArgs(ActionArguments):
     * Will create parent directories if they don't exist
     * File content should include proper indentation and formatting
     """
-
     path: str = Field(..., description="Path where the new file should be created")
     file_text: str = Field(..., description="Complete content to write to the new file")
 
@@ -52,7 +51,6 @@ class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
     """
     Action to create a new file with specified content.
     """
-
     args_schema = CreateFileArgs
 
     def __init__(

@@ -46,7 +46,13 @@ class Action(BaseModel, ABC):
 
     @property
     def name(self) -> str:
+        """Returns the name of the action class as a string."""
         return self.__class__.__name__
+
+    @classmethod
+    def get_name(cls) -> str:
+        """Returns the name of the action class as a string."""
+        return cls.__name__
 
     @classmethod
     def get_evaluation_criteria(cls, trajectory_length: int | None = None) -> List[str]:
@@ -55,6 +61,7 @@ class Action(BaseModel, ABC):
                 "Exploratory Actions: Recognize that initial searches and information-gathering steps are essential and should not be heavily penalized if they don't yield immediate results.",
                 "Appropriateness of Action: Evaluate if the action is logical given the agent's current knowledge and the early stage of problem-solving.",
             ]
+        
         else:
             return [
                 "Solution Quality: Assess the logical changes, contextual fit, and overall improvement without introducing new issues.",
@@ -139,8 +146,10 @@ class Action(BaseModel, ABC):
         """
         return """Your role is to evaluate the **last executed action** of the search tree that our AI agents are traversing, to help us determine the best trajectory to solve a programming issue. The agent is responsible for identifying and modifying the correct file(s) in response to the problem statement.
 
+Important: While line numbers may be referenced in the initial problem description, they can shift as changes are made to the file. Focus on whether the agent is modifying the correct logical parts of the code, rather than strictly matching the initially mentioned line numbers. What matters is that the right section of code is being modified, even if its current line number differs from what was originally specified.
+
 At this stage, the agent is still working on the solution. Your task is twofold:
-1. **Evaluation**: Assess whether the change done by the **last executed action** is appropriate for addressing the problem and whether the agent is on the right path to resolving the issue.
+1. **Evaluation**: Assess whether the change done by the **last executed action** is appropriate for addressing the problem and whether the agent is on the right path to resolving the issue. Verify that the correct sections of code are being modified, regardless of their current line numbers.
 2. **Alternative Feedback**: Independently of your evaluation, provide guidance for an alternative problem-solving branch. This ensures parallel exploration of different solution paths.
 """
 

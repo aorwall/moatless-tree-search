@@ -30,24 +30,33 @@ class ActionStep(BaseModel):
     observation: Optional[Observation] = None
     completion: Optional[Completion] = None
 
+class FeedbackData(BaseModel):
+    """Structured feedback data model"""
+    analysis: str = Field(..., description="Analysis of the task and alternative branch attempts")
+    feedback: str = Field(..., description="Direct feedback to the AI assistant")
+    system_prompt: Optional[str] = Field(None, description="System prompt used to generate feedback")
+    raw_completion: Optional[str] = Field(None, description="Raw completion response")
+    raw_messages: List[Dict] = Field(default_factory=list, description="Raw messages used to generate feedback")
+    timestamp: str = Field(..., description="When feedback was generated")
+
 
 class Node(BaseModel):
     node_id: int = Field(..., description="The unique identifier of the node")
-    
+
     parent: Optional["Node"] = Field(None, description="The parent node")
     children: List["Node"] = Field(default_factory=list, description="The child nodes")
-    
+
     workspace: Optional[Workspace] = Field(None, description="The workspace associated with the node")
     artifact_changes: List[ArtifactChange] = Field(default_factory=list, description="The artifact changes associated with the node")
 
     user_message: Optional[str] = Field(None, description="The user message for this node")
     assistant_message: Optional[str] = Field(None, description="The assistant response for this node")
-    
+
     action_steps: List[ActionStep] = Field(
         default_factory=list,
         description="The sequence of actions and observations for this node"
     )
-    
+
     file_context: Optional[FileContext] = Field(
         None, description="The file context state associated with the node"
     )
@@ -68,6 +77,9 @@ class Node(BaseModel):
     agent_settings: Optional[AgentSettings] = Field(
         None, description="The agent settings associated with the node"
     )
+    feedback_data: Optional[FeedbackData] = Field(
+        None, description="Structured feedback data for the node"
+    )
 
     @property
     def action(self) -> Optional[ActionArguments]:
@@ -85,7 +97,7 @@ class Node(BaseModel):
         else:
             self.action_steps[-1].action = value
 
-    @property 
+    @property
     def observation(self) -> Optional[Observation]:
         """Backward compatibility: Get observation from the latest action step"""
         if not self.action_steps:
@@ -97,7 +109,7 @@ class Node(BaseModel):
         """Backward compatibility: Set observation on the current/new action step"""
         if value is None:
             return
-            
+
         if not self.action_steps:
             # Create new action step if setting observation on empty node
             self.action_steps.append(ActionStep(
@@ -119,7 +131,11 @@ class Node(BaseModel):
 
     @classmethod
     def stub(cls, **kwargs):
-        return cls(node_id=0, **kwargs)
+        """Create a stub node with a unique ID."""
+        # Get the highest existing node ID from the kwargs or use 0
+        existing_nodes = kwargs.get('children', [])
+        highest_id = max([n.node_id for n in existing_nodes] + [kwargs.get('node_id', -1), -1]) + 1
+        return cls(node_id=highest_id, **kwargs)
 
     def is_leaf(self) -> bool:
         """Check if the node is a leaf node (no children)."""
@@ -257,12 +273,12 @@ class Node(BaseModel):
 
     def total_usage(self) -> Usage:
         total_usage = Usage()
-        
+
         # Sum usage across all action steps
         for step in self.action_steps:
             if step.completion:
                 total_usage += step.completion.usage
-                    
+
         return total_usage
 
 
@@ -298,9 +314,14 @@ class Node(BaseModel):
         Returns:
             Node: A new node instance with reset state
         """
-        # Create a new node with same base attributes
+        # Find highest node ID in the tree to ensure uniqueness
+        root = self.get_root()
+        all_nodes = root.get_all_nodes()
+        highest_id = max(node.node_id for node in all_nodes) + 1
+
+        # Create a new node with same base attributes but new ID
         new_node = Node(
-            node_id=self.node_id,
+            node_id=highest_id,  # Use new unique ID
             parent=self.parent,
             visits=self.visits,
             value=self.value,
@@ -309,9 +330,7 @@ class Node(BaseModel):
             feedback=self.feedback,
             is_duplicate=self.is_duplicate,
             action=self.action,
-            possible_actions=self.possible_actions.copy()
-            if self.possible_actions
-            else [],
+            possible_actions=self.possible_actions.copy() if self.possible_actions else []
         )
 
         new_node.reset()
@@ -375,13 +394,13 @@ class Node(BaseModel):
         runtime: RuntimeEnvironment | None = None
     ) -> "Node":
         """Update reconstruction to handle both old and new formats"""
-        
+
         # Handle legacy format conversion
         if "action" in node_data and not "action_steps" in node_data:
             action = node_data.get("action")
             observation = node_data.get("output")
             completions = node_data.get("completions", {})
-            
+
             if action or observation or completions:
                 node_data["action_steps"] = [{
                     "action": action,
@@ -404,6 +423,12 @@ class Node(BaseModel):
 
         node_data["visits"] = node_data.get("visits", 0)
         node_data["value"] = node_data.get("value", 0.0)
+
+        # Add feedback data reconstruction
+        if node_data.get("completions", {}).get("feedback"):
+            feedback_completion = node_data["completions"]["feedback"]
+            if isinstance(feedback_completion, dict) and "response" in feedback_completion:
+                node_data["feedback_data"] = FeedbackData.model_validate(feedback_completion["response"])
 
         if "children" in node_data:
             children = node_data.get("children", [])
@@ -532,66 +557,206 @@ class Node(BaseModel):
             raise ValueError("Format must be either 'list' or 'tree'")
 
 
-def generate_ascii_tree(root: Node, current: Node | None = None) -> str:
+def generate_ascii_tree(
+    root: Node,
+    current: Optional[Node] = None,
+    include_explanation: bool = False,
+    include_diffs: bool = False,
+    include_feedback: bool = False,
+    include_action_details: bool = False,
+    include_file_context: bool = False,
+    use_color: bool = True,
+    show_trajectory: bool = False,
+) -> str:
+    """Create an ASCII representation of the tree."""
     tree_lines = ["MCTS Tree"]
-    _append_ascii_node(root, "", True, tree_lines, current)
+    # Make sure we're starting from the actual root node
+    if root.parent:
+        root = root.get_root()
+
+    _append_ascii_node(
+        root,
+        "",
+        True,
+        tree_lines,
+        current,
+        include_explanation,
+        include_diffs,
+        include_feedback,
+        include_action_details,
+        include_file_context,
+        use_color,
+        show_trajectory,
+    )
     return "\n".join(tree_lines)
 
 
 def _append_ascii_node(
-    node: Node, prefix: str, is_last: bool, tree_lines: list[str], current: Node | None
-):
-    state_params = []
+    node: Node,
+    prefix: str,
+    is_last: bool,
+    tree_lines: list[str],
+    current: Node | None,
+    include_explanation: bool = False,
+    include_diffs: bool = False,
+    include_feedback: bool = False,
+    include_action_details: bool = False,
+    include_file_context: bool = False,
+    use_color: bool = True,
+    show_trajectory: bool = False,
+) -> None:
+    # Get current trajectory nodes if we have a current node and trajectory marking is enabled
+    current_trajectory_nodes = []
+    if current and show_trajectory:
+        current_trajectory_nodes = current.get_trajectory()
 
+    # Build node information
+    state_params = []
     if node.action:
         state_params.append(node.action.name)
-
         if node.observation and node.observation.expect_correction:
             state_params.append("expect_correction")
 
-    state_info = f"Node{node.node_id}"
-    if state_params:
-        state_info += f"({', '.join(state_params)})"
-    else:
-        state_info += f"()"
-
-    if current and node.node_id == current.node_id:
-        state_info = color_white(state_info)
-
+    # Build reward string
     if not node.reward:
         reward_str = "0"
-    elif node.reward.value >= 75:
-        reward_str = color_green(node.reward.value)
-    elif node.reward.value <= 0:
-        reward_str = color_red(node.reward.value)
+        node_str = f"Node{node.node_id}"
     else:
-        reward_str = color_yellow(node.reward.value)
+        if use_color:
+            if node.reward.value >= 75:
+                reward_str = color_green(node.reward.value)
+                node_str = color_green(f"Node{node.node_id}")
+            elif node.reward.value <= 0:
+                reward_str = color_red(node.reward.value)
+                node_str = color_red(f"Node{node.node_id}")
+            else:
+                reward_str = color_yellow(node.reward.value)
+                node_str = color_yellow(f"Node{node.node_id}")
+        else:
+            reward_str = str(node.reward.value)
+            node_str = f"Node{node.node_id}"
 
-    # avg_reward = node.get_mean_traj_reward()
-    if not node.reward:
-        node_str = f"Node{node.node_id} [-]"
-    elif node.reward.value >= 75:
-        node_str = color_green(f"Node{node.node_id} [{node.reward.value}]")
-    elif node.reward.value < 0:
-        node_str = color_red(f"Node{node.node_id} [{node.reward.value}]")
+    # Build state info without repeating node ID
+    state_info = ""
+    if state_params:
+        state_info = f"({', '.join(state_params)})"
     else:
-        node_str = color_yellow(f"Node{node.node_id} [{node.reward.value}]")
+        state_info = "()"
 
-    if node.is_duplicate:
-        tree_lines.append(
-            f"{prefix}{'└── ' if is_last else '├── '}Node{node.node_id} {state_info} (duplicate)"
+    if use_color and current and node.node_id == current.node_id:
+        state_info = color_white(state_info)
+
+    # Add expandable status
+    expandable_str = "expandable" if node.is_expandable() else "not-expandable"
+    if use_color:
+        expandable_str = color_green(expandable_str) if node.is_expandable() else color_red(expandable_str)
+
+    # Calculate the current node's connection prefix
+    connection = "└── " if is_last else "├── "
+
+    # Add star marker only if trajectory marking is enabled
+    trajectory_marker = "* " if (show_trajectory and node in current_trajectory_nodes) else "  "
+
+    # Add the node line with expandable status and optional trajectory marker
+    tree_lines.append(f"{prefix}{connection}{trajectory_marker}{node_str} {state_info} "
+                     f"(expansions: {node.expanded_count()}, reward: {reward_str}, "
+                     f"visits: {node.visits}, {expandable_str})")
+
+    # Calculate the content prefix - should align with the node's content
+    content_prefix = prefix + ("    " if is_last else "│   ")
+
+    # Add explanation if available
+    if include_explanation and node.reward and node.reward.explanation:
+        explanation_text = node.reward.explanation.strip()
+        _append_wrapped_text(tree_lines, explanation_text, content_prefix, "│ Explanation: ")
+
+    # Add feedback if available
+    if include_feedback and node.feedback_data:
+        tree_lines.append(f"{content_prefix}│ Feedback:")
+        _append_wrapped_text(tree_lines, node.feedback_data.feedback, content_prefix, "│ Direct Feedback: ")
+        _append_wrapped_text(tree_lines, node.feedback_data.analysis, content_prefix, "│ Analysis: ")
+
+    # Add diffs if available - only for Finish actions
+    if include_diffs and node.file_context and node.action and node.action.name == "Finish":
+        patch = node.file_context.generate_git_patch()
+        if patch.strip():
+            tree_lines.append(f"{content_prefix}│ Changes (git patch):")
+            for line in patch.split('\n'):
+                if line.strip():
+                    prefix_char = '+'if line.startswith('+') else ('-' if line.startswith('-') else ' ')
+                    formatted_line = line.strip()
+                    if use_color:
+                        if prefix_char == '+':
+                            formatted_line = color_green(formatted_line)
+                        elif prefix_char == '-':
+                            formatted_line = color_red(formatted_line)
+                    tree_lines.append(f"{content_prefix}│  {formatted_line}")
+
+    # Add action details if available
+    if include_action_details and node.action:
+        tree_lines.append(f"{content_prefix}│ Action Details:")
+        tree_lines.append(f"{content_prefix}│  Prompt: {node.action.to_prompt()}")
+        if node.observation:
+            tree_lines.append(f"{content_prefix}│  Output: {node.observation.message}")
+            if node.observation.extra:
+                tree_lines.append(f"{content_prefix}│  Extra: {node.observation.extra}")
+            if node.observation.expect_correction:
+                tree_lines.append(f"{content_prefix}│  Expects Correction: True")
+
+    # Add file context if available
+    if include_file_context and node.file_context and not node.file_context.is_empty():
+        tree_lines.append(f"{content_prefix}│ File Context:")
+        context = node.file_context.create_prompt(
+            show_outcommented_code=True,
+            exclude_comments=True,
+            outcomment_code_comment="... code not in context"
         )
-    else:
-        tree_lines.append(
-            f"{prefix}{'└── ' if is_last else '├── '}{node_str} {state_info} (expansions: {node.expanded_count()}, reward: {reward_str}, visits: {node.visits})"
+        _append_wrapped_text(tree_lines, context, content_prefix, "│  ")
+
+    # Process children with updated parameters
+    child_prefix = prefix + ("    " if is_last else "│   ")
+    children = node.children
+    for i, child in enumerate(children):
+        _append_ascii_node(
+            child,
+            child_prefix,
+            i == len(children) - 1,
+            tree_lines,
+            current,
+            include_explanation,
+            include_diffs,
+            include_feedback,
+            include_action_details,
+            include_file_context,
+            use_color,
+            show_trajectory,
         )
 
-        child_prefix = prefix + ("    " if is_last else "│   ")
-        children = node.children
-        for i, child in enumerate(node.children):
-            _append_ascii_node(
-                child, child_prefix, i == len(children) - 1, tree_lines, current
-            )
+
+def _append_wrapped_text(tree_lines: list[str], text: str, prefix: str, header_prefix: str = "│ "):
+    """Helper function to wrap and append text with proper prefixes."""
+    words = text.split()
+    current_line = []
+    current_length = 0
+    max_line_length = 100 - len(prefix) - len(header_prefix)
+
+    # First line gets the header prefix
+    is_first_line = True
+
+    for word in words:
+        if current_length + len(word) + 1 <= max_line_length:
+            current_line.append(word)
+            current_length += len(word) + 1
+        else:
+            line_prefix = header_prefix if is_first_line else "│   "
+            tree_lines.append(f"{prefix}{line_prefix}{' '.join(current_line)}")
+            current_line = [word]
+            current_length = len(word)
+            is_first_line = False
+
+    if current_line:
+        line_prefix = header_prefix if is_first_line else "│   "
+        tree_lines.append(f"{prefix}{line_prefix}{' '.join(current_line)}")
 
 
 def color_red(text: Any) -> str:

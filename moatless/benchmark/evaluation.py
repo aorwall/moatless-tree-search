@@ -13,6 +13,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional, Any
 
+import random
 import litellm
 from pydantic import BaseModel, Field
 from tqdm.auto import tqdm
@@ -35,8 +36,10 @@ from moatless.feedback.feedback_agent import FeedbackAgent
 from moatless.feedback.reward_feedback import RewardFeedbackGenerator
 from moatless.schema import MessageHistoryType
 from moatless.search_tree import SearchTree
-from moatless.selector import BestFirstSelector, SoftmaxSelector, Selector
+from moatless.selector import BestFirstSelector, SoftmaxSelector, Selector, LLMSelector, FeedbackSelector
+from moatless.value_function.base import ValueFunction
 from moatless.value_function.coding import CodingValueFunction
+from moatless.benchmark.instance_collections import sampled_50_instances
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +67,7 @@ class TreeSearchSettings(BaseModel):
     )
 
     max_cost: float = Field(
-        0.5,
+        4,
         description="The maximum cost spent on token before finishing.",
     )
 
@@ -76,6 +79,18 @@ class TreeSearchSettings(BaseModel):
     agent_model: Optional[CompletionModel] = Field(
         default=None,
         description="The model the agent will use.",
+    )
+    
+    selector: str = Field(
+        "best_first",
+        options=["best_first", "softmax", "llm_selector", "feedback"],
+        description="The selector to use for the tree search.",
+    )
+
+    value_function: Optional[str] = Field(
+        "llm_value_function",
+        options=["coding", "llm_value_function"],
+        description="The value function to use for the tree search.",
     )
 
     value_function_model: Optional[CompletionModel] = Field(
@@ -138,7 +153,8 @@ class TreeSearchSettings(BaseModel):
     )
 
     feedback_type: Optional[str] = Field(
-        None,
+        "agent",
+        options=["reward", "agent", None],
         description="Type of feedback generator to use ('reward', 'agent', or None).",
     )
 
@@ -197,12 +213,16 @@ class Evaluation:
         num_workers: int = 1,
         use_testbed: bool = False,
         selector: Selector | None = None,
+        overwrite: bool = False,
     ):
         self.evaluations_dir = evaluations_dir
         self.num_workers = num_workers
         self.report_mode = report_mode
         self.dataset_name = dataset_name
         self.evaluation_name = evaluation_name
+
+        self.log_handler = LogHandler(os.path.join(evaluations_dir, "logs"))
+        litellm.callbacks = [self.log_handler]
 
         self.use_testbed = use_testbed
 
@@ -229,6 +249,8 @@ class Evaluation:
         self.file_lock = threading.Lock()
         self.statuses = defaultdict(dict)
         self.events = defaultdict(list)
+
+        self.overwrite = overwrite
 
     def update_status(self, instance_id: str, status: str):
         with self.file_lock:
@@ -286,7 +308,7 @@ class Evaluation:
             instances = [instance for instance in lite_instances if instance["instance_id"] in common_ids]
             logger.info(f"Found {len(instances)} instances that exist in both lite and verified datasets")
         else:
-            file_path = os.path.join(os.path.dirname(__file__), f"swebench_{split}_all_evaluations.json")
+            file_path = os.path.join(os.path.dirname(__file__), f"swebench_lite_all_evaluations.json")
             with open(file_path) as f:
                 instances = json.load(f)
             logger.info(f"Loaded {len(instances)} instances from {file_path}")
@@ -294,13 +316,13 @@ class Evaluation:
         random.shuffle(instances)
 
 
+        # Apply all filters
         if instance_ids:
             instances = [
                 instance
                 for instance in instances
                 if instance["instance_id"] in instance_ids
             ]
-
             logger.info(
                 f"Running evaluation for {len(instances)} instances filtered by instance_ids"
             )
@@ -311,7 +333,6 @@ class Evaluation:
                 for instance in instances
                 if instance["instance_id"] not in exclude_instance_ids
             ]
-
             logger.info(
                 f"Running evaluation for {len(instances)} instances filtered by exclude_instance_ids"
             )
@@ -326,7 +347,6 @@ class Evaluation:
                     and instance.get("llm_monkeys", {}).get("resolved_rate", 0) > 0
                 )
             ]
-
             logger.info(
                 f"Running evaluation for {len(instances)} instances filtered by min_resolved >= {min_resolved}"
             )
@@ -337,16 +357,21 @@ class Evaluation:
                 for instance in instances
                 if len(instance["resolved_by"]) <= max_resolved
             ]
-
             logger.info(
                 f"Running evaluation for {len(instances)} instances filtered by max_resolved <= {max_resolved}"
             )
+        
+        if split == "sampled_50_instances":
+            instances = [
+                instance for instance in instances 
+                if instance["instance_id"] in sampled_50_instances
+            ]
+            logger.info(f"Running evaluation for {len(instances)} instances from sampled_50_instances")
 
         if repos:
             instances = [
                 instance for instance in instances if instance["repo"] in repos
             ]
-
             logger.info(
                 f"Running evaluation for {len(instances)} instances filtered by repos"
             )
@@ -357,11 +382,17 @@ class Evaluation:
                 for instance in instances
                 if instance["repo"] not in ignore_repos
             ]
-
             if instances:
                 logger.info(
                     f"Running evaluation for {len(instances)} instances after filtering by ignore_repos"
                 )
+
+        # After all filters, apply random sampling if requested
+        if split == "random":
+            instances = random.sample(instances, min(50, len(instances)))
+            logger.info(f"Randomly selected {len(instances)} instances from filtered dataset")
+
+        random.shuffle(instances)
 
         return self._run_evaluation(instances)
 
@@ -378,31 +409,37 @@ class Evaluation:
         instance_id = instance["instance_id"]
         instance_dir = os.path.join(self.evaluation_dir, f"{instance_id}")
         trajectory_path = os.path.join(instance_dir, "trajectory.json")
+        eval_result_path = os.path.join(instance_dir, "eval_result.json")
 
-        if not os.path.exists(self.evaluation_dir):
-            os.makedirs(trajectory_path)
+        # If overwrite is True, remove existing files
+        if self.overwrite and os.path.exists(instance_dir):
+            logger.info(f"Overwriting existing evaluation for instance {instance_id}")
+            shutil.rmtree(instance_dir)
+        
+        # Create directories if they don't exist
+        if not os.path.exists(instance_dir):
+            os.makedirs(instance_dir)
 
         log_dir = os.path.join(instance_dir, "logs")
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
 
-        eval_result_path = os.path.join(instance_dir, "eval_result.json")
-        if os.path.exists(eval_result_path):
+        # Check for existing evaluation only if not overwriting
+        if not self.overwrite and os.path.exists(eval_result_path):
             try:
                 with open(eval_result_path) as f:
                     eval_result = json.load(f)
-            except json.JSONDecodeError as e:
-                logger.error(
-                    f"Failed to parse eval result from {eval_result_path}. Will remove file to start over. Error: {e}"
-                )
-                os.remove(eval_result_path)
-                eval_result = {
-                    "node_results": {},
-                }
-        else:
-            eval_result = {
-                "node_results": {},
-            }
+                    if eval_result.get("status") == "completed":
+                        logger.info(f"Skipping completed instance {instance_id} (use --overwrite to force re-evaluation)")
+                        return eval_result
+            except json.JSONDecodeError:
+                # If file is corrupted, we'll start fresh
+                pass
+
+        # Initialize fresh eval_result
+        eval_result = {
+            "node_results": {},
+        }
 
         logger.info(f"Evaluating {instance_id}")
         problem_statement = f"<task>\nSolve the following reported issue in the {instance['repo']} repository:\n\n{instance['problem_statement']}\n</task>"
@@ -480,17 +517,45 @@ class Evaluation:
 
                     if self.selector:
                         selector = self.selector
-                    elif self.settings.best_first:
+                    elif self.settings.selector == "best_first":
                         selector = BestFirstSelector()
-                    else:
+                    elif self.settings.selector == "softmax":
                         selector = SoftmaxSelector()
-
-                    if self.settings.max_expansions > 1:
-                        value_function = CodingValueFunction(
-                            completion_model=self._create_completion_model(
-                                self.settings.value_function_model
-                            )
+                    elif self.settings.selector == "llm_selector":
+                        selector = LLMSelector(
+                            completion=self.settings.model,
+                            max_iterations=self.settings.max_iterations,
+                            debate=self.settings.debate,
+                            provide_feedback=self.settings.provide_feedback,
                         )
+                    elif self.settings.selector == "feedback":
+                        selector = FeedbackSelector()
+                    else:
+                        raise ValueError(f"Unknown selector: {self.settings.selector}")
+                    
+                    
+                    if self.settings.max_expansions > 1:
+
+                        if self.settings.value_function == "coding":
+                            value_function = CodingValueFunction(
+                                completion_model=self._create_completion_model(
+                                    self.settings.value_function_model
+                                )
+                            )
+                        elif self.settings.value_function == "llm_value_function":
+                            value_function = ValueFunction(
+                                completion_model=self._create_completion_model(
+                                    self.settings.value_function_model
+                                ),
+                                include_search_tree=True,
+                                coding_value_function=CodingValueFunction(
+                                    completion_model=self._create_completion_model(
+                                        self.settings.value_function_model
+                                    )
+                                )
+                            )
+                        else:
+                            value_function = None
 
                         # discriminator = MeanAwardDiscriminator()
                         discriminator = AgentDiscriminator(
@@ -502,7 +567,9 @@ class Evaluation:
                         if self.settings.provide_feedback:
                             if self.settings.feedback_type == "agent":
                                 feedback = FeedbackAgent(
-                                    completion_model=self._create_completion_model()
+                                    completion_model=self._create_completion_model(),
+                                    instance_dir=instance_dir,
+                                    feedback_file=os.path.join(instance_dir, "feedback.txt")
                                 )
                             elif self.settings.feedback_type == "reward":
                                 feedback = RewardFeedbackGenerator()
@@ -817,7 +884,6 @@ def create_evaluation_name(
         date_str = date
     else:
         date_str = datetime.now(tz=timezone.utc).strftime("%Y%m%d")
-
     # Make model name URL-safe (only alphanumeric and underscores)
     model_name = model.split("/")[-1]
     # Replace any non-alphanumeric chars with underscore
@@ -835,5 +901,4 @@ def create_evaluation_name(
         safe_value = "".join(c if c.isalnum() else "_" for c in str(value))
         safe_value = "_".join(filter(None, safe_value.split("_"))).strip("_")
         model_name += f"_{key}_{safe_value}"
-
     return model_name.lower()  # Convert to lowercase for consistency

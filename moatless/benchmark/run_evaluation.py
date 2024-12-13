@@ -31,16 +31,18 @@ def evaluate_search_and_code(
     max_resolved: Optional[int] = None,
     repos: Optional[list[str]] = None,
     split: str = "lite",
+    overwrite: bool = False,
     high_value_threshold: float = 50.0,
     high_value_leaf_bonus_constant: float = 50.0,
     use_average_reward: bool = False,
     **kwargs,
 ):
-    selector = BestFirstSelector(
-        high_value_threshold=high_value_threshold,
-        high_value_leaf_bonus_constant=high_value_leaf_bonus_constant,
-        use_average_reward=use_average_reward
-    )
+    # selector = BestFirstSelector(
+    #     high_value_threshold=high_value_threshold,
+    #     high_value_leaf_bonus_constant=high_value_leaf_bonus_constant,
+    #     use_average_reward=use_average_reward
+    # )
+    selector = None
 
     temperature = tree_search_settings.model.temperature
 
@@ -94,6 +96,7 @@ def evaluate_search_and_code(
         max_file_context_tokens=16000,
         num_workers=num_workers,
         use_testbed=use_testbed,
+        overwrite=overwrite,
     )
 
     evaluation.run_evaluation(
@@ -213,6 +216,11 @@ def main():
     features_group.add_argument(
         "--use_testbed", action="store_true", help="Enable testbed for running tests"
     )
+    features_group.add_argument(
+        "--use_edit_actions",
+        action="store_true",
+        help="Enable edit actions for the coding agent"
+    )
 
     # Runtime settings
     runtime_group = parser.add_argument_group("runtime settings")
@@ -245,8 +253,7 @@ def main():
     instance_group.add_argument(
         "--min_resolved",
         type=int,
-        default=None,
-        help="Filter instances by minimum number of resolved solutions",
+        help="Minimum number of people who resolved the issue",
     )
     instance_group.add_argument(
         "--max_resolved",
@@ -257,9 +264,9 @@ def main():
     instance_group.add_argument(
         "--split",
         type=str,
-        choices=["lite", "combo"],
+        choices=["lite", "combo", "random", "sampled_50_instances"],
         default="lite",
-        help="Dataset split to use (lite or combo)",
+        help="Dataset split to use (lite, combo, or random)",
     )
 
     # Other settings
@@ -269,6 +276,11 @@ def main():
     )
     other_group.add_argument(
         "--date", type=str, default=None, help="Custom date for the evaluation name"
+    )
+    other_group.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite existing evaluation results if they exist"
     )
 
     selector_group = parser.add_argument_group("selector settings")
@@ -434,6 +446,7 @@ def main():
         high_value_threshold=args.high_value_threshold,
         high_value_leaf_bonus_constant=args.high_value_leaf_bonus_constant,
         use_average_reward=args.use_average_reward,
+        overwrite=args.overwrite,
     )
 
 

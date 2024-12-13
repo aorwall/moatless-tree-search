@@ -184,13 +184,22 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         if not self._runtime:
             return observation
 
-        test_summary = self.run_tests(
-            file_path=str(path),
-            file_context=file_context,
+        run_tests = RunTests(
+            fail_on_not_found=False,
+            repository=self._repository,
+            runtime=self._runtime,
+            code_index=self._code_index,
+        )
+        test_observation = run_tests.execute(
+            RunTestsArgs(
+                thoughts=args.thoughts,
+                test_files=[args.path],
+            ),
+            file_context,
         )
 
-        if test_summary:
-            observation.message += f"\n\n{test_summary}"
+        if test_observation:
+            observation.message += f"\n\n{test_observation}"
 
         return observation
 
@@ -243,7 +252,6 @@ class ClaudeEditTool(Action, CodeModificationMixin):
                     message="Invalid view_range. It should be a list of two integers.",
                     action_args=args,
                 )
-
             init_line, final_line = view_range
 
             if init_line < 1 or init_line > n_lines:
@@ -289,6 +297,25 @@ class ClaudeEditTool(Action, CodeModificationMixin):
 
         return Observation(message=message, properties=properties)
 
+    def _create(
+        self, file_context: FileContext, path: Path, file_text: str
+    ) -> Observation:
+        if file_context.file_exists(str(path)):
+            return Observation(
+                message=f"File already exists at: {path}",
+                properties={"fail_reason": "file_exists"},
+            )
+
+        context_file = file_context.add_file(str(path))
+        context_file.apply_changes(file_text)
+
+        diff = do_diff(str(path), "", file_text)
+
+        return Observation(
+            message=f"File created successfully at: {path}",
+            properties={"diff": diff},
+        )
+
     def _insert(
         self, file_context: FileContext, path: Path, insert_line: int, new_str: str
     ) -> Observation:
@@ -333,7 +360,6 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         snippet = "\n".join(snippet_lines)
 
         diff = do_diff(str(path), file_text, new_file_text)
-
         context_file.apply_changes(new_file_text)
 
         success_msg = f"The file {path} has been edited. "

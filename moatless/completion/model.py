@@ -26,6 +26,10 @@ class ToolCall(BaseModel):
         None, description="The input parameters for the tool"
     )
 
+    def __post_init__(self):
+        # Ensure name is always a string
+        self.name = str(self.name)
+
 
 class AssistantMessage(Message):
     role: str = Field("assistant", description="The role of the assistant")
@@ -42,7 +46,7 @@ class AssistantMessage(Message):
 
         # Create a string combining name and input for hashing
         tool_str = (
-            f"{self.tool_call.name}:{json.dumps(self.tool_call.input, sort_keys=True)}"
+            f"{str(self.tool_call.name)}:{json.dumps(self.tool_call.input, sort_keys=True)}"
         )
         # Generate SHA-256 hash and take first 8 characters
         hash_id = hashlib.sha256(tool_str.encode()).hexdigest()[:8]
@@ -246,11 +250,13 @@ class StructuredOutput(BaseModel):
 
     @classmethod
     def anthropic_schema(cls) -> dict[str, Any]:
+        """Generate a schema compatible with Anthropic's tool calling format."""
         schema = cls.model_json_schema()
 
-        description = schema["description"]
-        del schema["description"]
-        del schema["title"]
+        description = schema.get("description", "")
+
+        # Get name safely without triggering property descriptor
+        name = cls.Config.title if hasattr(cls, 'Config') and hasattr(cls.Config, 'title') else cls.__name__.lower()
 
         # Exclude thoughts field from properties and required if it exists
         if "thoughts" in schema.get("properties", {}):
@@ -259,9 +265,13 @@ class StructuredOutput(BaseModel):
                 schema["required"].remove("thoughts")
 
         return {
-            "name": cls.name,
+            "name": name,
             "description": description,
-            "input_schema": schema,
+            "input_schema": {
+                "type": "object",
+                "properties": schema.get("properties", {}),
+                "required": schema.get("required", [])
+            }
         }
 
     @classmethod
@@ -378,14 +388,7 @@ def extract_json_from_message(message: str) -> tuple[dict | str, list[dict]]:
     """
     Extract JSON from a message, handling both code blocks and raw JSON.
     Returns a tuple of (selected_json_dict, all_found_json_dicts).
-
-    Args:
-        message: The message to parse
-
-    Returns:
-        tuple[dict | str, list[dict]]: (The selected JSON dict to use or original message, List of all JSON dicts found)
     """
-
     def clean_json_string(json_str: str) -> str:
         # Remove single-line comments and clean control characters
         lines = []
@@ -414,18 +417,20 @@ def extract_json_from_message(message: str) -> tuple[dict | str, list[dict]]:
             potential_json = clean_json_string(message[start:end].strip())
             try:
                 json_dict = json.loads(potential_json)
-                all_found_jsons.append(json_dict)
-            except json.JSONDecodeError as e:
-                logger.warning(f"Failed to parse JSON from code block: {e}")
+                # Validate that this is a complete, non-truncated JSON object
+                if isinstance(json_dict, dict) and all(isinstance(k, str) for k in json_dict.keys()):
+                    all_found_jsons.append(json_dict)
+            except json.JSONDecodeError:
                 pass
             current_pos = end + 3
 
         if all_found_jsons:
-            return all_found_jsons[0], all_found_jsons
+            # Return the most complete JSON object (one with the most fields)
+            return max(all_found_jsons, key=lambda x: len(x)), all_found_jsons
     except Exception as e:
         logger.warning(f"Failed to extract JSON from code blocks: {e}")
 
-    # If no ```json blocks found, try to find raw JSON objects
+    # If no ```json blocks found or they failed, try to find raw JSON objects
     try:
         current_pos = 0
         while True:
@@ -437,17 +442,20 @@ def extract_json_from_message(message: str) -> tuple[dict | str, list[dict]]:
                 try:
                     potential_json = clean_json_string(message[start:end])
                     json_dict = json.loads(potential_json)
-                    all_found_jsons.append(json_dict)
+                    # Validate that this is a complete, non-truncated JSON object
+                    if isinstance(json_dict, dict) and all(isinstance(k, str) for k in json_dict.keys()):
+                        all_found_jsons.append(json_dict)
                     break
                 except json.JSONDecodeError:
                     continue
             if not all_found_jsons:  # If no valid JSON found, move past this {
-                current_pos = start + 1
+                current_pos = start- + 1
             else:
                 current_pos = end
 
         if all_found_jsons:
-            return all_found_jsons[0], all_found_jsons
+            # Return the most complete JSON object (one with the most fields)
+            return max(all_found_jsons, key=lambda x: len(x)), all_found_jsons
     except Exception as e:
         logger.warning(f"Failed to extract raw JSON objects: {e}")
 

@@ -14,13 +14,11 @@ from moatless.runtime.runtime import RuntimeEnvironment
 
 logger = logging.getLogger(__name__)
 
-
 class CodeModificationMixin:
     """
     A mixin that provides common functionality for actions that modify code files.
     This includes path normalization, file validation, test running, and observation handling.
     """
-
     _runtime: RuntimeEnvironment | None = PrivateAttr(default=None)
     _code_index: CodeIndex | None = PrivateAttr(default=None)
     _repository: Repository | None = PrivateAttr(default=None)
@@ -43,7 +41,6 @@ class CodeModificationMixin:
             file_path: The path to validate
             file_context: The file context
             allow_missing: Whether to allow missing files (for file creation)
-
         Returns:
             Tuple of (Path object if valid, Error observation if invalid)
         """

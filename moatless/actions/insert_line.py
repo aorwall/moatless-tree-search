@@ -55,7 +55,6 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
     """
     Action to insert text at a specific line in a file.
     """
-
     args_schema = InsertLineArgs
 
     def __init__(

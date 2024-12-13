@@ -605,6 +605,7 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
         tools = []
         tool_choice = {"type": "any"}
 
+        actions = []
         if not response_model:
             tools = NOT_GIVEN
             tool_choice = NOT_GIVEN
@@ -613,8 +614,6 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                 actions = response_model
             elif response_model:
                 actions = [response_model]
-            else:
-                actions = []
 
             for action in actions:
                 if hasattr(action, "name") and action.name == "str_replace_editor":

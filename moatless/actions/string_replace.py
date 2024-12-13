@@ -134,7 +134,6 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
 
         context_file = file_context.get_context_file(str(path))
         file_content = context_file.content.expandtabs()
-
         old_str = args.old_str.expandtabs()
         new_str = args.new_str.expandtabs()
 
