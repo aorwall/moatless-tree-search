@@ -23,19 +23,10 @@ class ActionArguments(StructuredOutput, ABC):
     class Config:
         title = "Action"
 
-    @property
-    def name(self) -> str:
-        """Returns the action name based on the Config title."""
-        return str(self.Config.title)
-
     @classmethod
     def get_name(cls) -> str:
         """Returns the action name for the class based on Config title."""
         return str(getattr(cls.Config, 'title', cls.__name__))
-
-    def __str__(self) -> str:
-        """Ensure string representation uses the name properly"""
-        return self.name  # Already a string from the property
 
     def format_for_llm(self) -> str:
         """Format the action name for LLM consumption"""

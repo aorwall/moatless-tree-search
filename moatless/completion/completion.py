@@ -174,8 +174,8 @@ class CompletionModel(BaseModel):
             raise e
         except Exception as e:
             if isinstance(e, APIError):
-                logger.error(
-                    f"Request failed. self.model: {self.model}, base_url: {self.model_base_url}. Model: {e.model}, Provider {e.llm_provider}. Litellm {e.litellm_debug_info}. Exception {e.message}.  Input messages: {json.dumps(messages, indent=2)}"
+                logger.exception(
+                    f"Request failed.{e.litellm_debug_info}. Input messages: {json.dumps(messages, indent=2)}"
                 )
                 if e.status_code >= 500:
                     raise CompletionRejectError(
@@ -274,7 +274,9 @@ class CompletionModel(BaseModel):
                     action = get_response_model(tool_call.function.name)
 
                     if not action:
+                        logger.warning(f"Invalid action name: {tool_call.function.name}")
                         invalid_function_names.append(tool_call.function.name)
+                        continue
 
                     response_object = action.model_validate(tool_args)
                     response_objects.append(response_object)

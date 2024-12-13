@@ -185,22 +185,19 @@ class Completion(BaseModel):
             usage=usage,
         )
 
-
-class NameDescriptor:
-    def __get__(self, obj, cls=None) -> str:
-        if hasattr(cls, "Config") and hasattr(cls.Config, "title") and cls.Config.title:
-            return cls.Config.title
-        return cls.__name__
-
-
-class DescriptionDescriptor:
-    def __get__(self, obj, cls=None) -> str:
-        schema = cls.model_json_schema()
-        return schema.get("description", "")
-
 class StructuredOutput(BaseModel):
-    name: ClassVar[NameDescriptor] = NameDescriptor()
-    description: ClassVar[DescriptionDescriptor] = DescriptionDescriptor()
+    name: ClassVar[classproperty] = classproperty
+
+    class Config:
+        ignored_types = (classproperty,)
+
+    @classproperty
+    def name(cls):
+        return cls.Config.title if hasattr(cls, "Config") and hasattr(cls.Config, "title") and cls.Config.title else cls.__name__
+
+    @classproperty
+    def description(cls):
+        return cls.model_json_schema().get("description", "")
 
     @classmethod
     def openai_schema(cls, thoughts_in_action: bool = False) -> dict[str, Any]:
@@ -238,11 +235,11 @@ class StructuredOutput(BaseModel):
                     f"Correctly extracted `{cls.__name__}` with all "
                     f"the required parameters with correct types"
                 )
-
+        name = cls.name
         return {
             "type": "function",
             "function": {
-                "name": cls.name,
+                "name": name,
                 "description": schema["description"],
                 "parameters": parameters,
             }
@@ -256,7 +253,7 @@ class StructuredOutput(BaseModel):
         description = schema.get("description", "")
 
         # Get name safely without triggering property descriptor
-        name = cls.Config.title if hasattr(cls, 'Config') and hasattr(cls.Config, 'title') else cls.__name__.lower()
+        name = cls.name
 
         # Exclude thoughts field from properties and required if it exists
         if "thoughts" in schema.get("properties", {}):

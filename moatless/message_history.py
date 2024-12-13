@@ -96,7 +96,7 @@ class MessageHistoryGenerator(BaseModel):
                             message_content.append({"type": "text", "text": message})
                             message_content.append(artifact.to_prompt_format())
 
-                messages.append(ChatCompletionUserMessage(content=message_content))
+                messages.append(ChatCompletionUserMessage(role="user", content=message_content))
                 tokens += count_tokens(previous_node.user_message)
 
             tool_calls = []
@@ -148,7 +148,7 @@ class MessageHistoryGenerator(BaseModel):
         return messages
 
     def _generate_react_history(self, node: "Node", previous_nodes: List["Node"]) -> List[AllMessageValues]:
-        messages = [ChatCompletionUserMessage(content=node.get_root().message)]
+        messages = [ChatCompletionUserMessage(role="user", content=node.get_root().message)]
         
         if len(previous_nodes) <= 1:
             return messages
@@ -170,10 +170,8 @@ class MessageHistoryGenerator(BaseModel):
             if action_input:
                 assistant_content += f"\n{action_input}"
             
-            messages.append(ChatCompletionAssistantMessage(content=assistant_content))
-            
-            # Add observation message
-            messages.append(ChatCompletionUserMessage(content=f"Observation: {observation}"))
+            messages.append(ChatCompletionAssistantMessage(role="assistant", content=assistant_content))
+            messages.append(ChatCompletionUserMessage(role="user", content=f"Observation: {observation}"))
 
         tokens = count_tokens("".join([m.content for m in messages if m.content is not None]))
         logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
@@ -186,7 +184,7 @@ class MessageHistoryGenerator(BaseModel):
         content = node.get_root().message
 
         if not previous_nodes:
-            return [ChatCompletionUserMessage(content=content)]
+            return [ChatCompletionUserMessage(role="user", content=content)]
 
         for i, previous_node in enumerate(previous_nodes):
             if previous_node.action:
@@ -232,7 +230,7 @@ class MessageHistoryGenerator(BaseModel):
                 content += git_patch
                 content += "\n```"
 
-        return [ChatCompletionUserMessage(content=content)]
+        return [ChatCompletionUserMessage(role="user", content=content)]
 
     def get_node_messages(self, node: "Node") -> List[tuple[ActionArguments, str]]:
         """

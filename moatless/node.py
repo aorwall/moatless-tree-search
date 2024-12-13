@@ -60,7 +60,7 @@ class Node(BaseModel):
     file_context: Optional[FileContext] = Field(
         None, description="The file context state associated with the node"
     )
-    feedback: Optional[str] = Field(None, description="Feedback provided to the node")
+    # feedback: Optional[str] = Field(None, description="Feedback provided to the node")
     completions: Dict[str, Completion] = Field(
         default_factory=dict, description="The completions used in this node"
     )
