@@ -66,7 +66,7 @@ def test_create_text_completion(model):
     assert completion.usage.prompt_tokens > 0
 
 def test_create_completion_qwen_coder():
-    completion_model = CompletionModel(model="openai/Qwen/Qwen2.5-Coder-32B-Instruct", temperature=0.0, model_api_key="b584e39754fd3799235f22ac9b537c88", model_base_url="http://avior.mlfoundry.com/live-inference/v1")
+    completion_model = CompletionModel(model="openai/Qwen/Qwen2.5-Coder-32B-Instruct", temperature=0.0)
     completion_model.response_format = LLMResponseFormat.TOOLS
 
     actions = [RejectArgs, FinishArgs]

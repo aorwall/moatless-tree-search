@@ -6,7 +6,8 @@ from moatless.actions.action import Action
 from moatless.actions.finish import FinishArgs
 from moatless.actions.model import Observation, ActionArguments
 from moatless.file_context import FileContext
-from moatless.node import Node, MessageHistoryType
+from moatless.node import Node
+from moatless.message_history import MessageHistoryType
 from moatless.repository.repository import InMemRepository
 
 
