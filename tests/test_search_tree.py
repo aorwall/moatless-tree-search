@@ -12,7 +12,7 @@ from moatless.repository import FileRepository
 from moatless.runtime.runtime import NoEnvironment
 from moatless.search_tree import SearchTree
 from moatless.selector import BestFirstSelector
-from moatless.value_function import ValueFunction
+from moatless.value_function.base import ValueFunction
 
 
 def test_search_tree_dump_and_load():
