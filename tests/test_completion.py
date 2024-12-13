@@ -10,7 +10,7 @@ from moatless.actions.create_file import CreateFileArgs
 from moatless.actions.find_function import FindFunctionArgs
 from moatless.actions.model import ActionArguments
 from moatless.actions.string_replace import StringReplaceArgs
-from moatless.completion.completion import CompletionModel, LLMResponseFormat
+from moatless.completion.completion import CompletionModel, LLMResponseFormat, CompletionResponse
 from moatless.completion.model import Usage, Completion, StructuredOutput
 from moatless.exceptions import CompletionRejectError
 
@@ -568,20 +568,6 @@ Action Input:
         # Mock action class
         class TestAction(ActionArguments):
             query: str
-
-            @classmethod
-            def openai_schema(cls):
-                return {
-                    "name": "TestAction",
-                    "description": "Test action",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {"type": "string"}
-                        },
-                        "required": ["query"]
-                    }
-                }
 
         mock_response = ModelResponse(
             choices=[{
