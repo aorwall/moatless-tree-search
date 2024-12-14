@@ -153,7 +153,7 @@ class CompletionModel(BaseModel):
         completion_response = None
         try:
             if self.use_anthropic_client:
-                action_args, completion_response = self._anthropic_completion(
+                return self._anthropic_completion(
                     completion_messages, system_prompt, response_model
                 )
             elif self.response_format == LLMResponseFormat.REACT and isinstance(
@@ -271,21 +271,22 @@ class CompletionModel(BaseModel):
                 response_objects = []
 
                 invalid_function_names = []
-                for tool_call in llm_completion_response.choices[0].message.tool_calls:
-                    tool_args = json.loads(tool_call.function.arguments)
-                    action = get_response_model(tool_call.function.name)
+                if llm_completion_response.choices[0].message.tool_calls:
+                    for tool_call in llm_completion_response.choices[0].message.tool_calls:
+                        tool_args = json.loads(tool_call.function.arguments)
+                        action = get_response_model(tool_call.function.name)
 
-                    if not action:
-                        logger.warning(f"Invalid action name: {tool_call.function.name}")
-                        invalid_function_names.append(tool_call.function.name)
-                        continue
+                        if not action:
+                            logger.warning(f"Invalid action name: {tool_call.function.name}")
+                            invalid_function_names.append(tool_call.function.name)
+                            continue
 
-                    response_object = action.model_validate(tool_args)
-                    response_objects.append(response_object)
+                        response_object = action.model_validate(tool_args)
+                        response_objects.append(response_object)
 
-                if invalid_function_names:
-                    available_actions = [r.name for r in response_model]
-                    raise ValueError(f"Unknown functions {invalid_function_names}. Available functions: {available_actions}")
+                    if invalid_function_names:
+                        available_actions = [r.name for r in response_model]
+                        raise ValueError(f"Unknown functions {invalid_function_names}. Available functions: {available_actions}")
 
                 completion = Completion.from_llm_completion(
                     input_messages=messages,
@@ -405,6 +406,7 @@ Make sure to return an instance of the JSON, not the schema itself.""")
                     response_format={"type": "json_object"},
                     metadata=self.metadata or {},
                 )
+
                 logger.info(json.dumps(messages, indent=2))
                 logger.info(json.dumps(completion_response.model_dump(), indent=2))
                 if not completion_response or not completion_response.choices:
@@ -637,22 +639,22 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
 
         system_message = {"text": system_prompt, "type": "text"}
 
-        if "anthropic" in self.model:
-            anthropic_client = AnthropicBedrock()
-            extra_headers = { } #"X-Amzn-Bedrock-explicitPromptCaching": "enabled"}
-        else:
-            anthropic_client = Anthropic()
-            extra_headers = {}
-
         anthropic_messages = anthropic_messages_pt(
             model=self.model,
             messages=messages,
             llm_provider="anthropic",
         )
+        if "anthropic" in self.model:
+            anthropic_client = AnthropicBedrock()
+            betas = ["computer-use-2024-10-22"] #, "prompt-caching-2024-07-31"]
+            extra_headers = { } #"X-Amzn-Bedrock-explicitPromptCaching": "enabled"}
+        else:
+            anthropic_client = Anthropic()
+            extra_headers = {}
+            betas = ["computer-use-2024-10-22", "prompt-caching-2024-07-31"]
+            _inject_prompt_caching(anthropic_messages)
+            system_message["cache_control"] = {"type": "ephemeral"}
 
-        betas = ["computer-use-2024-10-22", "prompt-caching-2024-07-31"]
-        _inject_prompt_caching(anthropic_messages)
-        system_message["cache_control"] = {"type": "ephemeral"}
 
         completion_response = None
         retry_message = None
@@ -696,6 +698,12 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                             return check_action
                 return None
 
+            completion = Completion.from_llm_completion(
+                input_messages=messages,
+                completion_response=completion_response,
+                model=self.model,
+            )
+
             tool_call_id = None
             try:
                 text = None
@@ -732,7 +740,8 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                             action_args.thoughts = text
 
                         # TODO: We only support one action at the moment
-                        return action_args, completion_response
+                        return CompletionResponse.create(text=text, output=[action_args], completion=completion)
+
                     elif isinstance(block, TextBlock) or isinstance(
                         block, BetaTextBlock
                     ):
@@ -757,7 +766,7 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                         f"Failed to call Anthropic API. {e}"
                     ) from e
             except ValidationError as e:
-                logger.exception("Failed")
+                logger.exception(f"Failed to validate: {json.dumps(completion_response.model_dump(), indent=2)}")
                 retry_message = f"The request was invalid. Please try again. Error: {e}"
             except Exception as e:
                 raise CompletionRuntimeError(

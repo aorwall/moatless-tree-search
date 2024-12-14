@@ -178,11 +178,12 @@ class ViewCode(Action):
                             file_path, block_span.span_id, add_extra=False
                         )
 
-            elif file_span.start_line:
+            if file_span.start_line:
                 view_context.add_line_span_to_context(
                     file_path, file_span.start_line, file_span.end_line, add_extra=False
                 )
-            else:
+
+            if not file_span.start_line and not file_span.span_ids:
                 view_context.add_file(file_path, show_all_spans=True)
 
             if file.patch:

@@ -29,17 +29,21 @@ class ActionStep(BaseModel):
 
     def model_dump(self, **kwargs):
         data = super().model_dump(**kwargs)
+
         data["action"] = self.action.model_dump(**kwargs)
+        data["action"]["action_args_class"] = (
+            f"{self.action.__class__.__module__}.{self.action.__class__.__name__}"
+        )
+
         return data
 
 class FeedbackData(BaseModel):
     """Structured feedback data model"""
     analysis: str = Field(..., description="Analysis of the task and alternative branch attempts")
     feedback: str = Field(..., description="Direct feedback to the AI assistant")
-    system_prompt: Optional[str] = Field(None, description="System prompt used to generate feedback")
-    raw_completion: Optional[str] = Field(None, description="Raw completion response")
-    raw_messages: List[Dict] = Field(default_factory=list, description="Raw messages used to generate feedback")
-    timestamp: str = Field(..., description="When feedback was generated")
+    suggested_node_id: Optional[int] = Field(
+        None, description="ID of the node that should be expanded next (optional)"
+    )
 
 
 class Node(BaseModel):
@@ -344,47 +348,43 @@ class Node(BaseModel):
             Dict[str, Any]: A dictionary representation of the node tree.
         """
 
-        def serialize_node(node: "Node") -> Dict[str, Any]:
-            exclude_set = {"parent", "children"}
-            if "exclude" in kwargs:
-                if isinstance(kwargs["exclude"], set):
-                    exclude_set.update(kwargs["exclude"])
-                elif isinstance(kwargs["exclude"], dict):
-                    exclude_set.update(kwargs["exclude"].keys())
+        exclude_set = {"parent", "children"}
+        if "exclude" in kwargs:
+            if isinstance(kwargs["exclude"], set):
+                exclude_set.update(kwargs["exclude"])
+            elif isinstance(kwargs["exclude"], dict):
+                exclude_set.update(kwargs["exclude"].keys())
 
-            new_kwargs = {k: v for k, v in kwargs.items() if k != "exclude"}
-            node_dict = super().model_dump(exclude=exclude_set, **new_kwargs)
+        new_kwargs = {k: v for k, v in kwargs.items() if k != "exclude"}
+        node_dict = super().model_dump(exclude=exclude_set, **new_kwargs)
 
-            if node.action and "action" not in exclude_set:
-                node_dict["action"] = node.action.model_dump(**kwargs)
-                node_dict["action"]["action_args_class"] = (
-                    f"{node.action.__class__.__module__}.{node.action.__class__.__name__}"
-                )
+        if self.completions and "completions" not in exclude_set:
+            node_dict["completions"] = {
+                key: completion.model_dump(**kwargs)
+                for key, completion in self.completions.items()
+                if completion
+            }
 
-            if node.completions and "completions" not in exclude_set:
-                node_dict["completions"] = {
-                    key: completion.model_dump(**kwargs)
-                    for key, completion in node.completions.items()
-                    if completion
-                }
+        if self.reward and "reward" not in exclude_set:
+            node_dict["reward"] = self.reward.model_dump(**kwargs)
 
-            if node.reward and "reward" not in exclude_set:
-                node_dict["reward"] = node.reward.model_dump(**kwargs)
+        if self.observation and "output" not in exclude_set:
+            node_dict["output"] = self.observation.model_dump(**kwargs)
 
-            if node.observation and "output" not in exclude_set:
-                node_dict["output"] = node.observation.model_dump(**kwargs)
+        if self.file_context and "file_context" not in exclude_set:
+            node_dict["file_context"] = self.file_context.model_dump(**kwargs)
 
-            if node.file_context and "file_context" not in exclude_set:
-                node_dict["file_context"] = node.file_context.model_dump(**kwargs)
+        node_dict["action_steps"] = [
+            action_step.model_dump(**kwargs) for action_step in self.action_steps
+        ]
 
-            if not kwargs.get("exclude") or "children" not in kwargs.get("exclude"):
-                node_dict["children"] = [
-                    serialize_node(child) for child in node.children
-                ]
+        if not kwargs.get("exclude") or "children" not in kwargs.get("exclude"):
+            node_dict["children"] = [
+                child.model_dump(**kwargs) for child in self.children
+            ]
 
-            return node_dict
+        return node_dict
 
-        return serialize_node(self)
 
     @classmethod
     def _reconstruct_node(
@@ -424,11 +424,8 @@ class Node(BaseModel):
         node_data["visits"] = node_data.get("visits", 0)
         node_data["value"] = node_data.get("value", 0.0)
 
-        # Add feedback data reconstruction
-        if node_data.get("completions", {}).get("feedback"):
-            feedback_completion = node_data["completions"]["feedback"]
-            if isinstance(feedback_completion, dict) and "response" in feedback_completion:
-                node_data["feedback_data"] = FeedbackData.model_validate(feedback_completion["response"])
+        if node_data.get("feedback_data"):
+            node_data["feedback_data"] = FeedbackData.model_validate(node_data["feedback_data"])
 
         if "children" in node_data:
             children = node_data.get("children", [])

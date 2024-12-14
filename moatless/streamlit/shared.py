@@ -345,31 +345,34 @@ def show_completion(completion):
         if completion.input:
             st.subheader("Input prompts")
             for input_idx, input_msg in enumerate(completion.input):
-                if "content" in input_msg:
-                    if isinstance(input_msg["content"], str):
-                        content = input_msg["content"]
-                    elif (
-                        isinstance(input_msg["content"], list)
-                        and input_msg["role"] == "user"
-                    ):
-                        content_list = [c.get("content") for c in input_msg["content"]]
+                try:
+                    if "content" in input_msg:
+                        if isinstance(input_msg["content"], str):
+                            content = input_msg["content"]
+                        elif (
+                            isinstance(input_msg["content"], list)
+                            and input_msg["role"] == "user"
+                        ):
+                            content_list = [c.get("content") or c.get("text") for c in input_msg["content"]]
 
-                        content = "\n\n".join(content_list)
+                            content = "\n\n".join(content_list)
+                        else:
+                            content = json.dumps(input_msg["content"], indent=2)
+
+                        tokens = count_tokens(content)
+                        with st.expander(
+                            f"Message {input_idx + 1} by {input_msg['role']} ({tokens} tokens)",
+                            expanded=(input_idx == len(completion.input) - 1),
+                        ):
+                            st.code(content, language="")
                     else:
-                        content = json.dumps(input_msg["content"], indent=2)
-
-                    tokens = count_tokens(content)
-                    with st.expander(
-                        f"Message {input_idx + 1} by {input_msg['role']} ({tokens} tokens)",
-                        expanded=(input_idx == len(completion.input) - 1),
-                    ):
-                        st.code(content, language="")
-                else:
-                    with st.expander(
-                        f"Message {input_idx + 1} by {input_msg['role']}",
-                        expanded=(input_idx == len(completion.input) - 1),
-                    ):
-                        st.json(input_msg)
+                        with st.expander(
+                            f"Message {input_idx + 1} by {input_msg['role']}",
+                            expanded=(input_idx == len(completion.input) - 1),
+                        ):
+                            st.json(input_msg)
+                except Exception as e:
+                    logger.exception(f"Failed to parse {json.dumps(input_msg, indent=2)}")
 
         if completion.response:
             st.subheader("Completion response")

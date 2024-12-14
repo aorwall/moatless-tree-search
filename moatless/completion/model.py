@@ -185,15 +185,17 @@ class Completion(BaseModel):
             usage=usage,
         )
 
+class NameDescriptor:
+    def __get__(self, obj, cls=None) -> str:
+        if hasattr(cls, "Config") and hasattr(cls.Config, "title") and cls.Config.title:
+            return cls.Config.title
+        return cls.__name__
+
 class StructuredOutput(BaseModel):
-    name: ClassVar[classproperty] = classproperty
+    name: ClassVar[NameDescriptor] = NameDescriptor()
 
     class Config:
         ignored_types = (classproperty,)
-
-    @classproperty
-    def name(cls):
-        return cls.Config.title if hasattr(cls, "Config") and hasattr(cls.Config, "title") and cls.Config.title else cls.__name__
 
     @classproperty
     def description(cls):
@@ -247,13 +249,11 @@ class StructuredOutput(BaseModel):
 
     @classmethod
     def anthropic_schema(cls) -> dict[str, Any]:
-        """Generate a schema compatible with Anthropic's tool calling format."""
         schema = cls.model_json_schema()
 
-        description = schema.get("description", "")
-
-        # Get name safely without triggering property descriptor
-        name = cls.name
+        description = schema["description"]
+        del schema["description"]
+        del schema["title"]
 
         # Exclude thoughts field from properties and required if it exists
         if "thoughts" in schema.get("properties", {}):
@@ -262,13 +262,9 @@ class StructuredOutput(BaseModel):
                 schema["required"].remove("thoughts")
 
         return {
-            "name": name,
+            "name": cls.name,
             "description": description,
-            "input_schema": {
-                "type": "object",
-                "properties": schema.get("properties", {}),
-                "required": schema.get("required", [])
-            }
+            "input_schema": schema,
         }
 
     @classmethod

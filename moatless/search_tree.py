@@ -324,7 +324,7 @@ class SearchTree(BaseModel):
         child_node = self.expander.expand(node, self)
 
         if self.feedback_generator:
-            child_node.user_message = self.feedback_generator.generate_feedback(
+            child_node.feedback_data = self.feedback_generator.generate_feedback(
                 child_node,
                 self.agent.actions,
             )
@@ -585,7 +585,7 @@ class SearchTree(BaseModel):
                     obj["selector"] = SoftmaxSelector.model_validate(obj["selector"])
                 elif selector_type == "LLMSelector":
                     obj["selector"] = LLMSelector.model_validate(obj["selector"])
-                elif selector_type == "feedback":
+                elif selector_type == "FeedbackSelector":
                     obj["selector"] = FeedbackSelector.model_validate(obj["selector"])
                 else:
                     raise ValueError(f"Unknown selector type: {selector_type}")

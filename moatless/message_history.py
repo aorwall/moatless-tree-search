@@ -142,6 +142,9 @@ class MessageHistoryGenerator(BaseModel):
             messages.append(assistant_message)
             messages.extend(tool_responses)
 
+        if node.feedback_data:
+            messages.append(ChatCompletionUserMessage(role="user", content=node.feedback_data.feedback))
+
         logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
 
         return messages
