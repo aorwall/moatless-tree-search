@@ -250,10 +250,21 @@ class StructuredOutput(BaseModel):
     @classmethod
     def anthropic_schema(cls) -> dict[str, Any]:
         schema = cls.model_json_schema()
-
-        description = schema["description"]
-        del schema["description"]
         del schema["title"]
+
+        if "description" in schema:
+            description = schema["description"]
+            del schema["description"]
+        else:
+            description = None
+
+        response = {
+            "name": cls.name,
+            "input_schema": schema,
+        }
+
+        if description:
+            response["description"] = description
 
         # Exclude thoughts field from properties and required if it exists
         if "thoughts" in schema.get("properties", {}):
@@ -261,11 +272,7 @@ class StructuredOutput(BaseModel):
             if "required" in schema and "thoughts" in schema["required"]:
                 schema["required"].remove("thoughts")
 
-        return {
-            "name": cls.name,
-            "description": description,
-            "input_schema": schema,
-        }
+        return response
 
     @classmethod
     def model_validate_xml(cls, xml_text: str) -> Self:

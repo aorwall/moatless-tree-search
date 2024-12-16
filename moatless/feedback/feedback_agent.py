@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 class FeedbackResponse(StructuredOutput):
     """To provide feedback """
+
     analysis: str = Field(
         ..., description="Brief analysis of parent state and lessons from alternative attempts"
     )

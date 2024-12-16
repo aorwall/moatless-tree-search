@@ -702,7 +702,7 @@ def update_visualization(
                             tabs.append("Instance")
 
                         # Add Feedback tab if feedback exists in completions
-                        if "feedback" in selected_node.completions:
+                        if selected_node.feedback_data:
                             tabs.append("Feedback")
 
                     # Create all tabs at once
@@ -810,8 +810,10 @@ def update_visualization(
                                     
                                     # Display feedback summary
                                     st.subheader("Feedback Summary")
-                                    st.info(response_data.get('analysis', "No analysis available"))
-                                    st.success(response_data.get('feedback', "No feedback available"))
+                                    st.markdown("**Analysis**")
+                                    st.info(selected_node.feedback_data.analysis)
+                                    st.markdown("**Feedback**")
+                                    st.success(selected_node.feedback_data.feedback)
 
                                     # System Prompt
                                     with st.expander("System Prompt"):
@@ -853,9 +855,9 @@ def update_visualization(
 
                                     # Raw Completion
                                     with st.expander("Raw Completion"):
-                                        raw_completion = response_data.get('raw_completion')
+                                        raw_completion = completion_data.get('response')
                                         if raw_completion:
-                                            st.code(raw_completion)
+                                            st.json(raw_completion)
                                         else:
                                             st.text("No raw completion available")
 
