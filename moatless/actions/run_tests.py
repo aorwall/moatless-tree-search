@@ -15,6 +15,7 @@ from moatless.index.code_index import CodeIndex, is_test
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment, TestResult, TestStatus
 from moatless.utils.tokenizer import count_tokens
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ class RunTests(Action):
         self._runtime = runtime
 
     def execute(
-        self, args: RunTestsArgs, file_context: FileContext | None = None
+        self, args: RunTestsArgs, file_context: FileContext | None = None, workspace: Workspace | None = None
     ) -> Observation:
         """
         Run all tests found in file context or provided in args.

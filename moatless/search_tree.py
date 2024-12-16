@@ -323,6 +323,12 @@ class SearchTree(BaseModel):
 
         child_node = self.expander.expand(node, self)
 
+        if self.feedback_generator:
+            child_node.feedback_data = self.feedback_generator.generate_feedback(
+                child_node,
+                self.agent.actions,
+            )
+
         self.log(logger.info, f"Expanded Node{node.node_id} to new Node{child_node.node_id}")
         return child_node
 
@@ -332,12 +338,6 @@ class SearchTree(BaseModel):
         if node.observation:
             logger.info(f"Node{node.node_id}: Action already executed. Skipping.")
         else:
-            if self.agent:
-                agent = self.agent
-            elif node.agent_settings:
-                agent = ActionAgent(agent_settings=node.agent_settings)
-            
-
             self.agent.run(node)
 
         if self.value_function and not node.is_duplicate and node.observation:
@@ -543,7 +543,7 @@ class SearchTree(BaseModel):
             root = Node(
                 node_id=0,
                 max_expansions=max_expansions,
-                message=message,
+                user_message=message,
                 reward=Reward(value=100),
                 file_context=file_context,
             )
@@ -585,7 +585,7 @@ class SearchTree(BaseModel):
                     obj["selector"] = SoftmaxSelector.model_validate(obj["selector"])
                 elif selector_type == "LLMSelector":
                     obj["selector"] = LLMSelector.model_validate(obj["selector"])
-                elif selector_type == "feedback":
+                elif selector_type == "FeedbackSelector":
                     obj["selector"] = FeedbackSelector.model_validate(obj["selector"])
                 else:
                     raise ValueError(f"Unknown selector type: {selector_type}")

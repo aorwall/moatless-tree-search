@@ -2,6 +2,7 @@ import logging
 from enum import Enum
 from typing import Optional, List, Union, Tuple, Any, Type, ClassVar
 
+from litellm.types.llms.openai import ChatCompletionUserMessage
 from pydantic import Field, PrivateAttr, model_validator
 
 from moatless.actions.action import Action
@@ -15,11 +16,12 @@ from moatless.codeblocks import CodeBlock, get_parser_by_path, PythonParser
 from moatless.codeblocks.codeblocks import CodeBlockTypeGroup, CodeBlockType
 from moatless.codeblocks.module import Module
 from moatless.completion.completion import CompletionModel
-from moatless.completion.model import AssistantMessage, UserMessage, Completion
+from moatless.completion.model import Completion
 from moatless.file_context import FileContext, ContextFile
 from moatless.repository.file import do_diff, remove_duplicate_lines
 from moatless.repository.repository import Repository
 from moatless.utils.tokenizer import count_tokens
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +169,7 @@ class RequestCodeChange(Action):
         self._completion_model = completion_model
 
     def execute(
-        self, args: RequestCodeChangeArgs, file_context: FileContext
+        self, args: RequestCodeChangeArgs, file_context: FileContext | None = None, workspace: Workspace | None = None
     ) -> Observation:
         logger.info(
             f"RequestCodeChange: file_path={args.file_path}, start_line={args.start_line}, end_line={args.end_line}, change_type={args.change_type}"
@@ -293,20 +295,6 @@ class RequestCodeChange(Action):
             observation.execution_completion = completion
             return observation
 
-    def create_replacement_block(
-        self, messages: List[Union[UserMessage, AssistantMessage]]
-    ) -> Tuple[str, Any]:
-        try:
-            replace_code, completion = self._completion_model.create_text_completion(
-                messages=messages,
-                system_prompt=self._system_prompt(),
-            )
-
-            return replace_code, completion
-        except Exception as e:
-            logger.exception(f"Error applying change. Retrying...")
-            raise e
-
     def _system_prompt(self) -> str:
         system_prompt = ROLE_PROMPT
 
@@ -351,7 +339,7 @@ class RequestCodeChange(Action):
             args.pseudo_code,
         )
 
-        messages.append(UserMessage(content=user_message))
+        messages.append(ChatCompletionUserMessage(role="user", content=user_message))
         response, completion = self._completion_model.create_text_completion(
             messages=messages,
             system_prompt=self._system_prompt(),

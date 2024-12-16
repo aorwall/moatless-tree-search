@@ -12,6 +12,7 @@ from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +98,7 @@ class ApplyCodeChangeAndTest(RequestCodeChange):
         self._code_index = code_index
 
     def execute(
-        self, args: RequestCodeChangeArgs, file_context: FileContext
+        self, args: RequestCodeChangeArgs, file_context: FileContext | None = None, workspace: Workspace | None = None
     ) -> Observation:
         observation = super().execute(args, file_context)
 

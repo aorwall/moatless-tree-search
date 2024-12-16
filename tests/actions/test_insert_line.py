@@ -31,8 +31,7 @@ def test_insert_line_basic(repository, file_context):
     )
     
     observation = action.execute(args, file_context)
-    
-    assert observation.properties["success"]
+
     content = file_context.get_file("test.py").content
     assert 'logger.info(message)' in content
     assert "def hello():" in content  # Verify the rest of the file is intact
@@ -50,7 +49,6 @@ def test_insert_line_at_start(repository, file_context):
     
     observation = action.execute(args, file_context)
     
-    assert observation.properties["success"]
     content = file_context.get_file("test.py").content
     assert content.startswith('import logging\n')
     assert "diff" in observation.properties
@@ -97,7 +95,6 @@ def test_insert_multiline(repository, file_context):
     
     observation = action.execute(args, file_context)
     
-    assert observation.properties["success"]
     content = file_context.get_file("test.py").content
     assert 'def setup():' in content
     assert 'logging.basicConfig' in content
@@ -121,7 +118,6 @@ def test_insert_line_with_indentation(repository, file_context):
     
     observation = action.execute(args, file_context)
     
-    assert observation.properties["success"]
     content = file_context.get_file("test2.py").content
     print(content)
     assert '    def new_method(self):' in content

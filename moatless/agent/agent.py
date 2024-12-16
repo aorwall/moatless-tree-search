@@ -1,6 +1,7 @@
 import importlib
 import json
 import logging
+from platform import node
 from typing import List, Type, Dict, Any, Optional
 
 from pydantic import BaseModel, Field, PrivateAttr, model_validator, ValidationError
@@ -12,12 +13,13 @@ from moatless.actions.model import (
     RetryException,
     ActionError,
 )
+from moatless.actions.respond import MessageArgs
 from moatless.agent.settings import AgentSettings
 from moatless.completion.completion import CompletionModel, LLMResponseFormat
-from moatless.completion.model import AssistantMessage, UserMessage, Completion
+from moatless.completion.model import Completion
 from moatless.exceptions import RuntimeError, CompletionRejectError
 from moatless.index.code_index import CodeIndex
-from moatless.node import Node
+from moatless.node import Node, ActionStep
 from moatless.repository.repository import Repository
 from moatless.message_history import MessageHistoryGenerator
 
@@ -99,91 +101,57 @@ class ActionAgent(BaseModel):
         action_args = [action.args_schema for action in self.actions]
 
         messages = self.message_generator.generate(node)
-
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            logger.info(
-                f"Node{node.node_id}: Run attempt {attempt + 1} of {max_attempts}"
+        logger.info(
+            f"Node{node.node_id}: Build action with {len(messages)} messages"
+        )
+        try:
+            completion_response = self._completion.create_completion(
+                messages, system_prompt=system_prompt, response_model=action_args
             )
-            try:
-                node.action, completion_response = self._completion.create_completion(
-                    messages, system_prompt=system_prompt, response_model=action_args
-                )
-                node.completions["build_action"] = completion_response
-            except CompletionRejectError as e:
-                node.action = ActionError(
-                    error=f"Failed to generate action. Error: {e}"
-                )
 
-                if e.last_completion:
-                    # TODO: Move mapping to completion.py
-                    node.completions["build_action"] = Completion.from_llm_completion(
-                        input_messages=e.messages,
-                        completion_response=e.last_completion,
-                        model=self.completion.model,
-                    )
+            node.action_steps = [ActionStep(action=action) for action in completion_response.structured_outputs]
+            node.assistant_message = completion_response.text_response
 
-                node.observation = Observation(
-                    message=e.message,
-                    terminal=True,
-                    properties={"error": str(e), "retries": attempt},
+            node.completions["build_action"] = completion_response.completion
+        except CompletionRejectError as e:
+            node.action = ActionError(
+                error=f"Failed to generate action. Error: {e}"
+            )
+
+            if e.last_completion:
+                # TODO: Move mapping to completion.py
+                node.completions["build_action"] = Completion.from_llm_completion(
+                    input_messages=e.messages,
+                    completion_response=e.last_completion,
+                    model=self.completion.model,
                 )
 
-                return
+            node.observation = Observation(
+                message=e.message,
+                terminal=True,
+                properties={"error": str(e)},
+            )
 
-            duplicate_node = node.find_duplicate()
-            if duplicate_node:
-                node.is_duplicate = True
-                logger.info(
-                    f"Node{node.node_id} is a duplicate to Node{duplicate_node.node_id}. Skipping execution."
-                )
-                return
-            try:
-                node.observation = self._execute(node)
-                if node.observation.execution_completion:
-                    node.completions["execute_action"] = (
-                        node.observation.execution_completion
-                    )
+            return
 
-                if attempt > 0:
-                    node.observation.properties["retries"] = attempt
+        if node.action is None:
+            return
 
-                logger.info(
-                    f"Node{node.node_id}: Executed action: {node.action.name}. "
-                    f"Terminal: {node.observation.terminal if node.observation else False}. "
-                    f"Output: {node.observation.message if node.observation else None}"
-                )
+        duplicate_node = node.find_duplicate()
+        if duplicate_node:
+            node.is_duplicate = True
+            logger.info(
+                f"Node{node.node_id} is a duplicate to Node{duplicate_node.node_id}. Skipping execution."
+            )
+            return
 
-                return
+        logger.info(f"Node{node.node_id}: Execute {len(node.action_steps)} actions")
+        for action_step in node.action_steps:
+            self._execute(node, action_step)
 
-            except RetryException as e:
-                logger.warning(
-                    f"Node{node.node_id}: Action needs retry (attempt {attempt + 1}): {e.message}"
-                )
 
-                messages.append(
-                    AssistantMessage(tool_call=e.action_args.to_tool_call())
-                )
-                messages.append(UserMessage(content=e.message))
-                if attempt == max_attempts - 1:
-                    node.observation = Observation(
-                        message=e.message,
-                        is_terminal=True,
-                        properties={"retries": attempt},
-                    )
-                    return
-            except CompletionRejectError as e:
-                logger.warning(f"Node{node.node_id}: Action rejected: {e.message}")
-                node.completions["execute_action"] = e.last_completion
-                node.observation = Observation(
-                    message=e.message,
-                    is_terminal=True,
-                    properties={"retries": attempt},
-                )
-                return
-
-    def _execute(self, node: Node):
-        action = self._action_map.get(type(node.action))
+    def _execute(self, node: Node, action_step: ActionStep):
+        action = self._action_map.get(type(action_step.action))
         if not action:
             logger.error(
                 f"Node{node.node_id}: Action {node.action.name} not found in action map. "
@@ -191,7 +159,24 @@ class ActionAgent(BaseModel):
             )
             raise RuntimeError(f"Action {type(node.action)} not found in action map.")
 
-        return action.execute(node.action, node.file_context)
+        try:
+            action_step.observation = action.execute(action_step.action, node.file_context, node.workspace)
+            if action_step.observation.execution_completion:
+                action_step.completion = node.observation.execution_completion
+
+            logger.info(
+                f"Executed action: {action_step.action.name}. "
+                f"Terminal: {action_step.observation.terminal if node.observation else False}. "
+                f"Output: {action_step.observation.message if node.observation else None}"
+            )
+
+        except CompletionRejectError as e:
+            logger.warning(f"Node{node.node_id}: Action rejected: {e.message}")
+            action_step.completion = e.last_completion
+            action_step.observation = Observation(
+                message=e.message,
+                is_terminal=True,
+            )
 
 
     def generate_system_prompt(self) -> str:

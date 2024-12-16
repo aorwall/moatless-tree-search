@@ -1,4 +1,4 @@
-# Moatless Tree Search 
+# Moatless Tree Search
 
 ### Code for paper [SWE-Search: Enhancing Software Agents with Monte Carlo Tree Search and Iterative Refinement](https://arxiv.org/abs/2410.20285)
 
@@ -28,13 +28,14 @@ Note: The original development code can be found at [github.com/a-antoniades/swe
 
 Install the package:
 
-```bash
+```shell
 pip install moatless-tree-search
 ```
 
 ### Environment Setup
 
 Before running the evaluation, you'll need:
+
 1. At least one LLM provider API key (e.g., OpenAI, Anthropic, etc.)
 2. A Voyage AI API key from [voyageai.com](https://voyageai.com) to use the pre-embedded vector stores for SWE-Bench instances.
 3. (Optional) Access to a testbed environment - see [moatless-testbeds](https://github.com/aorwall/moatless-testbeds) for setup instructions
@@ -43,14 +44,14 @@ You can configure these settings by either:
 
 1. Create a `.env` file in the project root (copy from `.env.example`):
 
-   ```bash
+   ```shell
    cp .env.example .env
    # Edit .env with your values
    ```
 
 2. Or export the variables directly:
-   
-   ```bash
+
+   ```shell
    # Directory for storing vector index store files  
    export INDEX_STORE_DIR="/tmp/index_store"    
 
@@ -75,11 +76,11 @@ You can configure these settings by either:
    export TESTBED_BASE_URL="<your-base-url>"
    ```
 
-
 ## Streamlit
+
 To launch the Streamlit app, run:
 
-```bash
+```shell
 # Launch with direct file loading
 moatless-streamlit path/to/trajectory.json
 
@@ -98,9 +99,9 @@ The following badges are used to indicate the status of a node:
 
 ## Evaluation
 
-To run the evaluation script
+To run the evaluation script:
 
-```bash
+```shell
 moatless-evaluate \
     --model "gpt-4o-mini" \
     --repo_base_dir /tmp/repos \
@@ -118,9 +119,29 @@ You can optionally set the `--instance_ids` to evaluate on a specific instance o
 
 Use `--use_testbed` if you got access to a testbed environment. Otherwise, tests will not be run.
 
+## Development
+
+Install with Poetry:
+
+```shell
+poetry install --with dev
+```
+
+### Apple Silicon
+
+To install the dependencies on Apple Silicon (Mac M1/M2/M3 etc.), you need the following workaround to get the `graphviz` package working:
+
+```shell
+brew install graphviz
+export CFLAGS="-I $(brew --prefix graphviz)/include"
+export LDFLAGS="-L $(brew --prefix graphviz)/lib"
+poetry install --with dev
+```
+
 ## Examples
 
 ### Example: Basic Flow
+
 Basic setup similar to the moatless-tools agent.
 
 ```python
@@ -266,7 +287,8 @@ print(node.observation.message)
 ```
 
 ### Citation
-```
+
+```bibtex
 @misc{antoniades2024swesearchenhancingsoftwareagents,
       title={SWE-Search: Enhancing Software Agents with Monte Carlo Tree Search and Iterative Refinement}, 
       author={Antonis Antoniades and Albert Örwall and Kexun Zhang and Yuxi Xie and Anirudh Goyal and William Wang},

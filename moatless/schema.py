@@ -1,5 +1,6 @@
 import logging
 from enum import Enum
+from typing import Optional, Literal, List
 
 from pydantic import BaseModel, Field
 
@@ -53,3 +54,45 @@ class RankedFileSpan(BaseModel):
     span_id: str
     rank: int = 0
     tokens: int = 0
+
+class ActionView(BaseModel):
+    name: str
+
+
+class Attachment(BaseModel):
+    """Represents a file attachment in a chat message"""
+    file_name: str = Field(description="Original name of the uploaded file")
+    content: bytes = Field(description="Raw binary content of the file")
+    mime_type: Optional[str] = Field(
+        default=None,
+        description="MIME type of the file content"
+    )
+
+
+class Message(BaseModel):
+    role: str = Field(
+        description="Role of the message sender ('user' or 'assistant')"
+    )
+    content: Optional[str] = Field(default=None, description="Content of the message")
+
+
+class UserMessage(Message):
+    role: Literal["user"] = Field(
+        default="user",
+        description="Role is always 'user' for user messages"
+    )
+    artifact_ids: Optional[List[str]] = Field(
+        default=None,
+        description="List of artifact ids associated with the message"
+    )
+
+class AssistantMessage(Message):
+    role: Literal["assistant"] = Field(
+        default="assistant",
+        description="Role is always 'assistant' for assistant messages"
+    )
+    actions: Optional[List[ActionView]] = Field(
+        default=None,
+        description="List of actions performed by the assistant"
+    )
+

@@ -18,6 +18,7 @@ from moatless.repository.file import do_diff
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.utils.tokenizer import count_tokens
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         )
 
     def execute(
-        self, args: EditActionArguments, file_context: FileContext
+        self, args: EditActionArguments, file_context: FileContext | None = None, workspace: Workspace | None = None
     ) -> Observation:
         # Claude tends to add /repo in the start of the file path.
         # TODO: Maybe we should add /repo as default on all paths?

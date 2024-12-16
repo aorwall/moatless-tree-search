@@ -6,6 +6,7 @@ from pydantic import Field
 from moatless.actions.action import Action
 from moatless.actions.model import ActionArguments, Observation, FewShotExample
 from moatless.file_context import FileContext
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class ViewDiff(Action):
 
     args_schema = ViewDiffArgs
 
-    def execute(self, args: ViewDiffArgs, file_context: FileContext) -> Observation:
+    def execute(self, args: ViewDiffArgs, file_context: FileContext | None = None, workspace: Workspace | None = None) -> Observation:
         diff = file_context.generate_git_patch()
         
         if not diff:

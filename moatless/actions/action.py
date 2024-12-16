@@ -15,6 +15,7 @@ from moatless.actions.model import (
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.repository import Repository
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -29,15 +30,15 @@ class Action(BaseModel, ABC):
     def __init__(self, **data):
         super().__init__(**data)
 
-    def execute(self, args: ActionArguments, file_context: FileContext) -> Observation:
+    def execute(self, args: ActionArguments, file_context: FileContext | None = None, workspace: Workspace | None = None) -> Observation:
         """
         Execute the action.
         """
 
-        message = self._execute(file_context=file_context)
+        message = self._execute(args, file_context=file_context, workspace=workspace)
         return Observation.create(message)
 
-    def _execute(self, file_context: FileContext) -> str | None:
+    def _execute(self, args: ActionArguments, file_context: FileContext | None = None, workspace: Workspace | None = None) -> str | None:
         """
         Execute the action and return the updated FileContext.
         """

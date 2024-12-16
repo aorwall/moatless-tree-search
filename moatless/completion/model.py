@@ -185,57 +185,21 @@ class Completion(BaseModel):
             usage=usage,
         )
 
-
 class NameDescriptor:
     def __get__(self, obj, cls=None) -> str:
         if hasattr(cls, "Config") and hasattr(cls.Config, "title") and cls.Config.title:
             return cls.Config.title
         return cls.__name__
 
-
 class StructuredOutput(BaseModel):
-    """Base class for structured outputs from the model."""
-    
-    @classmethod
-    def from_response(cls, completion_response):
-        """Parse the completion response into a structured output."""
-        content = completion_response.choices[0].message.content
-        try:
-            # Try to parse as JSON first
-            import json
-            # Clean up the content by removing markdown code block markers if present
-            if content.startswith('```json'):
-                content = content[7:]
-            if content.endswith('```'):
-                content = content[:-3]
-            content = content.strip()
-            
-            # Handle truncated JSON by finding the last complete object
-            try:
-                data = json.loads(content)
-            except json.JSONDecodeError:
-                # Find the last complete JSON object
-                last_brace = content.rfind('}')
-                if last_brace != -1:
-                    first_brace = content.find('{')
-                    if first_brace != -1:
-                        content = content[first_brace:last_brace+1]
-                        data = json.loads(content)
-                else:
-                    raise
-                    
-            return cls.model_validate(data)
-        except json.JSONDecodeError:
-            logger.warning(f"Failed to parse JSON. Content: {content}")
-            # If not JSON, try simple number for Reward case
-            if cls.__name__ == "Reward":
-                try:
-                    value = int(float(content))
-                    return cls(value=value)
-                except ValueError:
-                    logger.warning(f"Failed to parse as number. Content: {content}")
-            logger.error("Could not parse response in any supported format")
-            return None
+    name: ClassVar[NameDescriptor] = NameDescriptor()
+
+    class Config:
+        ignored_types = (classproperty,)
+
+    @classproperty
+    def description(cls):
+        return cls.model_json_schema().get("description", "")
 
     @classmethod
     def openai_schema(cls, thoughts_in_action: bool = False) -> dict[str, Any]:
@@ -273,11 +237,11 @@ class StructuredOutput(BaseModel):
                     f"Correctly extracted `{cls.__name__}` with all "
                     f"the required parameters with correct types"
                 )
-
+        name = cls.name
         return {
             "type": "function",
             "function": {
-                "name": cls.name,
+                "name": name,
                 "description": schema["description"],
                 "parameters": parameters,
             }
@@ -285,23 +249,30 @@ class StructuredOutput(BaseModel):
 
     @classmethod
     def anthropic_schema(cls) -> dict[str, Any]:
-        """Generate a schema compatible with Anthropic's tool calling format."""
         schema = cls.model_json_schema()
-        # Add a default description if none exists
-        description = schema.get("description", "No description provided")
-        
-        # Get name safely without triggering property descriptor
-        name = cls.Config.title if hasattr(cls, 'Config') and hasattr(cls.Config, 'title') else cls.__name__.lower()
-        
-        return {
-            "name": name,
-            "description": description,
-            "input_schema": {
-                "type": "object",
-                "properties": schema.get("properties", {}),
-                "required": schema.get("required", [])
-            }
+        del schema["title"]
+
+        if "description" in schema:
+            description = schema["description"]
+            del schema["description"]
+        else:
+            description = None
+
+        response = {
+            "name": cls.name,
+            "input_schema": schema,
         }
+
+        if description:
+            response["description"] = description
+
+        # Exclude thoughts field from properties and required if it exists
+        if "thoughts" in schema.get("properties", {}):
+            del schema["properties"]["thoughts"]
+            if "required" in schema and "thoughts" in schema["required"]:
+                schema["required"].remove("thoughts")
+
+        return response
 
     @classmethod
     def model_validate_xml(cls, xml_text: str) -> Self:

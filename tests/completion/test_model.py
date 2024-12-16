@@ -3,6 +3,7 @@ from pydantic import ValidationError
 
 from moatless.actions.create_file import CreateFileArgs
 from moatless.actions.string_replace import StringReplaceArgs
+from moatless.completion.model import StructuredOutput
 
 
 def test_string_replace_xml_validation():
@@ -67,3 +68,28 @@ def test_string_replace_indentation():
     assert args.path == "test/file.py"
     assert args.old_str == "        data = StringIO(data)\n        for obj in serializers.deserialize(\"json\", data, using=self.connection.alias):\n            obj.save()"
     assert args.new_str == "        data = StringIO(data)\n        with transaction.atomic(using=self.connection.alias):\n            for obj in serializers.deserialize(\"json\", data, using=self.connection.alias):\n                obj.save()"
+
+def test_structured_output_name_and_description():
+    # Test class with Config.title and docstring
+    class TestWithConfig(StructuredOutput):
+        """This is a test description."""
+        class Config:
+            title = "CustomTitle"
+
+    assert TestWithConfig.name == "CustomTitle"
+    assert TestWithConfig.description == "This is a test description."
+
+    # Test class without Config.title but with docstring
+    class TestWithoutConfig(StructuredOutput):
+        """Another test description."""
+        pass
+
+    assert TestWithoutConfig.name == "TestWithoutConfig"
+    assert TestWithoutConfig.description == "Another test description."
+
+    # Test class without Config.title or docstring
+    class TestBare(StructuredOutput):
+        pass
+
+    assert TestBare.name == "TestBare"
+    assert TestBare.description == ""

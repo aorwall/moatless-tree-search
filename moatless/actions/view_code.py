@@ -14,6 +14,7 @@ from moatless.actions.model import (
 from moatless.codeblocks import CodeBlockType
 from moatless.file_context import FileContext, ContextFile
 from moatless.repository.repository import Repository
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ class ViewCode(Action):
         description="The maximum number of tokens in the requested code.",
     )
 
-    def execute(self, args: ViewCodeArgs, file_context: FileContext) -> Observation:
+    def execute(self, args: ViewCodeArgs, file_context: FileContext | None = None, workspace: Workspace | None = None) -> Observation:
         # Group files by filepath and combine span_ids
         grouped_files = {}
         for file_with_spans in args.files:
@@ -177,11 +178,12 @@ class ViewCode(Action):
                             file_path, block_span.span_id, add_extra=False
                         )
 
-            elif file_span.start_line:
+            if file_span.start_line:
                 view_context.add_line_span_to_context(
                     file_path, file_span.start_line, file_span.end_line, add_extra=False
                 )
-            else:
+
+            if not file_span.start_line and not file_span.span_ids:
                 view_context.add_file(file_path, show_all_spans=True)
 
             if file.patch:

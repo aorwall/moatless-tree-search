@@ -1,18 +1,29 @@
+import json
 import logging
-from enum import Enum
-from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field, field_serializer
+from typing import List, Any, Callable, Dict
+from pydantic import BaseModel, Field, field_serializer, PrivateAttr
+
+from litellm.types.llms.openai import (
+    AllMessageValues,
+    ChatCompletionAssistantMessage,
+    ChatCompletionAssistantToolCall,
+    ChatCompletionFunctionMessage,
+    ChatCompletionImageObject,
+    ChatCompletionImageUrlObject,
+    ChatCompletionTextObject,
+    ChatCompletionToolCallFunctionChunk,
+    ChatCompletionToolMessage,
+    ChatCompletionUserMessage,
+)
 
 from moatless.actions.run_tests import RunTestsArgs
 from moatless.actions.view_code import ViewCodeArgs, CodeSpan
 from moatless.actions.view_diff import ViewDiffArgs
-from moatless.completion.model import Message, UserMessage, AssistantMessage
 from moatless.actions.model import ActionArguments
-from moatless.file_context import FileContext
+from moatless.exceptions import CompletionRuntimeError
 from moatless.node import Node
 from moatless.schema import MessageHistoryType
 from moatless.utils.tokenizer import count_tokens
-from moatless.runtime.runtime import TestStatus
 
 logger = logging.getLogger(__name__)
 
@@ -55,80 +66,98 @@ class MessageHistoryGenerator(BaseModel):
     def serialize_message_history_type(self, message_history_type: MessageHistoryType) -> str:
         return message_history_type.value
 
-    def generate(self, node: "Node") -> List[Message]:  # type: ignore
-        previous_nodes = node.get_trajectory()[:-1]
-        if not previous_nodes:
-            return []
-
+    def generate(self, node: "Node") -> List[AllMessageValues]:  # type: ignore
         logger.info(
             f"Generating message history for Node{node.node_id}: {self.message_history_type}"
         )
-
         generators = {
             MessageHistoryType.SUMMARY: self._generate_summary_history,
             MessageHistoryType.REACT: self._generate_react_history,
             MessageHistoryType.MESSAGES: self._generate_message_history
         }
-
+        previous_nodes = node.get_trajectory()[:-1]
         return generators[self.message_history_type](node, previous_nodes)
 
-    def _generate_message_history(self, node: "Node", previous_nodes: List["Node"]) -> List[Message]:
-        messages = [UserMessage(content=node.get_root().message)]
+    def _generate_message_history(self, node: Node, previous_nodes: List["Node"]) -> List[dict[str, Any]]:
+        messages = []
+        tool_idx = 0
+        tokens = 0
 
-        if len(previous_nodes) <= 1:
-            return messages
+        for i, previous_node in enumerate(previous_nodes):
+            # Handle user message
+            if previous_node.user_message:
+                message_content = [{"type": "text", "text": previous_node.user_message}]
+                
+                if previous_node.artifact_changes:
+                    for change in previous_node.artifact_changes:
+                        artifact = previous_node.workspace.get_artifact_by_id(change.artifact_id)
+                        if artifact:
+                            message = f"{artifact.type} artifact: {artifact.id}"
+                            message_content.append({"type": "text", "text": message})
+                            message_content.append(artifact.to_prompt_format())
 
-        node_messages = self.get_node_messages(node)
-        
-        for action, observation in node_messages:
-            # Handle thoughts based on configuration
-            if self.thoughts_in_action:
-                content = None
-                tool_call = action.to_tool_call(thoughts_in_action=True)
-            else:
-                content = (
-                    f"<thoughts>{action.thoughts}</thoughts>"
-                    if hasattr(action, "thoughts")
-                    else None
-                )
-                tool_call = action.to_tool_call()
-                if "thoughts" in tool_call.input:
-                    del tool_call.input["thoughts"]
+                messages.append(ChatCompletionUserMessage(role="user", content=message_content))
+                tokens += count_tokens(previous_node.user_message)
 
-            messages.append(AssistantMessage(content=content, tool_call=tool_call))
-            messages.append(UserMessage(content=f"<observation>\n{observation}\n</observation>"))
+            tool_calls = []
+            tool_responses = []
 
-        # Add latest feedback with explanation at the end if available
-        if node.feedback:
-            feedback_message = (
-                "Based on analysis of your previous actions and alternative solution attempts, "
-                "here is the feedback to guide your next steps:\n\n"
-                "<feedback>\n"
-                f"{node.feedback}\n"
-                "</feedback>\n\n"
-                "Please consider this feedback when deciding your next action. "
-                "The feedback aims to help you avoid repeating unsuccessful approaches "
-                "and guide you towards more promising solutions.\n\n"
-                "Note: Your current trajectory only includes the actions you've taken directly - "
-                "alternative attempts mentioned in the feedback are from separate branches and "
-                "have not affected your current state. However, you should learn from these "
-                "alternative attempts to avoid repeating unsuccessful approaches and to combine "
-                "successful elements into an improved solution."
-            )
-            messages.append(UserMessage(content=feedback_message))
+            if not previous_node.assistant_message and not previous_node.action_steps:
+                continue
 
-        tokens = count_tokens("".join([m.content for m in messages if m.content is not None]))
+            for action_step in previous_node.action_steps:
+                tool_idx += 1
+                tool_call_id = f"tool_{tool_idx}"
+
+                tool_calls.append({
+                    "id": tool_call_id,
+                    "type": "function",
+                    "function": {
+                        "name": action_step.action.name,
+                        "arguments": action_step.action.model_dump_json(),
+                    },
+                })
+
+                tokens += count_tokens(action_step.action.model_dump_json())
+
+                tool_responses.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": previous_node.observation.message,
+                })
+
+                tokens += count_tokens(previous_node.observation.message)
+
+            assistant_message = {
+                "role": "assistant"
+            }
+
+            if tool_calls:
+                assistant_message["tool_calls"] = tool_calls
+
+            if previous_node.assistant_message:
+                assistant_message["content"] = previous_node.assistant_message
+                tokens += count_tokens(previous_node.assistant_message)
+
+            messages.append(assistant_message)
+            messages.extend(tool_responses)
+
+        if node.feedback_data:
+            messages.append(ChatCompletionUserMessage(role="user", content=node.feedback_data.feedback))
+
         logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
+
         return messages
 
-    def _generate_react_history(self, node: "Node", previous_nodes: List["Node"]) -> List[Message]:
-        messages = [UserMessage(content=node.get_root().message)]
+    def _generate_react_history(self, node: "Node", previous_nodes: List["Node"]) -> List[AllMessageValues]:
+        messages = [ChatCompletionUserMessage(role="user", content=node.get_root().message)]
         
         if len(previous_nodes) <= 1:
             return messages
 
         node_messages = self.get_node_messages(node)
         
+        # Convert node messages to react format
         for action, observation in node_messages:
             # Add thought and action message
             thought = (
@@ -143,36 +172,21 @@ class MessageHistoryGenerator(BaseModel):
             if action_input:
                 assistant_content += f"\n{action_input}"
             
-            messages.append(AssistantMessage(content=assistant_content))
-            messages.append(UserMessage(content=f"Observation: {observation}"))
-
-        # Add latest feedback with explanation at the end if available
-        if node.feedback:
-            feedback_message = (
-                "System Analysis: I've analyzed your previous actions and alternative attempts. "
-                "Here's strategic guidance for your next steps:\n\n"
-                f"Feedback: {node.feedback}\n\n"
-                "Note: This feedback is based on the outcomes of various solution attempts. "
-                "While alternative attempts mentioned are from separate branches and "
-                "have not affected your current state, you should carefully consider their "
-                "outcomes to inform your decisions. Learn from both successful and failed "
-                "approaches to craft an improved solution that avoids known pitfalls and "
-                "combines effective strategies."
-            )
-            messages.append(UserMessage(content=feedback_message))
+            messages.append(ChatCompletionAssistantMessage(role="assistant", content=assistant_content))
+            messages.append(ChatCompletionUserMessage(role="user", content=f"Observation: {observation}"))
 
         tokens = count_tokens("".join([m.content for m in messages if m.content is not None]))
         logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
         return messages
 
-    def _generate_summary_history(self, node: Node, previous_nodes: List[Node]) -> List[Message]:
+    def _generate_summary_history(self, node: Node, previous_nodes: List[Node]) -> List[AllMessageValues]:
         formatted_history: List[str] = []
         counter = 0
 
         content = node.get_root().message
 
         if not previous_nodes:
-            return [UserMessage(content=content)]
+            return [ChatCompletionUserMessage(role="user", content=content)]
 
         for i, previous_node in enumerate(previous_nodes):
             if previous_node.action:
@@ -218,7 +232,7 @@ class MessageHistoryGenerator(BaseModel):
                 content += git_patch
                 content += "\n```"
 
-        return [UserMessage(content=content)]
+        return [ChatCompletionUserMessage(role="user", content=content)]
 
     def get_node_messages(self, node: "Node") -> List[tuple[ActionArguments, str]]:
         """

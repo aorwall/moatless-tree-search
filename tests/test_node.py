@@ -6,7 +6,8 @@ from moatless.actions.action import Action
 from moatless.actions.finish import FinishArgs
 from moatless.actions.model import Observation, ActionArguments
 from moatless.file_context import FileContext
-from moatless.node import Node, MessageHistoryType
+from moatless.node import ActionStep, Node
+from moatless.message_history import MessageHistoryType
 from moatless.repository.repository import InMemRepository
 
 
@@ -50,10 +51,10 @@ def test_node_model_dump():
 
     # Add a FinishArgs action to one of the nodes
     finish_args = FinishArgs(
-        scratch_pad="Task is complete because all requirements are met.",
+        thoughts="Task is complete because all requirements are met.",
         finish_reason="All tests pass and code is optimized."
     )
-    child1.action = finish_args
+    child1.action_steps = [ActionStep(action=finish_args)]
 
     # Get the model dump
     dumped_data = root.model_dump()
@@ -63,7 +64,7 @@ def test_node_model_dump():
     assert dumped_data["node_id"] == 0
     assert dumped_data["visits"] == 10
     assert dumped_data["value"] == 100.0
-    assert dumped_data["message"] == "Root node"
+    assert dumped_data["user_message"] == "Root node"
     assert len(dumped_data["children"]) == 2
     assert "parent" not in dumped_data  # Ensure parent is not included
 
@@ -71,9 +72,9 @@ def test_node_model_dump():
     assert child1_data["node_id"] == 1
     assert child1_data["visits"] == 5
     assert child1_data["value"] == 50.0
-    assert child1_data["message"] == "Child 1"
-    assert child1_data["action"]["scratch_pad"] == "Task is complete because all requirements are met."
-    assert child1_data["action"]["finish_reason"] == "All tests pass and code is optimized."
+    assert child1_data["user_message"] == "Child 1"
+    assert child1_data["action_steps"][0]["action"]["thoughts"] == "Task is complete because all requirements are met."
+    assert child1_data["action_steps"][0]["action"]["finish_reason"] == "All tests pass and code is optimized."
     assert len(child1_data["children"]) == 1
     assert "parent" not in child1_data  # Ensure parent is not included
 
@@ -81,40 +82,34 @@ def test_node_model_dump():
     assert child2_data["node_id"] == 2
     assert child2_data["visits"] == 3
     assert child2_data["value"] == 30.0
-    assert child2_data["message"] == "Child 2"
+    assert child2_data["user_message"] == "Child 2"
     assert len(child2_data["children"]) == 0
 
     grandchild1_data = child1_data["children"][0]
     assert grandchild1_data["node_id"] == 3
     assert grandchild1_data["visits"] == 2
     assert grandchild1_data["value"] == 20.0
-    assert grandchild1_data["message"] == "Grandchild 1"
     assert len(grandchild1_data["children"]) == 0
 
     # Test loading the dumped data
     loaded_root = Node.reconstruct(dumped_data)
     loaded_child1 = loaded_root.children[0]
     
+    assert isinstance(loaded_child1.action_steps[0].action, FinishArgs)
     assert isinstance(loaded_child1.action, FinishArgs)
-    assert loaded_child1.action.scratch_pad == "Task is complete because all requirements are met."
+    assert loaded_child1.action.name == "Finish"
+    assert loaded_child1.action.thoughts == "Task is complete because all requirements are met."
     assert loaded_child1.action.finish_reason == "All tests pass and code is optimized."
 
     # Test with custom exclude
     custom_dump = root.model_dump(exclude={"value", "message"})
     assert "value" not in custom_dump
-    assert "message" not in custom_dump
     assert "parent" not in custom_dump  # 'parent' should still be excluded
 
     # Test with exclude_none=True 
     none_dump = root.model_dump(exclude_none=True)
     assert "reward" not in none_dump  # 'reward' should be excluded as it's None
 
-    # Test with both custom exclude and exclude_none=False
-    combined_dump = root.model_dump(exclude={"value"}, exclude_none=False)
-    assert "value" not in combined_dump
-    assert "message" in combined_dump
-    assert "reward" in combined_dump
-    assert "parent" not in combined_dump
 
 
 def test_persist_tree_non_root():

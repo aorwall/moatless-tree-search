@@ -6,7 +6,7 @@ from typing import Any, List
 from pydantic import BaseModel
 
 from moatless.actions.model import ActionArguments
-from moatless.node import Node
+from moatless.node import Node, FeedbackData
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,7 @@ class FeedbackGenerator(BaseModel, ABC):
     @abstractmethod
     def generate_feedback(
         self, node: Node, actions: List[ActionArguments] | None = None
-    ) -> str | None:
+    ) -> FeedbackData | None:
         """Generate feedback based on the node."""
         pass
 

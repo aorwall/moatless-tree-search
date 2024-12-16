@@ -2,14 +2,14 @@ import importlib
 import logging
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from litellm.types.llms.openai import ChatCompletionUserMessage
 from pydantic import BaseModel, PrivateAttr, Field
 
 from moatless.actions.action import Action, RewardScaleEntry
 from moatless.completion.completion import CompletionModel, Message
-from moatless.completion.model import UserMessage, Completion
+from moatless.completion.model import Completion
 from moatless.message_history import MessageHistoryGenerator
 from moatless.node import Node, generate_ascii_tree
-from moatless.schema import MessageHistoryType
 from moatless.value_function.model import Reward
 
 logger = logging.getLogger(__name__)
@@ -55,64 +55,54 @@ class ValueFunction(BaseModel):
 
     def get_reward(self, node: Node) -> Tuple[Reward, Optional[Completion]]:
         # First get coding value function result if enabled
-        coding_reward = None
-        try:
-            if self.coding_value_function:
-                coding_reward, _ = self.coding_value_function.get_reward(node)
-        except Exception as e:
-            logger.warning(f"Failed to get coding reward: {e}")
-            
-        messages = self.message_generator.generate(node)
-        if messages is None:
-            messages = []  # Ensure we have a valid list
+        coding_reward = self._get_coding_reward(node)
         
-        system_prompt = self._create_system_prompt(node)
-        
-        # Add defensive check
-        if not messages:
-            messages = [UserMessage(content="No message history available")]
+        # Prepare messages with coding context if available
+        messages = self._prepare_messages(node)
+        system_prompt = self._create_system_prompt(node, coding_reward)
 
-        # Add coding evaluation as a user message
-        if coding_reward:
-            coding_context = (
-                f"<coding_assessment>\n"
-                f"Code-specific evaluation:\n"
-                f"Value: {coding_reward.value}\n"
-                f"Explanation: {coding_reward.explanation}\n"
-                f"</coding_assessment>"
-            )
-            messages.append(UserMessage(content=coding_context))
-
-        # Try up to 3 times to get a valid reward
-        max_retries = 3
-        for attempt in range(max_retries):
+        # Try up to max retries to get a valid reward
+        for attempt in range(RewardConfig.MAX_RETRIES):
             try:
-                reward, completion = self.completion_model.create_completion(
-                    messages=messages, 
-                    system_prompt=system_prompt + "\nIMPORTANT: Respond ONLY with a valid JSON object containing 'value', 'explanation', and 'feedback' fields.", 
+                completion_response = self.completion_model.create_completion(
+                    messages=messages,
+                    system_prompt=system_prompt + RewardConfig.RESPONSE_FORMAT_INSTRUCTION,
                     response_model=Reward
                 )
-                
-                if reward is not None:
-                    # Validate the reward using Pydantic
-                    try:
-                        validated_reward = Reward(
-                            value=reward.value,
-                            explanation=reward.explanation,
-                            feedback=reward.feedback
-                        )
-                        return validated_reward, completion
-                    except ValueError as ve:
-                        logger.warning(f"Invalid reward format on attempt {attempt + 1}: {ve}")
-                        continue
-                
-                logger.warning(
-                    f"Attempt {attempt + 1}/{max_retries}: Reward generation returned None"
-                )
-                
+
+                if completion_response.structured_output is None:
+                    logger.warning(
+                        f"Attempt {attempt + 1}/{RewardConfig.MAX_RETRIES}: "
+                        "Reward generation returned None"
+                    )
+                    continue
+
+                # Store completion in node's completions
+                if not hasattr(node, "completions"):
+                    node.completions = {}
+                node.completions["reward"] = completion_response.completion
+
+                # Validate the reward using Pydantic
+                try:
+                    validated_reward = Reward(
+                        value=completion_response.structured_output.value,
+                        explanation=completion_response.structured_output.explanation,
+                        feedback=completion_response.structured_output.feedback
+                    )
+
+                    # If we have both coding and general rewards, combine them
+                    if coding_reward:
+                        validated_reward = self._combine_rewards(validated_reward, coding_reward)
+
+                    return validated_reward, completion_response.completion
+
+                except ValueError as ve:
+                    logger.warning(f"Invalid reward format on attempt {attempt + 1}: {ve}")
+                    continue
+
             except Exception as e:
                 logger.error(f"Error during reward generation (attempt {attempt + 1}): {e}")
-        
+
         # If all retries failed, return a fallback reward
         error_msg = "Failed to generate valid reward after multiple attempts"
         logger.error(error_msg)
@@ -283,7 +273,7 @@ Evaluation Guidelines:
             message += "No changes made yet."
             message += "\n</git_patch>\n\n"
 
-        return UserMessage(content=message)
+        return ChatCompletionUserMessage(role="user", content=message)
 
     def _build_system_prompt(self, node: Node):
         action = Action.get_action_by_args_class(type(node.action))

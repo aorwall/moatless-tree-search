@@ -60,6 +60,7 @@ class CodingAgent(ActionAgent):
                 repository=repository,
                 code_index=code_index,
                 completion_model=completion_model,
+                run_tests=bool(runtime)
             )
             system_prompt = CLAUDE_REACT_PROMPT
             action_type = "Claude actions with computer use capability"
@@ -214,6 +215,7 @@ def create_claude_coding_actions(
     repository: Repository,
     code_index: CodeIndex | None = None,
     completion_model: CompletionModel | None = None,
+    run_tests: bool = True,
 ) -> List[Action]:
     actions = create_base_actions(repository, code_index, completion_model)
     actions.append(
@@ -221,7 +223,8 @@ def create_claude_coding_actions(
 
     )
     actions.append(ListFiles())
-    actions.append(RunTests(repository=repository, code_index=code_index))
+    if run_tests:
+        actions.append(RunTests(repository=repository, code_index=code_index))
     actions.extend([Finish(), Reject()])
     return actions
 

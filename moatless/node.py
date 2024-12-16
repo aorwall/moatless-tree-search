@@ -3,6 +3,8 @@ import logging
 from enum import Enum
 from typing import Optional, List, Dict, Any, Union
 
+from moatless.artifacts.artifact import ArtifactChange
+from moatless.workspace import Workspace
 from moatless.actions.view_code import ViewCodeArgs, CodeSpan
 from pydantic import BaseModel, Field
 
@@ -11,9 +13,6 @@ from moatless.agent.settings import AgentSettings
 from moatless.completion.model import (
     Usage,
     Completion,
-    Message,
-    UserMessage,
-    AssistantMessage,
 )
 from moatless.file_context import FileContext
 from moatless.repository.repository import Repository
@@ -23,34 +22,58 @@ from moatless.value_function.model import Reward
 logger = logging.getLogger(__name__)
 
 
+class ActionStep(BaseModel):
+    action: ActionArguments
+    observation: Optional[Observation] = None
+    completion: Optional[Completion] = None
+
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+
+        data["action"] = self.action.model_dump(**kwargs)
+        data["action"]["action_args_class"] = (
+            f"{self.action.__class__.__module__}.{self.action.__class__.__name__}"
+        )
+
+        return data
+
+    @classmethod
+    def model_validate(cls, obj: Any, **kwargs) -> "ActionArguments":
+        if isinstance(obj, dict):
+            obj = obj.copy()
+            obj["action"] = ActionArguments.model_validate(obj["action"])
+        return super().model_validate(obj, **kwargs)
+
 class FeedbackData(BaseModel):
     """Structured feedback data model"""
     analysis: str = Field(..., description="Analysis of the task and alternative branch attempts")
     feedback: str = Field(..., description="Direct feedback to the AI assistant")
-    system_prompt: Optional[str] = Field(None, description="System prompt used to generate feedback")
-    raw_completion: Optional[str] = Field(None, description="Raw completion response")
-    raw_messages: List[Dict] = Field(default_factory=list, description="Raw messages used to generate feedback")
-    timestamp: str = Field(..., description="When feedback was generated")
+    suggested_node_id: Optional[int] = Field(
+        None, description="ID of the node that should be expanded next (optional)"
+    )
 
 
 class Node(BaseModel):
     node_id: int = Field(..., description="The unique identifier of the node")
+
     parent: Optional["Node"] = Field(None, description="The parent node")
     children: List["Node"] = Field(default_factory=list, description="The child nodes")
 
-    action: Optional[ActionArguments] = Field(
-        None, description="The action associated with the node"
+    workspace: Optional[Workspace] = Field(None, description="The workspace associated with the node")
+    artifact_changes: List[ArtifactChange] = Field(default_factory=list, description="The artifact changes associated with the node")
+
+    user_message: Optional[str] = Field(None, description="The user message for this node")
+    assistant_message: Optional[str] = Field(None, description="The assistant response for this node")
+
+    action_steps: List[ActionStep] = Field(
+        default_factory=list,
+        description="The sequence of actions and observations for this node"
     )
-    observation: Optional[Observation] = Field(
-        None, description="The output of the action"
-    )
+
     file_context: Optional[FileContext] = Field(
         None, description="The file context state associated with the node"
     )
-    message: Optional[str] = Field(
-        None, description="The message associated with the node"
-    )
-    feedback: Optional[str] = Field(None, description="Feedback provided to the node")
+    # feedback: Optional[str] = Field(None, description="Feedback provided to the node")
     completions: Dict[str, Completion] = Field(
         default_factory=dict, description="The completions used in this node"
     )
@@ -61,21 +84,63 @@ class Node(BaseModel):
         None, description="Flag to indicate if the node is a duplicate"
     )
     reward: Optional[Reward] = Field(None, description="The reward of the node")
-    visits: int = Field(
-        0, description="The number of times the node has been visited"
-    )
-    value: Optional[float] = Field(
-        None, description="The total value (reward) of the node"
-    )
-    max_expansions: Optional[int] = Field(
-        None, description="The maximum number of expansions"
-    )
+    visits: int = Field(0, description="The number of times the node has been visited")
+    value: Optional[float] = Field(None, description="The total value (reward) of the node")
+    max_expansions: Optional[int] = Field(None, description="The maximum number of expansions")
     agent_settings: Optional[AgentSettings] = Field(
         None, description="The agent settings associated with the node"
     )
     feedback_data: Optional[FeedbackData] = Field(
         None, description="Structured feedback data for the node"
     )
+
+    @property
+    def action(self) -> Optional[ActionArguments]:
+        """Backward compatibility: Get action from the latest action step"""
+        if not self.action_steps:
+            return None
+        return self.action_steps[-1].action if self.action_steps else None
+
+    @action.setter
+    def action(self, value: Optional[ActionArguments]):
+        """Backward compatibility: Set action on the current/new action step"""
+
+        if not self.action_steps:
+            self.action_steps.append(ActionStep(action=value))
+        else:
+            self.action_steps[-1].action = value
+
+    @property
+    def observation(self) -> Optional[Observation]:
+        """Backward compatibility: Get observation from the latest action step"""
+        if not self.action_steps:
+            return None
+        return self.action_steps[-1].observation if self.action_steps else None
+
+    @observation.setter
+    def observation(self, value: Optional[Observation]):
+        """Backward compatibility: Set observation on the current/new action step"""
+        if value is None:
+            return
+
+        if not self.action_steps:
+            # Create new action step if setting observation on empty node
+            self.action_steps.append(ActionStep(
+                action=self.action,
+                observation=value
+            ))
+        else:
+            self.action_steps[-1].observation = value
+
+    @property
+    def message(self) -> Optional[str]:
+        """Backward compatibility: Get message maps to user_message"""
+        return self.user_message
+
+    @message.setter
+    def message(self, value: Optional[str]):
+        """Backward compatibility: Set message maps to user_message"""
+        self.user_message = value
 
     @classmethod
     def stub(cls, **kwargs):
@@ -99,10 +164,10 @@ class Node(BaseModel):
 
     def is_terminal(self) -> bool:
         """Determine if the current state is a terminal state."""
-        if self.observation and self.observation.terminal:
-            return True
-
-        return False
+        if not self.action_steps:
+            return False
+        last_step = self.action_steps[-1]
+        return last_step.observation.terminal if last_step.observation else False
 
     def is_finished(self) -> bool:
         """Determine if the node is succesfully finished"""
@@ -115,6 +180,12 @@ class Node(BaseModel):
         """Add a child node to this node."""
         child_node.parent = self
         self.children.append(child_node)
+
+    def set_parent(self, parent: "Node"):
+        if self.node_id == parent.node_id:
+            raise ValueError(f"Node can't have same id {self.node_id} parent")
+        self.parent = parent
+        parent.add_child(self)
 
     def get_depth(self) -> int:
         depth = 0
@@ -178,10 +249,18 @@ class Node(BaseModel):
         return expanded_nodes
 
     def get_all_nodes(self) -> List["Node"]:
+        if self.parent:
+            node = self.get_root()
+        else:
+            node = self
+
+        return node._get_all_nodes()
+
+    def _get_all_nodes(self) -> List["Node"]:
         nodes = []
         nodes.append(self)
         for child in self.children:
-            nodes.extend(child.get_all_nodes())
+            nodes.extend(child._get_all_nodes())
         return nodes
 
     def get_root(self) -> "Node":
@@ -208,9 +287,10 @@ class Node(BaseModel):
     def total_usage(self) -> Usage:
         total_usage = Usage()
 
-        for completion in self.completions.values():
-            if completion:
-                total_usage += completion.usage
+        # Sum usage across all action steps
+        for step in self.action_steps:
+            if step.completion:
+                total_usage += step.completion.usage
 
         return total_usage
 
@@ -229,12 +309,11 @@ class Node(BaseModel):
 
     def reset(self):
         """Reset the node state to be able to execute it again."""
-        self.action = None
+        self.action_steps = []
+        self.user_message = None
+        self.assistant_message = None
         self.visits = 0
         self.value = 0.0
-        self.observation = None
-        self.feedback = None
-        self.completions = {}
         self.is_duplicate = False
         if self.parent and self.parent.file_context:
             self.file_context = self.parent.file_context.clone()
@@ -243,7 +322,7 @@ class Node(BaseModel):
     def clone_and_reset(self) -> "Node":
         """
         Creates a copy of the node and resets its observation and file context.
-        
+
         Returns:
             Node: A new node instance with reset state
         """
@@ -259,8 +338,7 @@ class Node(BaseModel):
             visits=self.visits,
             value=self.value,
             max_expansions=self.max_expansions,
-            message=self.message,
-            feedback=self.feedback,
+            user_message=self.user_message,
             is_duplicate=self.is_duplicate,
             action=self.action,
             possible_actions=self.possible_actions.copy() if self.possible_actions else []
@@ -277,47 +355,43 @@ class Node(BaseModel):
             Dict[str, Any]: A dictionary representation of the node tree.
         """
 
-        def serialize_node(node: "Node") -> Dict[str, Any]:
-            exclude_set = {"parent", "children"}
-            if "exclude" in kwargs:
-                if isinstance(kwargs["exclude"], set):
-                    exclude_set.update(kwargs["exclude"])
-                elif isinstance(kwargs["exclude"], dict):
-                    exclude_set.update(kwargs["exclude"].keys())
+        exclude_set = {"parent", "children"}
+        if "exclude" in kwargs:
+            if isinstance(kwargs["exclude"], set):
+                exclude_set.update(kwargs["exclude"])
+            elif isinstance(kwargs["exclude"], dict):
+                exclude_set.update(kwargs["exclude"].keys())
 
-            new_kwargs = {k: v for k, v in kwargs.items() if k != "exclude"}
-            node_dict = super().model_dump(exclude=exclude_set, **new_kwargs)
+        new_kwargs = {k: v for k, v in kwargs.items() if k != "exclude"}
+        node_dict = super().model_dump(exclude=exclude_set, **new_kwargs)
 
-            if node.action and "action" not in exclude_set:
-                node_dict["action"] = node.action.model_dump(**kwargs)
-                node_dict["action"]["action_args_class"] = (
-                    f"{node.action.__class__.__module__}.{node.action.__class__.__name__}"
-                )
+        if self.completions and "completions" not in exclude_set:
+            node_dict["completions"] = {
+                key: completion.model_dump(**kwargs)
+                for key, completion in self.completions.items()
+                if completion
+            }
 
-            if node.completions and "completions" not in exclude_set:
-                node_dict["completions"] = {
-                    key: completion.model_dump(**kwargs)
-                    for key, completion in node.completions.items()
-                    if completion
-                }
+        if self.reward and "reward" not in exclude_set:
+            node_dict["reward"] = self.reward.model_dump(**kwargs)
 
-            if node.reward and "reward" not in exclude_set:
-                node_dict["reward"] = node.reward.model_dump(**kwargs)
+        if self.observation and "output" not in exclude_set:
+            node_dict["output"] = self.observation.model_dump(**kwargs)
 
-            if node.observation and "output" not in exclude_set:
-                node_dict["output"] = node.observation.model_dump(**kwargs)
+        if self.file_context and "file_context" not in exclude_set:
+            node_dict["file_context"] = self.file_context.model_dump(**kwargs)
 
-            if node.file_context and "file_context" not in exclude_set:
-                node_dict["file_context"] = node.file_context.model_dump(**kwargs)
+        node_dict["action_steps"] = [
+            action_step.model_dump(**kwargs) for action_step in self.action_steps
+        ]
 
-            if not kwargs.get("exclude") or "children" not in kwargs.get("exclude"):
-                node_dict["children"] = [
-                    serialize_node(child) for child in node.children
-                ]
+        if not kwargs.get("exclude") or "children" not in kwargs.get("exclude"):
+            node_dict["children"] = [
+                child.model_dump(**kwargs) for child in self.children
+            ]
 
-            return node_dict
+        return node_dict
 
-        return serialize_node(self)
 
     @classmethod
     def _reconstruct_node(
@@ -326,19 +400,28 @@ class Node(BaseModel):
         repo: Repository | None = None,
         runtime: RuntimeEnvironment | None = None
     ) -> "Node":
-        if node_data.get("action"):
-            node_data["action"] = ActionArguments.model_validate(node_data["action"])
+        """Update reconstruction to handle both old and new formats"""
 
-        if node_data.get("output"):
-            node_data["observation"] = Observation.model_validate(node_data["output"])
+        # Handle legacy format conversion
+        if "action" in node_data and not "action_steps" in node_data:
+            action = node_data.get("action")
+            observation = node_data.get("output")
+            completions = node_data.get("completions", {})
 
-        if node_data.get("completions"):
-            for key, completion_data in node_data["completions"].items():
-                completion = Completion.model_validate(completion_data)
-                node_data["completions"][key] = completion
+            if action or observation or completions:
+                node_data["action_steps"] = [{
+                    "action": action,
+                    "observation": observation,
+                    "completions": completions
+                }]
 
-        if node_data.get("reward"):
-            node_data["reward"] = Reward.model_validate(node_data["reward"])
+        if "message" in node_data and not "user_message" in node_data:
+            node_data["user_message"] = node_data.pop("message")
+
+        if node_data.get("action_steps"):
+            node_data["action_steps"] = [
+                ActionStep.model_validate(step_data) for step_data in node_data["action_steps"]
+            ]
 
         if node_data.get("file_context"):
             node_data["file_context"] = FileContext.from_dict(
@@ -348,12 +431,9 @@ class Node(BaseModel):
         node_data["visits"] = node_data.get("visits", 0)
         node_data["value"] = node_data.get("value", 0.0)
 
-        # Add feedback data reconstruction
-        if node_data.get("completions", {}).get("feedback"):
-            feedback_completion = node_data["completions"]["feedback"]
-            if isinstance(feedback_completion, dict) and "response" in feedback_completion:
-                node_data["feedback_data"] = FeedbackData.model_validate(feedback_completion["response"])
-        
+        if node_data.get("feedback_data"):
+            node_data["feedback_data"] = FeedbackData.model_validate(node_data["feedback_data"])
+
         if "children" in node_data:
             children = node_data.get("children", [])
 
@@ -497,7 +577,7 @@ def generate_ascii_tree(
     # Make sure we're starting from the actual root node
     if root.parent:
         root = root.get_root()
-        
+
     _append_ascii_node(
         root,
         "",
@@ -516,10 +596,10 @@ def generate_ascii_tree(
 
 
 def _append_ascii_node(
-    node: Node, 
-    prefix: str, 
-    is_last: bool, 
-    tree_lines: list[str], 
+    node: Node,
+    prefix: str,
+    is_last: bool,
+    tree_lines: list[str],
     current: Node | None,
     include_explanation: bool = False,
     include_diffs: bool = False,
@@ -577,18 +657,18 @@ def _append_ascii_node(
 
     # Calculate the current node's connection prefix
     connection = "└── " if is_last else "├── "
-    
+
     # Add star marker only if trajectory marking is enabled
     trajectory_marker = "* " if (show_trajectory and node in current_trajectory_nodes) else "  "
-    
+
     # Add the node line with expandable status and optional trajectory marker
     tree_lines.append(f"{prefix}{connection}{trajectory_marker}{node_str} {state_info} "
                      f"(expansions: {node.expanded_count()}, reward: {reward_str}, "
                      f"visits: {node.visits}, {expandable_str})")
-    
+
     # Calculate the content prefix - should align with the node's content
     content_prefix = prefix + ("    " if is_last else "│   ")
-    
+
     # Add explanation if available
     if include_explanation and node.reward and node.reward.explanation:
         explanation_text = node.reward.explanation.strip()
@@ -663,10 +743,10 @@ def _append_wrapped_text(tree_lines: list[str], text: str, prefix: str, header_p
     current_line = []
     current_length = 0
     max_line_length = 100 - len(prefix) - len(header_prefix)
-    
+
     # First line gets the header prefix
     is_first_line = True
-    
+
     for word in words:
         if current_length + len(word) + 1 <= max_line_length:
             current_line.append(word)
@@ -677,7 +757,7 @@ def _append_wrapped_text(tree_lines: list[str], text: str, prefix: str, header_p
             current_line = [word]
             current_length = len(word)
             is_first_line = False
-    
+
     if current_line:
         line_prefix = header_prefix if is_first_line else "│   "
         tree_lines.append(f"{prefix}{line_prefix}{' '.join(current_line)}")

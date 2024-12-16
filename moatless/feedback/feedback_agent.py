@@ -1,16 +1,18 @@
 import logging
+from json import JSONDecodeError
 from typing import List, Dict, Optional
 import json
 import os
 from datetime import datetime
 
+from litellm.types.llms.openai import ChatCompletionUserMessage
 from pydantic import Field, BaseModel
 
 from moatless.actions.action import Action
 from moatless.completion.completion import CompletionModel
-from moatless.completion.model import Completion, Message, UserMessage, Usage, StructuredOutput
+from moatless.completion.model import Completion, Usage, StructuredOutput
 from moatless.feedback import FeedbackGenerator
-from moatless.node import Node, generate_ascii_tree
+from moatless.node import Node, generate_ascii_tree, FeedbackData
 from moatless.schema import MessageHistoryType
 from moatless.message_history import MessageHistoryGenerator
 from moatless.utils.parse import parse_node_id
@@ -18,34 +20,26 @@ from moatless.utils.parse import parse_node_id
 logger = logging.getLogger(__name__)
 
 
-class FeedbackContent(StructuredOutput):
-    """The core feedback content returned by the LLM"""
+class FeedbackResponse(StructuredOutput):
+    """To provide feedback """
+
     analysis: str = Field(
-        ..., description="Analysis of the task and alternative branch attempts"
+        ..., description="Brief analysis of parent state and lessons from alternative attempts"
     )
-    feedback: str = Field(..., description="Direct feedback to the AI assistant")
+    feedback: str = Field(..., description="Clear, actionable guidance for your next action")
     suggested_node_id: Optional[int] = Field(
         None, description="ID of the node that should be expanded next (optional)"
     )
-
-
-class FeedbackResponse(StructuredOutput):
-    """Complete feedback response including metadata"""
-    content: FeedbackContent
-    raw_messages: List[Dict] = Field(default_factory=list, description="Raw messages used to generate feedback")
-    system_prompt: str = Field(None, description="System prompt used to generate feedback")
-    raw_completion: str = Field(None, description="Raw completion response")
-    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat(), description="When feedback was generated")
-
-    @classmethod
-    def name(cls) -> str:
-        return "feedback_response"
-
 
 class FeedbackAgent(FeedbackGenerator):
     completion_model: CompletionModel = Field(..., description="The completion model to use")
     instance_dir: str | None = Field(None, description="Base directory for the instance")
     feedback_file: str | None = Field(None, description="Path to the feedback file")
+
+    include_parent_info: bool = Field(True)
+    persist_path: str | None = Field(None)
+    include_tree: bool = Field(True)
+    include_node_suggestion: bool = Field(True)
 
     def model_post_init(self, __context) -> None:
         """Initialize feedback file after model initialization"""
@@ -67,13 +61,9 @@ class FeedbackAgent(FeedbackGenerator):
     def generate_feedback(
         self, 
         node: Node, 
-        actions: List[Action] | None = None,
-        include_parent_info: bool = False,
-        persist_path: str | None = None,
-        include_tree: bool = True,
-        include_node_suggestion: bool = False,
-    ) -> str | None:
-        if not node.parent:
+        actions: List[Action] | None = None
+    ) -> FeedbackData | None:
+        if not node.parent or not node.parent.parent:
             logger.info(
                 f"Node {node.node_id} has no parent node, skipping feedback generation"
             )
@@ -82,114 +72,76 @@ class FeedbackAgent(FeedbackGenerator):
         # Only get siblings that have been run (have actions set)
         sibling_nodes = [s for s in node.get_sibling_nodes() if s.action is not None]
         
-        # if not sibling_nodes:
-        #     logger.info(
-        #         f"Node {node.node_id} has no executed sibling nodes, skipping feedback generation"
-        #     )
-        #     return None
-
         messages = self._create_analysis_messages(
             node, 
             sibling_nodes,
-            include_parent_info=include_parent_info,
-            include_tree=include_tree
         )
         system_prompt = self._create_system_prompt(
-            actions, 
-            include_tree=include_tree,
-            include_node_suggestion=include_node_suggestion
+            actions
         )
 
         try:
-            completion_content, completion_response = self.completion_model.create_completion(
+            completion_response = self.completion_model.create_completion(
                 messages=messages,
                 system_prompt=system_prompt,
                 response_model=FeedbackResponse
             )
-            
-            logger.debug(f"Raw completion content: {completion_content}")
-            
-            try:
-                import json
-                import re
-                
-                json_match = re.search(r'\{.*\}', completion_content, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group(0)
-                    feedback_data = json.loads(json_str)
-                    
-                    # Parse the LLM's structured output
-                    if include_node_suggestion:
-                        if 'suggested_node_id' not in feedback_data:
-                            suggested_node = parse_node_id(completion_content)
-                            if suggested_node is not None:
-                                feedback_data['suggested_node_id'] = suggested_node
-                    else:
-                        feedback_data.pop('suggested_node_id', None)
-                    
-                    feedback_content = FeedbackContent.model_validate(feedback_data)
-                    
-                    # Create the complete response with metadata
-                    feedback_response = FeedbackResponse(
-                        content=feedback_content,
-                        raw_messages=[m.model_dump() for m in messages],
-                        system_prompt=system_prompt,
-                        raw_completion=completion_content
-                    )
-                    
-                    # Create a proper Completion object for the node
-                    completion = Completion(
-                        model=self.completion_model.model,
-                        input=[m.model_dump() for m in messages],
-                        response=feedback_response.model_dump(),
-                        usage=Usage.from_completion_response(completion_response, self.completion_model.model)
-                    )
-                    
-                    # Store feedback in node's completions
-                    if not hasattr(node, "completions"):
-                        node.completions = {}
-                    node.completions["feedback"] = completion
-                    
-                    # Save the feedback to file if requested
-                    if persist_path:
-                        self.save_feedback(
-                            node=node,
-                            feedback=feedback_response,
-                            persist_path=persist_path
-                        )
-                    
-                    return feedback_content.analysis
-                    
-                else:
-                    logger.error("No JSON structure found in completion response")
-                    return None
-                    
-            except json.JSONDecodeError as je:
-                logger.error(f"JSON parsing error: {je}")
-                return None
-            except Exception as e:
-                logger.error(f"Error parsing feedback response: {e}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                return None
+
+            # Store the completion in the node
+            node.completions["feedback"] = completion_response.completion
+
+            logger.debug(f"Raw completion content: {completion_response.completion}")
+            feedback_response: FeedbackResponse = completion_response.structured_output
+
+            # If node suggestions are disabled, set to None
+            if not self.include_node_suggestion:
+                feedback_response.suggested_node_id = None
+
+            feedback_message = (
+                "System Analysis: I've analyzed your previous actions and alternative attempts. "
+                "Here's strategic guidance for your next steps:\n\n"
+                f"Feedback: {feedback_response.analysis}\n\n"
+                "Note: This feedback is based on the outcomes of various solution attempts. "
+                "While alternative attempts mentioned are from separate branches and "
+                "have not affected your current state, you should carefully consider their "
+                "outcomes to inform your decisions. Learn from both successful and failed "
+                "approaches to craft an improved solution that avoids known pitfalls and "
+                "combines effective strategies."
+            )
+
+            # Save feedback to file if requested
+            if self.persist_path:
+                self.save_feedback(
+                    node=node,
+                    feedback=FeedbackResponse(
+                        analysis=feedback_response.analysis,
+                        feedback=feedback_response.feedback,
+                        suggested_node_id=feedback_response.suggested_node_id
+                    ),
+                    system_prompt=system_prompt,
+                    messages=messages,
+                    raw_completion=completion_response.completion
+                )
+
+            return FeedbackData(
+                analysis=feedback_response.analysis,
+                feedback=feedback_message,
+                suggested_node_id=feedback_response.suggested_node_id
+            )
 
         except Exception as e:
-            logger.error(f"Error while generating feedback: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.exception(f"Error while generating feedback: {e}")
             return None
 
     def _create_analysis_messages(
         self, 
         current_node: Node, 
         sibling_nodes: List[Node],
-        include_parent_info: bool = False,
-        include_tree: bool = False,
-    ) -> List[Message]:
+    ) -> List[ChatCompletionUserMessage]:
         messages = []
 
         # Format tree visualization section
-        if include_tree:
+        if self.include_tree:
             tree_message = "# Search Tree Visualization\n"
             tree_message += "<search_tree>\n"
             tree_message += generate_ascii_tree(
@@ -203,7 +155,7 @@ class FeedbackAgent(FeedbackGenerator):
                 show_trajectory=True
             )
             tree_message += "\n</search_tree>\n\n"
-            messages.append(UserMessage(content=tree_message))
+            messages.append(ChatCompletionUserMessage(role="user", content=tree_message))
 
         # Format node relationships section
         relationship_message = "# Node Relationships\n"
@@ -213,7 +165,7 @@ class FeedbackAgent(FeedbackGenerator):
         relationship_message += f"Sibling Nodes: {[n.node_id for n in current_node.get_sibling_nodes()]}\n"
         relationship_message += f"Child Nodes: {[n.node_id for n in current_node.children]}\n"
         relationship_message += "</relationships>\n\n"
-        messages.append(UserMessage(content=relationship_message))
+        messages.append(ChatCompletionUserMessage(role="user", content=relationship_message))
 
         # Format root task section
         root_node = current_node.get_root()
@@ -221,7 +173,7 @@ class FeedbackAgent(FeedbackGenerator):
         first_message += "<task>\n"
         first_message += f"Root Node {root_node.node_id}:\n{root_node.message}\n"
         first_message += "</task>\n\n"
-        messages.append(UserMessage(content=first_message))
+        messages.append(ChatCompletionUserMessage(role="user", content=first_message))
 
         # Format message history section
         message_generator = MessageHistoryGenerator(
@@ -234,10 +186,10 @@ class FeedbackAgent(FeedbackGenerator):
         # Add node IDs to the message history
         trajectory = current_node.get_trajectory()
         for i, msg in enumerate(history_messages):
-            if i < len(trajectory):
+            if i < len(trajectory) and "content" in msg:
                 node = trajectory[i]
                 parent_id = node.parent.node_id if node.parent else 'None'
-                msg.content = f"# Node {node.node_id} (Parent: {parent_id})\n<history>\n{msg.content}\n</history>\n"
+                msg["content"] = f"# Node {node.node_id} (Parent: {parent_id})\n<history>\n{msg['content']}\n</history>\n"
         
         messages.extend(history_messages)
 
@@ -271,26 +223,16 @@ class FeedbackAgent(FeedbackGenerator):
             analysis_message += "</warning>\n"
 
         if analysis_message != "# alternative Solution Attempts\n":
-            messages.append(UserMessage(content=analysis_message))
+            messages.append(ChatCompletionUserMessage(role="user", content=analysis_message))
 
         return messages
 
     def _create_system_prompt(
         self, 
-        actions: List[Action], 
-        include_tree: bool = False,
-        include_node_suggestion: bool = False,
+        actions: List[Action],
     ) -> str:
-        # Store the JSON format based on whether node suggestion is included
-        json_format = '''
-{
-    "analysis": "Brief analysis of parent state and lessons from alternative attempts",
-    "feedback": "Clear, actionable guidance for your next action"''' + ('''
-    "suggested_node_id": null  // Optional: ID of the node that should be expanded next''' if include_node_suggestion else '') + '''
-}'''
-
         # Calculate the starting number based on whether tree is included
-        start_num = 2 if include_tree else 1
+        start_num = 2 if self.include_tree else 1
 
         # Build the prompt using f-strings instead of .format()
         base_prompt = f"""You are a feedback agent that guides an AI assistant's next action.
@@ -302,7 +244,7 @@ mentioned line numbers. What matters is that the right section of code is being 
 
 **Input Structure:**"""
 
-        if include_tree:
+        if self.include_tree:
             base_prompt += """
 1. Tree Visualization: ASCII representation of the entire seaxrch tree showing:
    - Node IDs and their relationships
@@ -345,8 +287,6 @@ mentioned line numbers. What matters is that the right section of code is being 
    - This can help guide the search towards promising branches
    - Leave as null if you have no strong preference
 
-**Required JSON Response Format:**""" + json_format + """
-
 Note: Focus on encouraging the agent to achieve new, novel solutions and avoid approaches that were tried in other branches. 
 **Always clearly articulate which of the Nodes/Actions you refer to are within the current node's trajectory (current trajectory), and which are not (alternative), and therefore have no effect on the current node's state.**"""
 
@@ -368,12 +308,12 @@ Note: Focus on encouraging the agent to achieve new, novel solutions and avoid a
    - Contextualize the feedback based on the entire tree structure and outcomes
 2. Suggest the next action for your branch"""
 
-        if include_node_suggestion:
+        if self.include_node_suggestion:
             tasks += """
 3. Having now reached a finished state, suggest which node to expand next by setting suggested_node_id in your response
    - This can help guide the search towards promising branches, and eventually reach improved solutions."""
 
-        base_prompt += f"\n**Your Task:**\n{tasks}\n\n**Required JSON Response Format:**" + json_format
+        base_prompt += f"\n**Your Task:**\n{tasks}"
 
         return base_prompt
 
@@ -381,13 +321,15 @@ Note: Focus on encouraging the agent to achieve new, novel solutions and avoid a
         self,
         node: Node,
         feedback: FeedbackResponse,
-        persist_path: str | None = None,
+        system_prompt: str | None = None,
+        messages: List | None = None,
+        raw_completion: str | None = None
     ) -> None:
         """Save raw prompts and responses to feedback file"""
         # Setup file path
-        if persist_path:
-            save_dir = os.path.dirname(persist_path)
-            base_name = os.path.splitext(os.path.basename(persist_path))[0]
+        if self.persist_path:
+            save_dir = os.path.dirname(self.persist_path)
+            base_name = os.path.splitext(os.path.basename(self.persist_path))[0]
             self.feedback_file = os.path.join(save_dir, f"{base_name}_feedback.txt")
             os.makedirs(save_dir, exist_ok=True)
 
@@ -400,13 +342,13 @@ Note: Focus on encouraging the agent to achieve new, novel solutions and avoid a
             "",
             "SYSTEM PROMPT",
             "-" * 80,
-            feedback.system_prompt if feedback.system_prompt else "No system prompt provided",
+            system_prompt if system_prompt else "No system prompt provided",
             "",
             "MESSAGES",
             "-" * 80,
         ]
 
-        for i, msg in enumerate(feedback.raw_messages, 1):
+        for i, msg in enumerate(messages, 1):
             feedback_entry.extend([
                 f"[Message {i} - {msg['role']}]",
                 msg['content'],
@@ -417,7 +359,7 @@ Note: Focus on encouraging the agent to achieve new, novel solutions and avoid a
         feedback_entry.extend([
             "COMPLETION",
             "-" * 80,
-            feedback.raw_completion if feedback.raw_completion else "No raw completion provided",
+            raw_completion if raw_completion else "No raw completion provided",
             "",
             "=" * 80,
             ""  # Final newline

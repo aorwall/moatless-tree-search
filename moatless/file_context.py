@@ -18,7 +18,6 @@ from moatless.codeblocks.codeblocks import (
     SpanType,
 )
 from moatless.codeblocks.module import Module
-from moatless.index import CodeIndex
 from moatless.repository import FileRepository
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment, TestResult
@@ -85,7 +84,6 @@ class ContextFile(BaseModel):
 
     _cache_valid: bool = PrivateAttr(False)
 
-    # Add is_new as a private attribute
     _is_new: bool = PrivateAttr(False)
 
     def __init__(
@@ -107,7 +105,6 @@ class ContextFile(BaseModel):
         super().__init__(file_path=file_path, **data)
         self._repo = repo
         self._initial_patch = initial_patch
-        # Set is_new based on whether the file exists in repo, default to False if no repo
         self._is_new = False if repo is None else not repo.file_exists(file_path)
 
     def _add_import_span(self):
@@ -277,6 +274,16 @@ class ContextFile(BaseModel):
     def _apply_patched_file(self, content: str, patched_file) -> str:
         """
         Applies a single patched file's hunks to the content.
+
+        Args:
+            content (str): The original content.
+            patched_file: The patched file object from the PatchSet.
+
+        Returns:
+            str: The patched content.
+
+        Raises:
+            Exception: If there is a context mismatch during patch application.
         """
         content_lines = content.splitlines(keepends=True)
         new_content_lines = []
@@ -642,6 +649,8 @@ class ContextFile(BaseModel):
     def add_span(
         self,
         span_id: str,
+        start_line: Optional[int] = None,
+        end_line: Optional[int] = None,
         tokens: Optional[int] = None,
         pinned: bool = False,
         add_extra: bool = True,
@@ -659,7 +668,7 @@ class ContextFile(BaseModel):
             span = self.module.find_span_by_id(span_id)
             if span:
                 self.spans.append(
-                    ContextSpan(span_id=span_id, tokens=tokens, pinned=pinned)
+                    ContextSpan(span_id=span_id, start_line=start_line, end_line=start_line, tokens=tokens, pinned=pinned)
                 )
                 if add_extra:
                     self._add_class_span(span)
@@ -713,19 +722,14 @@ class ContextFile(BaseModel):
         )
 
         added_spans = []
-        tokens = 0
         for block in blocks:
             if (
                 block.belongs_to_span
                 and block.belongs_to_span.span_id not in self.span_ids
             ):
                 added_spans.append(block.belongs_to_span.span_id)
-                self.add_span(block.belongs_to_span.span_id, add_extra=add_extra)
-                tokens += block.belongs_to_span.tokens
+                self.add_span(block.belongs_to_span.span_id, start_line=start_line, end_line=end_line, add_extra=add_extra)
 
-        logger.info(
-            f"Added {added_spans} with {tokens} tokens on lines {start_line} - {end_line} to {self.file_path} to context"
-        )
         return added_spans
 
     def lines_is_in_context(self, start_line: int, end_line: int) -> bool:
@@ -804,11 +808,11 @@ class ContextFile(BaseModel):
         """
         return self.patches
 
-    @property 
+    @property
     def is_new(self) -> bool:
         """
         Returns whether this file is newly created in the context.
-        
+
         Returns:
             bool: True if the file is new, False otherwise
         """
@@ -981,6 +985,10 @@ class FileContext(BaseModel):
 
     def exists(self, file_path: str):
         return file_path in self._files
+
+    @property
+    def has_runtime(self):
+        return bool(self._runtime)
 
     @property
     def files(self):
@@ -1510,6 +1518,8 @@ class FileContext(BaseModel):
         Returns:
             str: Summary string of test results
         """
+        from testbeds.schema import TestStatus
+
         all_results = []
         for test_file in self._test_files.values():
             all_results.extend(test_file.test_results)
@@ -1527,6 +1537,8 @@ class FileContext(BaseModel):
         Returns:
             str: Formatted string containing details of failed tests
         """
+        from testbeds.schema import TestStatus
+
         test_result_strings = []
         for test_file in self._test_files.values():
             for result in test_file.test_results:
@@ -1545,7 +1557,7 @@ class FileContext(BaseModel):
         
         return "\n".join(test_result_strings) if test_result_strings else ""
 
-    def get_test_status(self) -> Optional[TestStatus]:
+    def get_test_status(self) -> Optional["TestStatus"]:
         """
         Returns the overall test status based on all test results.
         Returns ERROR if any test has error status,
@@ -1583,27 +1595,26 @@ class FileContext(BaseModel):
         """
         Returns a list of file paths that have been edited in the context.
         A file is considered edited if it has changes (patch) but is not new.
-        
+
         Returns:
             List[str]: List of edited file paths
         """
         return [
-            file_path 
-            for file_path, file in self._files.items() 
+            file_path
+            for file_path, file in self._files.items()
             if file.was_edited and not file.is_new
         ]
 
     def get_created_files(self) -> List[str]:
         """
         Returns a list of file paths that have been newly created in the context.
-        
+
         Returns:
             List[str]: List of created file paths
         """
         return [
-            file_path 
-            for file_path, file in self._files.items() 
+            file_path
+            for file_path, file in self._files.items()
             if file.is_new
         ]
 
-    
