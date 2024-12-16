@@ -68,11 +68,15 @@ class CodeModificationMixin:
 
         return path, None
 
+
     def run_tests(
         self,
         file_path: str,
         file_context: FileContext,
     ) -> str:
+        if not file_context.has_runtime:
+            return ""
+
         if file_context.file_exists(file_path) and is_test(file_path):
             file_context.add_test_file(file_path)
         elif self._code_index:

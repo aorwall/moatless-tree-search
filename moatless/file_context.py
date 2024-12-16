@@ -987,6 +987,10 @@ class FileContext(BaseModel):
         return file_path in self._files
 
     @property
+    def has_runtime(self):
+        return bool(self._runtime)
+
+    @property
     def files(self):
         return list(self._files.values())
 

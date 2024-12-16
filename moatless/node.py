@@ -37,6 +37,13 @@ class ActionStep(BaseModel):
 
         return data
 
+    @classmethod
+    def model_validate(cls, obj: Any, **kwargs) -> "ActionArguments":
+        if isinstance(obj, dict):
+            obj = obj.copy()
+            obj["action"] = ActionArguments.model_validate(obj["action"])
+        return super().model_validate(obj, **kwargs)
+
 class FeedbackData(BaseModel):
     """Structured feedback data model"""
     analysis: str = Field(..., description="Analysis of the task and alternative branch attempts")
@@ -413,7 +420,7 @@ class Node(BaseModel):
 
         if node_data.get("action_steps"):
             node_data["action_steps"] = [
-                ActionStep.model_validate(step) for step in node_data["action_steps"]
+                ActionStep.model_validate(step_data) for step_data in node_data["action_steps"]
             ]
 
         if node_data.get("file_context"):
