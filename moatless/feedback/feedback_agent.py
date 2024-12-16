@@ -18,7 +18,8 @@ from moatless.utils.parse import parse_node_id
 logger = logging.getLogger(__name__)
 
 
-class FeedbackResponse(StructuredOutput):
+class FeedbackContent(StructuredOutput):
+    """The core feedback content returned by the LLM"""
     analysis: str = Field(
         ..., description="Analysis of the task and alternative branch attempts"
     )
@@ -26,10 +27,19 @@ class FeedbackResponse(StructuredOutput):
     suggested_node_id: Optional[int] = Field(
         None, description="ID of the node that should be expanded next (optional)"
     )
+
+
+class FeedbackResponse(StructuredOutput):
+    """Complete feedback response including metadata"""
+    content: FeedbackContent
     raw_messages: List[Dict] = Field(default_factory=list, description="Raw messages used to generate feedback")
     system_prompt: str = Field(None, description="System prompt used to generate feedback")
     raw_completion: str = Field(None, description="Raw completion response")
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat(), description="When feedback was generated")
+
+    @classmethod
+    def name(cls) -> str:
+        return "feedback_response"
 
 
 class FeedbackAgent(FeedbackGenerator):
@@ -94,6 +104,7 @@ class FeedbackAgent(FeedbackGenerator):
             completion_content, completion_response = self.completion_model.create_completion(
                 messages=messages,
                 system_prompt=system_prompt,
+                response_model=FeedbackResponse
             )
             
             logger.debug(f"Raw completion content: {completion_content}")
@@ -107,19 +118,26 @@ class FeedbackAgent(FeedbackGenerator):
                     json_str = json_match.group(0)
                     feedback_data = json.loads(json_str)
                     
-                    # Only try to parse node_id if it's requested
+                    # Parse the LLM's structured output
                     if include_node_suggestion:
                         if 'suggested_node_id' not in feedback_data:
                             suggested_node = parse_node_id(completion_content)
                             if suggested_node is not None:
                                 feedback_data['suggested_node_id'] = suggested_node
-                        else:
-                            # Remove suggested_node_id if present but not requested
-                            feedback_data.pop('suggested_node_id', None)
+                    else:
+                        feedback_data.pop('suggested_node_id', None)
                     
-                    feedback_response = FeedbackResponse.model_validate(feedback_data)
+                    feedback_content = FeedbackContent.model_validate(feedback_data)
                     
-                    # Create a proper Completion object
+                    # Create the complete response with metadata
+                    feedback_response = FeedbackResponse(
+                        content=feedback_content,
+                        raw_messages=[m.model_dump() for m in messages],
+                        system_prompt=system_prompt,
+                        raw_completion=completion_content
+                    )
+                    
+                    # Create a proper Completion object for the node
                     completion = Completion(
                         model=self.completion_model.model,
                         input=[m.model_dump() for m in messages],
@@ -137,13 +155,10 @@ class FeedbackAgent(FeedbackGenerator):
                         self.save_feedback(
                             node=node,
                             feedback=feedback_response,
-                            persist_path=persist_path,
-                            system_prompt=system_prompt,
-                            messages=messages,
-                            raw_completion=completion_content
+                            persist_path=persist_path
                         )
                     
-                    return feedback_response.analysis
+                    return feedback_content.analysis
                     
                 else:
                     logger.error("No JSON structure found in completion response")
@@ -367,9 +382,6 @@ Note: Focus on encouraging the agent to achieve new, novel solutions and avoid a
         node: Node,
         feedback: FeedbackResponse,
         persist_path: str | None = None,
-        system_prompt: str | None = None,
-        messages: List[Message] | None = None,
-        raw_completion: str | None = None
     ) -> None:
         """Save raw prompts and responses to feedback file"""
         # Setup file path
@@ -388,25 +400,24 @@ Note: Focus on encouraging the agent to achieve new, novel solutions and avoid a
             "",
             "SYSTEM PROMPT",
             "-" * 80,
-            system_prompt if system_prompt else "No system prompt provided",
+            feedback.system_prompt if feedback.system_prompt else "No system prompt provided",
             "",
             "MESSAGES",
             "-" * 80,
         ]
 
-        if messages:
-            for i, msg in enumerate(messages, 1):
-                feedback_entry.extend([
-                    f"[Message {i} - {msg.role}]",
-                    msg.content,
-                    "-" * 40,
-                    ""
-                ])
+        for i, msg in enumerate(feedback.raw_messages, 1):
+            feedback_entry.extend([
+                f"[Message {i} - {msg['role']}]",
+                msg['content'],
+                "-" * 40,
+                ""
+            ])
 
         feedback_entry.extend([
             "COMPLETION",
             "-" * 80,
-            raw_completion if raw_completion else "No raw completion provided",
+            feedback.raw_completion if feedback.raw_completion else "No raw completion provided",
             "",
             "=" * 80,
             ""  # Final newline

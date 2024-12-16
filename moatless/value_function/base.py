@@ -14,6 +14,23 @@ from moatless.value_function.model import Reward
 
 logger = logging.getLogger(__name__)
 
+# Constants for reward configuration
+class RewardConfig:
+    MAX_RETRIES: int = 3
+    DEFAULT_ERROR_VALUE: int = -100
+    AUTOMATIC_REJECT_VALUE: int = -100
+    
+    # System prompt additions
+    RESPONSE_FORMAT_INSTRUCTION: str = """
+IMPORTANT: Respond ONLY with a valid JSON object in exactly this format:
+{
+    "value": <integer between -100 and 100>,
+    "explanation": "<string explaining your reasoning>",
+    "feedback": "<string with alternative suggestions>"
+}
+
+Do not include any other text, schema definitions, or formatting in your response.
+"""
 
 class ValueFunction(BaseModel):
     completion_model: CompletionModel = Field(
@@ -39,93 +56,134 @@ class ValueFunction(BaseModel):
     def get_reward(self, node: Node) -> Tuple[Reward, Optional[Completion]]:
         # First get coding value function result if enabled
         coding_reward = None
-        if self.coding_value_function:
-            coding_reward, _ = self.coding_value_function.get_reward(node)
+        try:
+            if self.coding_value_function:
+                coding_reward, _ = self.coding_value_function.get_reward(node)
+        except Exception as e:
+            logger.warning(f"Failed to get coding reward: {e}")
             
         messages = self.message_generator.generate(node)
         if messages is None:
             messages = []  # Ensure we have a valid list
         
-        last_message = ""
-
-        # Handle automatic reward cases by adding them to the message
-        if node.observation.expect_correction and self.correction_award is not None:
-            last_message += "# Automatic Reward Assessment\n"
-            last_message += f"Action expects a correction. Suggested value: {self.correction_award}\n\n"
-
-        if node.action.name in ["Reject", "Error"]:
-            last_message += "# Automatic Reward Assessment\n"
-            last_message += f"{node.action.name} action detected. Suggested value: -100\n\n"
-
-        # Format the action section
-        if node.action.name == "Finish":
-            last_message += "# Completion Reasoning\n"
-            last_message += "<reasoning_for_completion>\n"
-            last_message += node.action.finish_reason
-            last_message += "\n</reasoning_for_completion>\n\n"
-        else:
-            last_message += "# Last Executed Action\n"
-            last_message += "The following action was executed and its output is the subject of your evaluation:\n\n"
-            last_message += "<executed_action>\n"
-            last_message += f"Action: {node.action.name}\n"
-            last_message += node.action.to_prompt()
-            last_message += "\n## Output\n"
-            last_message += node.observation.message
-            last_message += "\n</executed_action>\n\n"
-
-        # Format the file context section
-        if not node.parent.file_context.is_empty():
-            last_message += "# File Context\n"
-            last_message += "The following code context was available when executing the action:\n\n"
-            last_message += "<file_context>\n"
-            last_message += node.file_context.create_prompt(
-                show_span_ids=False,
-                show_line_numbers=True,
-                exclude_comments=False,
-                show_outcommented_code=True,
-                outcomment_code_comment="... rest of the code",
-            )
-            last_message += "\n</file_context>\n\n"
-
-        # Format the git patch section
-        full_patch = node.parent.file_context.generate_git_patch()
-        if full_patch.strip():
-            last_message += "# Previous Changes\n"
-            last_message += "Git diff of changes made before this action:\n\n"
-            last_message += "<git_patch>\n"
-            last_message += full_patch
-            last_message += "\n</git_patch>\n\n"
-
-        # Format the search tree section
-        if self.include_search_tree:
-            last_message += "# Search Tree State\n"
-            last_message += "<search_tree>\n"
-            ascii_tree = generate_ascii_tree(
-                node.get_root(),
-                include_explanation=True,
-                use_color=False,
-                include_diffs=True,
-                include_action_details=False,
-                include_file_context=False,
-            )
-            last_message += ascii_tree
-            last_message += "\n</search_tree>\n\n"
-
-        # Ensure we append the message only if we have content
-        if last_message:
-            messages.append(UserMessage(content=last_message))
-        
-        system_prompt = self._create_system_prompt(node, coding_reward)
+        system_prompt = self._create_system_prompt(node)
         
         # Add defensive check
         if not messages:
             messages = [UserMessage(content="No message history available")]
+
+        # Add coding evaluation as a user message
+        if coding_reward:
+            coding_context = (
+                f"<coding_assessment>\n"
+                f"Code-specific evaluation:\n"
+                f"Value: {coding_reward.value}\n"
+                f"Explanation: {coding_reward.explanation}\n"
+                f"</coding_assessment>"
+            )
+            messages.append(UserMessage(content=coding_context))
+
+        # Try up to 3 times to get a valid reward
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                reward, completion = self.completion_model.create_completion(
+                    messages=messages, 
+                    system_prompt=system_prompt + "\nIMPORTANT: Respond ONLY with a valid JSON object containing 'value', 'explanation', and 'feedback' fields.", 
+                    response_model=Reward
+                )
+                
+                if reward is not None:
+                    # Validate the reward using Pydantic
+                    try:
+                        validated_reward = Reward(
+                            value=reward.value,
+                            explanation=reward.explanation,
+                            feedback=reward.feedback
+                        )
+                        return validated_reward, completion
+                    except ValueError as ve:
+                        logger.warning(f"Invalid reward format on attempt {attempt + 1}: {ve}")
+                        continue
+                
+                logger.warning(
+                    f"Attempt {attempt + 1}/{max_retries}: Reward generation returned None"
+                )
+                
+            except Exception as e:
+                logger.error(f"Error during reward generation (attempt {attempt + 1}): {e}")
         
-        return self.completion_model.create_completion(
-            messages=messages, 
-            system_prompt=system_prompt, 
-            response_model=Reward
-        )
+        # If all retries failed, return a fallback reward
+        error_msg = "Failed to generate valid reward after multiple attempts"
+        logger.error(error_msg)
+        return Reward.create_fallback(error_msg), None
+
+    def _get_coding_reward(self, node: Node) -> Optional[Reward]:
+        """Attempt to get coding reward if coding value function is enabled."""
+        if not self.coding_value_function:
+            return None
+        
+        try:
+            reward, _ = self.coding_value_function.get_reward(node)
+            return reward
+        except Exception as e:
+            logger.warning(f"Failed to get coding reward: {e}")
+            return None
+
+    def _prepare_messages(self, node: Node) -> List[Message]:
+        """Prepare the message list for reward generation."""
+        messages = self.message_generator.generate(node) or []
+        
+        if not messages:
+            messages = [UserMessage(content="No message history available")]
+        
+        return messages
+
+    def _attempt_reward_generation(
+        self, 
+        messages: List[Message], 
+        system_prompt: str,
+        attempt: int
+    ) -> Tuple[Optional[Reward], Optional[Completion]]:
+        """
+        Attempt to generate a reward with validation.
+        
+        Returns:
+            Tuple of (validated reward or None, completion or None)
+        """
+        try:
+            reward, completion = self.completion_model.create_completion(
+                messages=messages,
+                system_prompt=system_prompt + RewardConfig.RESPONSE_FORMAT_INSTRUCTION,
+                response_model=Reward
+            )
+            
+            if reward is None:
+                logger.warning(
+                    f"Attempt {attempt + 1}/{RewardConfig.MAX_RETRIES}: "
+                    "Reward generation returned None"
+                )
+                return None, None
+            
+            # Validate the reward
+            try:
+                validated_reward = Reward(
+                    value=reward.value,
+                    explanation=reward.explanation,
+                    feedback=reward.feedback
+                )
+                return validated_reward, completion
+            except ValueError as ve:
+                logger.warning(
+                    f"Invalid reward format on attempt {attempt + 1}: {ve}"
+                )
+                return None, None
+            
+        except Exception as e:
+            logger.error(
+                f"Error during reward generation (attempt {attempt + 1}): {e}"
+            )
+            return None, None
 
     def _create_system_prompt(self, node: Node, coding_reward: Optional[Reward] = None) -> str:
         base_prompt = self._build_system_prompt(node)
@@ -144,7 +202,7 @@ Evaluation Guidelines:
 2. Either reinforce its reasoning or explain why you disagree
 3. Provide your own comprehensive evaluation
 </coding_assessment>
-""".format(coding_reward=coding_reward)
+"""
 
         if self.include_search_tree:
             base_prompt += """
@@ -239,7 +297,7 @@ Evaluation Guidelines:
 
         evaluation_criteria_text = ValueFunction._format_evaluation_criteria(
             criteria_list
-        )
+    )
         reward_scale_text = ValueFunction._format_reward_scale(
             reward_scale_list, min_value, max_value
         )
@@ -336,13 +394,24 @@ Evaluation Guidelines:
 
     def _combine_rewards(self, reward1: Reward, reward2: Reward) -> Reward:
         """Combine two rewards by averaging their values and concatenating explanations."""
-        combined_value = (reward1.value + reward2.value) // 2  # Integer division
-        combined_explanation = (
-            "Combined Assessment:\n"
-            f"1. General Assessment: {reward1.explanation}\n"
-            f"2. Code Quality Assessment: {reward2.explanation}"
-        )
-        return Reward(
-            value=combined_value,
-            explanation=combined_explanation
-        )
+        try:
+            combined_value = (reward1.value + reward2.value) // 2  # Integer division
+            combined_explanation = (
+                "Combined Assessment:\n"
+                f"1. General Assessment: {reward1.explanation or 'No explanation provided'}\n"
+                f"2. Code Quality Assessment: {reward2.explanation or 'No explanation provided'}"
+            )
+            combined_feedback = (
+                "Combined Feedback:\n"
+                f"1. {reward1.feedback or 'No feedback provided'}\n"
+                f"2. {reward2.feedback or 'No feedback provided'}"
+            )
+            
+            return Reward(
+                value=combined_value,
+                explanation=combined_explanation,
+                feedback=combined_feedback
+            )
+        except Exception as e:
+            logger.error(f"Error combining rewards: {e}")
+            return Reward.create_fallback("Error while combining rewards")
