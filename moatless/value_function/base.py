@@ -276,7 +276,13 @@ Evaluation Guidelines:
         return ChatCompletionUserMessage(role="user", content=message)
 
     def _build_system_prompt(self, node: Node):
+        if node.action is None:
+            raise ValueError("Node action is not set. This indicates an issue with action selection or completion parsing.")
+        
         action = Action.get_action_by_args_class(type(node.action))
+        if action is None:
+            raise ValueError(f"Could not find action for node {node.node_id}")
+        
         trajectory_length = len(node.get_trajectory())
 
         base_prompt = action.get_value_function_prompt()

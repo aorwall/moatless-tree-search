@@ -1,6 +1,6 @@
 import logging
 from json import JSONDecodeError
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import json
 import os
 from datetime import datetime
@@ -21,8 +21,9 @@ logger = logging.getLogger(__name__)
 
 
 class FeedbackResponse(StructuredOutput):
-    """To provide feedback """
-
+    """Schema for feedback response"""
+    name: str = "provide_feedback"
+    
     analysis: str = Field(
         ..., description="Brief analysis of parent state and lessons from alternative attempts"
     )
@@ -30,6 +31,23 @@ class FeedbackResponse(StructuredOutput):
     suggested_node_id: Optional[int] = Field(
         None, description="ID of the node that should be expanded next (optional)"
     )
+
+    @classmethod
+    def anthropic_schema(cls) -> Dict[str, Any]:
+        """Provide schema in format expected by Anthropic's tool calling"""
+        schema = cls.model_json_schema()
+        return {
+            "name": "provide_feedback",
+            "description": schema.get("description", "Provide feedback on the current state"),
+            "parameters": schema
+        }
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert Message objects to dictionaries"""
+        return {
+            "role": self.role if hasattr(self, "role") else "assistant",
+            "content": self.content if hasattr(self, "content") else str(self)
+        }
 
 class FeedbackAgent(FeedbackGenerator):
     completion_model: CompletionModel = Field(..., description="The completion model to use")

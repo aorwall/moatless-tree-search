@@ -1,5 +1,6 @@
 from typing import Optional, Union, Dict, Any, List
 from pydantic import Field, field_validator, BaseModel
+from moatless.completion.model import StructuredOutput
 import json
 import logging
 import re
@@ -7,8 +8,10 @@ from decimal import Decimal, InvalidOperation
 
 logger = logging.getLogger(__name__)
 
-class Reward(BaseModel):
+class Reward(StructuredOutput):
     """A structured output for providing reward values and feedback for actions."""
+    
+    name = "reward"  # Required by StructuredOutput for anthropic_schema()
     
     value: int = Field(
         ...,

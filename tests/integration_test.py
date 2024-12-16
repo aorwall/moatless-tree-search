@@ -1,4 +1,6 @@
 import os
+import re
+import logging
 
 import pytest
 from dotenv import load_dotenv
@@ -24,15 +26,13 @@ pytest.mark.llm_integration = pytest.mark.skipif(
     reason="need --run-llm-integration option to run tests that call LLMs",
 )
 
-
 @pytest.mark.parametrize(
     "model",
     [
         # "claude-3-5-sonnet-20241022",
-        # "claude-3-5-haiku-20241022",
-        # "anthropic.claude-3-5-sonnet-20241022-v2:0",
-        "anthropic.claude-3-5-haiku-20241022-v1:0",
         # "claude-3-5-sonnet-20241022",
+        # "claude-3-opus-20240229",
+        "claude-3-5-haiku-latest",
         # "azure/gpt-4o-mini",
         # "gpt-4o-2024-08-06",
         # "deepseek/deepseek-chat"

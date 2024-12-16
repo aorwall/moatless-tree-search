@@ -24,7 +24,7 @@ django__django-14155 \
 scikit-learn__scikit-learn-14983 \
 """
 
-MODEL="claude-3-5-sonnet-20241022"
+MODEL="claude-3-5-haiku-latest"
 CWD=$(pwd)
 export PYTHONPATH="${CWD}:${PYTHONPATH}"
 
