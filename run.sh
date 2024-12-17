@@ -24,7 +24,7 @@ django__django-14155 \
 scikit-learn__scikit-learn-14983 \
 """
 
-MODEL="openai/Qwen/Qwen2.5-Coder-32B-Instruct"
+MODEL="claude-3-5-haiku-latest"
 CWD=$(pwd)
 export PYTHONPATH="${CWD}:${PYTHONPATH}"
 
@@ -43,4 +43,4 @@ python ./moatless/benchmark/run_evaluation.py \
         --feedback_type agent \
         --use_testbed \
         --overwrite \
-        --split sampled_50_instances
+        --instance_ids astropy__astropy-14365

@@ -1,6 +1,6 @@
 import logging
 from json import JSONDecodeError
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import json
 import os
 from datetime import datetime
@@ -21,8 +21,9 @@ logger = logging.getLogger(__name__)
 
 
 class FeedbackResponse(StructuredOutput):
-    """To provide feedback """
-
+    """Schema for feedback response"""
+    name: str = "provide_feedback"
+    
     analysis: str = Field(
         ..., description="Brief analysis of parent state and lessons from alternative attempts"
     )
@@ -30,6 +31,23 @@ class FeedbackResponse(StructuredOutput):
     suggested_node_id: Optional[int] = Field(
         None, description="ID of the node that should be expanded next (optional)"
     )
+
+    @classmethod
+    def anthropic_schema(cls) -> Dict[str, Any]:
+        """Provide schema in format expected by Anthropic's tool calling"""
+        schema = cls.model_json_schema()
+        return {
+            "name": "provide_feedback",
+            "description": schema.get("description", "Provide feedback on the current state"),
+            "parameters": schema
+        }
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert Message objects to dictionaries"""
+        return {
+            "role": self.role if hasattr(self, "role") else "assistant",
+            "content": self.content if hasattr(self, "content") else str(self)
+        }
 
 class FeedbackAgent(FeedbackGenerator):
     completion_model: CompletionModel = Field(..., description="The completion model to use")
@@ -72,12 +90,6 @@ class FeedbackAgent(FeedbackGenerator):
         # Only get siblings that have been run (have actions set)
         sibling_nodes = [s for s in node.get_sibling_nodes() if s.action is not None]
         
-        # if not sibling_nodes:
-        #     logger.info(
-        #         f"Node {node.node_id} has no executed sibling nodes, skipping feedback generation"
-        #     )
-        #     return None
-
         messages = self._create_analysis_messages(
             node, 
             sibling_nodes,
@@ -93,10 +105,15 @@ class FeedbackAgent(FeedbackGenerator):
                 response_model=FeedbackResponse
             )
 
+            # Store the completion in the node
             node.completions["feedback"] = completion_response.completion
 
             logger.debug(f"Raw completion content: {completion_response.completion}")
             feedback_response: FeedbackResponse = completion_response.structured_output
+
+            # If node suggestions are disabled, set to None
+            if not self.include_node_suggestion:
+                feedback_response.suggested_node_id = None
 
             feedback_message = (
                 "System Analysis: I've analyzed your previous actions and alternative attempts. "
@@ -109,6 +126,20 @@ class FeedbackAgent(FeedbackGenerator):
                 "approaches to craft an improved solution that avoids known pitfalls and "
                 "combines effective strategies."
             )
+
+            # Save feedback to file if requested
+            if self.persist_path:
+                self.save_feedback(
+                    node=node,
+                    feedback=FeedbackResponse(
+                        analysis=feedback_response.analysis,
+                        feedback=feedback_response.feedback,
+                        suggested_node_id=feedback_response.suggested_node_id
+                    ),
+                    system_prompt=system_prompt,
+                    messages=messages,
+                    raw_completion=completion_response.completion
+                )
 
             return FeedbackData(
                 analysis=feedback_response.analysis,
@@ -335,14 +366,13 @@ Note: Focus on encouraging the agent to achieve new, novel solutions and avoid a
             "-" * 80,
         ]
 
-        if messages:
-            for i, msg in enumerate(messages, 1):
-                feedback_entry.extend([
-                    f"[Message {i} - {msg.role}]",
-                    msg.content,
-                    "-" * 40,
-                    ""
-                ])
+        for i, msg in enumerate(messages, 1):
+            feedback_entry.extend([
+                f"[Message {i} - {msg['role']}]",
+                msg['content'],
+                "-" * 40,
+                ""
+            ])
 
         feedback_entry.extend([
             "COMPLETION",

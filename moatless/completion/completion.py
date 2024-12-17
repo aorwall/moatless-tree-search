@@ -24,7 +24,7 @@ from litellm.exceptions import (
     AuthenticationError,
     APIError,
 )
-from litellm.llms.prompt_templates.factory import anthropic_messages_pt
+from litellm.litellm_core_utils.prompt_templates.factory import anthropic_messages_pt
 from litellm.types.llms.anthropic import AnthropicMessagesUserMessageParam, AnthopicMessagesAssistantMessageParam
 from litellm.types.utils import ModelResponse
 from openai import AzureOpenAI, OpenAI, LengthFinishReasonError
