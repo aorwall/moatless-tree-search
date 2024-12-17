@@ -35,11 +35,28 @@ class FeedbackResponse(StructuredOutput):
     @classmethod
     def anthropic_schema(cls) -> Dict[str, Any]:
         """Provide schema in format expected by Anthropic's tool calling"""
-        schema = cls.model_json_schema()
         return {
+            "type": "custom",
             "name": "provide_feedback",
-            "description": schema.get("description", "Provide feedback on the current state"),
-            "parameters": schema
+            "description": "Provide feedback on the current state",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "analysis": {
+                        "type": "string",
+                        "description": "Brief analysis of parent state and lessons from alternative attempts"
+                    },
+                    "feedback": {
+                        "type": "string", 
+                        "description": "Clear, actionable guidance for your next action"
+                    },
+                    "suggested_node_id": {
+                        "type": ["integer", "null"],
+                        "description": "ID of the node that should be expanded next (optional)"
+                    }
+                },
+                "required": ["analysis", "feedback"]
+            }
         }
 
     def to_dict(self) -> Dict[str, Any]:

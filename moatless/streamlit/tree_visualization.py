@@ -90,11 +90,15 @@ def build_graph(
         else:
             logger.info(f"Processing root node {node_id}")
 
+        # Initialize node attributes
+        node_attrs = {}
+
+        # Sanitize node attributes to avoid Graphviz syntax errors
         if node.action:
             if node.action.name == "str_replace_editor":
-                action_name = node.action.command
+                action_name = str(node.action.command).replace('"', '\\"').replace('\\', '\\\\')
             else:
-                action_name = node.action.name
+                action_name = str(node.action.name).replace('"', '\\"').replace('\\', '\\\\')
         else:
             action_name = ""
 
@@ -114,31 +118,45 @@ def build_graph(
                 if failed_test_count > 0:
                     warning = f"{failed_test_count} failed tests"
             if "fail_reason" in node.observation.properties:
-                error = f"Fail: {node.observation.properties['fail_reason']}"
+                error = str(node.observation.properties["fail_reason"]).replace('"', '\\"').replace('\\', '\\\\')
 
         if node.observation and node.observation.expect_correction:
             warning += f"\nExpected correction"
 
-        resolved = is_resolved(node.node_id)
+        resolved = is_resolved(node.node_id) if eval_result else None
+
+        # Add feedback data to node attributes if it exists
+        feedback_data = getattr(node, 'feedback_data', None)
+        if feedback_data:
+            node_attrs.update({
+                "feedback_analysis": str(feedback_data.analysis).replace('"', '\\"').replace('\\', '\\\\') if feedback_data.analysis else "",
+                "feedback_text": str(feedback_data.feedback).replace('"', '\\"').replace('\\', '\\\\') if feedback_data.feedback else "",
+                "feedback_suggested_node": feedback_data.suggested_node_id
+            })
 
         # Only add the node if it doesn't exist
         if not G.has_node(node_id):
-            G.add_node(
-                node_id,
-                name=action_name,
-                type="node",
-                visits=node.visits or 1,
-                duplicate=node.is_duplicate,
-                avg_reward=node.value / node.visits if node.visits else 0,
-                reward=node.reward.value if node.reward else 0,
-                warning=warning,
-                error=error,
-                resolved=resolved,
-                context_status=context_stats.status if context_stats else None,
-                patch_status=context_stats.patch_status if context_stats else None,
-                explanation=node.reward.explanation if node.reward else "",
-                is_linear=is_linear,
-            )
+            # Add base attributes
+            node_attrs.update({
+                "name": action_name,
+                "type": "node",
+                "visits": node.visits or 1,
+                "duplicate": node.is_duplicate,
+                "avg_reward": node.value / node.visits if node.visits else 0,
+                "reward": node.reward.value if node.reward else 0,
+                "warning": warning.replace('"', '\\"').replace('\\', '\\\\'),
+                "error": error,
+                "resolved": resolved,
+                "context_status": context_stats.status if context_stats else None,
+                "patch_status": context_stats.patch_status if context_stats else None,
+                "explanation": str(node.reward.explanation).replace('"', '\\"').replace('\\', '\\\\') if node.reward else "",
+                "is_linear": is_linear,
+            })
+            
+            # Remove None values to avoid Graphviz issues
+            node_attrs = {k: v for k, v in node_attrs.items() if v is not None}
+            
+            G.add_node(node_id, **node_attrs)
 
         # Add edge from parent if provided
         if parent_id:
@@ -160,15 +178,12 @@ def build_graph(
         if len(in_edges) > 1:
             logger.error(f"Node {node} has multiple parents: {in_edges}")
     
+    # Use simpler graph attributes to avoid syntax errors
     G.graph["graph"] = {
         "rankdir": "TB",
-        "ranksep": "3.0",
-        "nodesep": "2.0",
-        "splines": "polyline",
-        "ordering": "out",
-        "concentrate": "true",
-        "overlap": "false",
-        "pack": "true",
+        "ranksep": "1.5",
+        "nodesep": "1.0",
+        "splines": "ortho",  # Changed from polyline for simpler layout
     }
     
     return G
@@ -712,13 +727,10 @@ def update_visualization(
                     if selected_node:  # Only process tabs if we have a valid node
                         # Summary tab is always first
                         with tab_contents[0]:  # Summary tab
-                            # Show feedback response if it exists
-                            if "feedback" in selected_node.completions:
-                                feedback_completion = selected_node.completions["feedback"]
-                                if hasattr(feedback_completion, 'response'):
-                                    response_data = feedback_completion.response
-                                    if hasattr(response_data, 'feedback'):
-                                        st.info(response_data.feedback)
+                            # Show feedback if it exists
+                            if selected_node and selected_node.feedback_data:
+                                st.subheader("Feedback")
+                                st.success(selected_node.feedback_data.feedback)
 
                             # Show reward information
                             if selected_node.reward:
@@ -809,7 +821,7 @@ def update_visualization(
                                     response_data = completion_data.get('response', {})
                                     
                                     # Display feedback summary
-                                    st.subheader("Feedback Summary")
+                                    st.subheader("Feedback")
                                     st.markdown("**Analysis**")
                                     st.info(selected_node.feedback_data.analysis)
                                     st.markdown("**Feedback**")
