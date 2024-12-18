@@ -168,10 +168,9 @@ class CompletionModel(BaseModel):
                     completion_messages, system_prompt, response_model
                 )
             else:
-                raise RuntimeError("JSON format not supported now, use LLMResponseFormat.REACT")
-                # action_args, completion_response = self._litellm_completion(
-                #    completion_messages, system_prompt, response_model
-                # )
+                return self._litellm_completion(
+                   completion_messages, system_prompt, response_model
+                )
         except CompletionError as e:
             raise e
         except Exception as e:
@@ -194,15 +193,6 @@ class CompletionModel(BaseModel):
                 messages=completion_messages,
                 last_completion=completion_response,
             ) from e
-
-        if completion_response:
-            completion = Completion.from_llm_completion(
-                input_messages=completion_messages,
-                completion_response=completion_response,
-                model=self.model,
-            )
-        else:
-            completion = None
 
         if (
             "stop_reason" in completion.response
@@ -409,8 +399,6 @@ Make sure to return an instance of the JSON, not the schema itself.""")
                     metadata=self.metadata or {},
                 )
 
-                logger.info(json.dumps(messages, indent=2))
-                logger.info(json.dumps(completion_response.model_dump(), indent=2))
                 if not completion_response or not completion_response.choices:
                     raise CompletionRuntimeError("No completion response or choices returned")
 
@@ -428,14 +416,17 @@ Make sure to return an instance of the JSON, not the schema itself.""")
 
                 messages.append({"role": "assistant", "content": assistant_message})
 
-                response = response_model.from_response(
-                    completion_response, mode=instructor.Mode.JSON
+                response = response_model.model_validate_json(assistant_message)
+
+                completion = Completion.from_llm_completion(
+                    input_messages=messages,
+                    completion_response=completion_response,
+                    model=self.model,
                 )
-
                 if hasattr(response, "action"):
-                    return response.action, completion_response
+                    return CompletionResponse.create(output=response.action, completion=completion)
 
-                return response, completion_response
+                return CompletionResponse.create(output=response, completion=completion)
 
             except (ValidationError, json.JSONDecodeError) as e:
                 logger.warning(
