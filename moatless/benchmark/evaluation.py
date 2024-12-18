@@ -652,11 +652,9 @@ class Evaluation:
                             repository = create_repository(
                                 instance, repo_base_dir=self.repo_base_dir
                             )
-                            from testbeds.sdk import TestbedSDK
                             from moatless.runtime.testbed import TestbedEnvironment
 
                             runtime = TestbedEnvironment(
-                                testbed_sdk=TestbedSDK(),
                                 repository=repository,
                                 instance=instance,
                                 log_dir=log_dir,
@@ -674,7 +672,7 @@ class Evaluation:
                                 )
                                 continue
 
-                            patch = leaf_node.file_context.generate_git_patch()
+                            patch = leaf_node.file_context.generate_git_patch(ignore_tests=True)
                             if patch and patch.strip():
                                 patch_hash = create_sha256_hash(patch)
 

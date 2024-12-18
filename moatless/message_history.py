@@ -175,7 +175,7 @@ class MessageHistoryGenerator(BaseModel):
             messages.append(ChatCompletionAssistantMessage(role="assistant", content=assistant_content))
             messages.append(ChatCompletionUserMessage(role="user", content=f"Observation: {observation}"))
 
-        tokens = count_tokens("".join([m.content for m in messages if m.content is not None]))
+        tokens = count_tokens("".join([m["content"] for m in messages if m.get("content")]))
         logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
         return messages
 

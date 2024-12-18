@@ -205,18 +205,27 @@ class StructuredOutput(BaseModel):
     def openai_schema(cls, thoughts_in_action: bool = False) -> dict[str, Any]:
         """
         Return the schema in the format of OpenAI's schema as jsonschema
-
-        Note:
-            Its important to add a docstring to describe how to best use this class, it will be included in the description attribute and be part of the prompt.
-
-        Returns:
-            model_json_schema (dict): A dictionary in the format of OpenAI's schema as jsonschema
         """
         schema = cls.model_json_schema()
         docstring = parse(cls.__doc__ or "")
         parameters = {
             k: v for k, v in schema.items() if k not in ("title", "description")
         }
+
+        def remove_defaults(obj: dict) -> None:
+            """Recursively remove default fields from a schema object"""
+            if isinstance(obj, dict):
+                if "default" in obj:
+                    del obj["default"]
+                # Recurse into nested properties
+                for value in obj.values():
+                    remove_defaults(value)
+            elif isinstance(obj, list):
+                for item in obj:
+                    remove_defaults(item)
+
+        # Remove default field from all properties recursively
+        remove_defaults(parameters)
 
         for param in docstring.params:
             if (name := param.arg_name) in parameters["properties"] and (

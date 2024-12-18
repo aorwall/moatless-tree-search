@@ -67,10 +67,9 @@ def build_graph(
     G = nx.DiGraph()
     
     # Determine if this is a linear trajectory
-    is_linear = getattr(root_node, "max_expansions", None) == 1
-    
+
     # Add debug logging
-    logger.info(f"Building graph from root node {root_node.node_id} (linear: {is_linear})")
+    logger.info(f"Building graph from root node {root_node.node_id})")
 
     def is_resolved(node_id):
         if not eval_result:
@@ -137,7 +136,6 @@ def build_graph(
                 context_status=context_stats.status if context_stats else None,
                 patch_status=context_stats.patch_status if context_stats else None,
                 explanation=node.reward.explanation if node.reward else "",
-                is_linear=is_linear,
             )
 
         # Add edge from parent if provided
@@ -510,8 +508,8 @@ def update_visualization(
             search_tree.root, st.session_state.max_node_id
         )
         
-        is_linear = force_linear if force_linear is not None else getattr(search_tree.root, "max_expansions", None) == 1
-        
+        is_linear = force_linear or getattr(search_tree.root, "max_expansions", 1) == 1
+
         if is_linear:
             # Use the new table visualization for linear trajectories
             nodes = search_tree.root.get_all_nodes()
