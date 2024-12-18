@@ -168,9 +168,10 @@ class CompletionModel(BaseModel):
                     completion_messages, system_prompt, response_model
                 )
             else:
-                action_args, completion_response = self._litellm_completion(
-                    completion_messages, system_prompt, response_model
-                )
+                raise RuntimeError("JSON format not supported now, use LLMResponseFormat.REACT")
+                # action_args, completion_response = self._litellm_completion(
+                #    completion_messages, system_prompt, response_model
+                # )
         except CompletionError as e:
             raise e
         except Exception as e:

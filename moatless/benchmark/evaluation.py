@@ -158,8 +158,8 @@ class TreeSearchSettings(BaseModel):
         description="Type of feedback generator to use ('reward', 'agent', or None).",
     )
 
-    agent_message_history_type: MessageHistoryType = Field(
-        MessageHistoryType.MESSAGES,
+    agent_message_history_type: Optional[MessageHistoryType] = Field(
+        None,
         description="Determines how message history is generated for the agent.",
     )
 
