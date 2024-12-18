@@ -177,7 +177,7 @@ class CompletionModel(BaseModel):
         except Exception as e:
             if isinstance(e, APIError):
                 logger.exception(
-                    f"Request failed.{e.litellm_debug_info}. Input messages: {json.dumps(messages, indent=2)}"
+                    f"Request failed.{e.litellm_debug_info}. Response Model: {response_model}. Input messages: {json.dumps(messages, indent=2)}"
                 )
                 if e.status_code >= 500:
                     raise CompletionRejectError(
@@ -187,7 +187,7 @@ class CompletionModel(BaseModel):
                     ) from e
 
             else:
-                logger.exception(f"Failed to create completion. Input messages: {json.dumps(messages, indent=2)}")
+                logger.exception(f"Failed to create completion. Response Model: {response_model}. Input messages: {json.dumps(messages, indent=2)}")
 
             raise CompletionRuntimeError(
                 f"Failed to get completion response: {e}",
@@ -663,9 +663,9 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                 else:
                     schema = action.anthropic_schema()
 
-                    # Remove scratch pad field, use regular text block for thoughts
-                    if "thoughts" in schema["input_schema"]["properties"]:
-                        del schema["input_schema"]["properties"]["thoughts"]
+                    # # Remove scratch pad field, use regular text block for thoughts
+                    # if "thoughts" in schema["input_schema"]["properties"]:
+                    #     del schema["input_schema"]["properties"]["thoughts"]
 
                     tools.append(schema)
 
@@ -710,13 +710,13 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                 )
             except anthropic.BadRequestError as e:
                 logger.exception(
-                    f"Failed to create completion: {e}. Input messages: {json.dumps(messages, indent=2)}"
+                    f"Failed to create completion: {e}. Response Model: {response_model}. Input messages: {json.dumps(messages, indent=2)}"
                 )
                 last_completion = (
                     completion_response.model_dump() if completion_response else None
                 )
                 raise CompletionRuntimeError(
-                    f"Failed to create completion: {e}",
+                    f"Failed to create completion: {e}. Response Model: {response_model}.",
                     last_completion=last_completion,
                     messages=messages,
                 ) from e

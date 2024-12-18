@@ -35,7 +35,7 @@ python ./moatless/benchmark/run_evaluation.py \
         --eval_name debug/coding_value_function/12_feedback_tests_fin_bef/$MODEL \
         --temp 0.7 \
         --num_workers 2 \
-        --format react \
+        --format tools \
         --max_iterations 200 \
         --max_expansions 10 \
         --use_edit_actions \

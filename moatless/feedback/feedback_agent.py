@@ -35,11 +35,28 @@ class FeedbackResponse(StructuredOutput):
     @classmethod
     def anthropic_schema(cls) -> Dict[str, Any]:
         """Provide schema in format expected by Anthropic's tool calling"""
-        schema = cls.model_json_schema()
         return {
+            "type": "custom",
             "name": "provide_feedback",
-            "description": schema.get("description", "Provide feedback on the current state"),
-            "parameters": schema
+            "description": "Provide feedback on the current state",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "analysis": {
+                        "type": "string",
+                        "description": "Brief analysis of parent state and lessons from alternative attempts"
+                    },
+                    "feedback": {
+                        "type": "string", 
+                        "description": "Clear, actionable guidance for your next action"
+                    },
+                    "suggested_node_id": {
+                        "type": ["integer", "null"],
+                        "description": "ID of the node that should be expanded next (optional)"
+                    }
+                },
+                "required": ["analysis", "feedback"]
+            }
         }
 
     def to_dict(self) -> Dict[str, Any]:
@@ -249,89 +266,108 @@ class FeedbackAgent(FeedbackGenerator):
         self, 
         actions: List[Action],
     ) -> str:
-        # Calculate the starting number based on whether tree is included
-        start_num = 2 if self.include_tree else 1
+        base_prompt = """You are a feedback agent that guides an AI assistant's next action.
 
-        # Build the prompt using f-strings instead of .format()
-        base_prompt = f"""You are a feedback agent that guides an AI assistant's next action.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️  CRITICAL: ACTION AGENT LIMITATIONS  ⚠️
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+The action agent receiving your feedback:
+• CANNOT see the search tree
+• Has NO CONTEXT about node relationships
+• Only knows about actions in its direct trajectory
+• Cannot understand references to nodes without proper context
 
-**Important Note About Line Numbers:**
-While line numbers may be referenced in the initial problem description, they can shift as changes are made to the file. 
-Focus on whether the agent is modifying the correct logical parts of the code, rather than strictly matching the initially 
-mentioned line numbers. What matters is that the right section of code is being modified, even if its current line numberslightly differs from what was originally specified.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋  REQUIRED FEEDBACK STRUCTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. CURRENT NODE CONTEXT
+   You must start by describing:
+   • Position in tree: "You are at Node X, which is [position relative to root]"
+   • Current state: "You are currently [describe action/state]"
+   • Parent context: "Your parent node (Node Y) [describe what parent did]"
+   • Relationship to solutions: "There are [N] terminal nodes in [relationship] branches"
 
-**Input Structure:**"""
+2. NODE REFERENCES
+   When mentioning ANY node, use this format:
+   "Node [ID] (a [relationship] to your current node) which [describe what was attempted]"
+
+3. TRAJECTORY CLARITY
+   Always specify if nodes are:
+   • In current trajectory (marked with *)
+   • From parallel branches
+   • Sibling attempts
+   • Completely separate solution paths
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅  CORRECT EXAMPLES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Current Node Context:
+"You are at Node 8, which is your first action from the root. Your parent (Node 1) 
+performed a FindCodeSnippet action that didn't add new context. There are three 
+terminal nodes in parallel branches (Nodes 7, 9, and 14) that have reached finished 
+states with different approaches."
+
+Node References:
+"Node 7 (a sibling attempt from your parent) tried implementing a file lock mechanism 
+but failed due to permission issues"
+
+"Node 10 (from a parallel branch) attempted to fix the issue by rewriting the class 
+structure, which passed all tests but introduced complexity"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌  INCORRECT EXAMPLES - DO NOT USE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• "Look at Node 7's solution"
+• "Nodes 7 and 10 have proposed solutions"
+• "The solutions in Nodes 7, 10, and 14 are equivalent"
+• "Previous attempts have solved this"
+• Any reference to a node without explaining its relationship and what it attempted
+
+"""
+        # Add Input Structure section
+        base_prompt += """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📥  INPUT STRUCTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
 
         if self.include_tree:
             base_prompt += """
-1. Tree Visualization: ASCII representation of the entire seaxrch tree showing:
-   - Node IDs and their relationships
-   - Action types taken at each node
-   - Rewards and visit counts
-   - Key outcomes and observations
-   Use this tree to generate feedback which takes into account the entire search space, mistakes, and outcomes.
-   Encourage the AI assistant to explore alternative solutions, *or combine existing solutions* (look at the git patches) and learn from previous attempts.
-   Reaching the same finished state multiple times is a waste of resources."""
+1. Tree Visualization: ASCII representation showing:
+   • Node IDs and relationships
+   • Action types at each node
+   • Rewards and visit counts
+   • Key outcomes and observations"""
 
-        base_prompt += f"""
-{start_num}. Original Task: The problem to solve
+        # ... rest of the input structure section ...
 
-{start_num + 1}. Message History: Chain of executed actions leading to current state
-
-{start_num + 2}. Tree Structure:
-   - Parent Node: Your current starting point - the last successfully executed action
-   - Current Node: Your branch from the parent, waiting for your next action
-   - alternative Sibling Nodes: Other independent solution attempts branching from the same parent
-     (These are from different trajectories and have not happened in your current path)
-
-{start_num + 3}. alternative Node Information: Details about other solution attempts, including:
-   - Their proposed actions and parameters
-   - Their outcomes (from separate, independent trajectories)
-   - Warning flags for previously attempted approaches
-   
-**Your Task:**
+        base_prompt += """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋  YOUR TASK
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 1. Analyze the situation:
-   - Start from your parent node's current state
-   - Consider what other sibling nodes have tried (but remember these are alternative universes, not your history)
-   - Learn from their outcomes to avoid repeating unsuccessful approaches
-   - Do not assume that a "finish" state means the issue was resolved succesfully, even if the feedback assumes so, since we can never actually be completely certain.
-   - Contextualize the feedback based on the entire tree structure and outcomes
-   - Constantly inform the agent about alternative approaches that have been tried (files viewed, tests, git diffs) in order to avoid repeating the same actions and learn from them to improve in this trajectory.
-   - When referring to previous attempts in alternative trajectories, provide information about what was tried as the agent does not have access to any alternative node information
-   - Nodes in the Current Trajectory are marked with a *.
+   • Start with current node context (position, state, parent, solutions)
+   • Consider sibling attempts (remember these are alternative universes)
+   • Learn from outcomes to avoid repeating unsuccessful approaches
+   • Contextualize feedback based on tree structure
+   • Always explain node relationships and attempts
+   • Inform about alternative approaches tried (files, tests, git diffs)
 
-2. Suggest the next action for your branch
-3. Optionally suggest which node to expand next by setting suggested_node_id in your response
-   - This can help guide the search towards promising branches
-   - Leave as null if you have no strong preference
+2. Suggest next action:
+   • Clear, actionable guidance
+   • Based on lessons from other attempts
+   • Avoid repeating failed approaches
 
-Note: Focus on encouraging the agent to achieve new, novel solutions and avoid approaches that were tried in other branches. 
-**Always clearly articulate which of the Nodes/Actions you refer to are within the current node's trajectory (current trajectory), and which are not (alternative), and therefore have no effect on the current node's state.**"""
+3. Optionally suggest node to expand:
+   • Must explain why this node is promising
+   • Leave as null if no strong preference
 
-        # Add available actions if provided
-        if actions:
-            base_prompt += "\n\n# Available Actions:\n"
-            for action in actions:
-                try:
-                    schema = action.args_schema.model_json_schema()
-                    base_prompt += f"\n## {schema['title']}\n{schema['description']}"
-                except Exception as e:
-                    logger.error(f"Error while building prompt for action {action}: {e}")
+Remember: Focus on helping the agent achieve novel solutions and, while learning from 
+parallel attempts and avoiding re-implementing them. Always provide proper context since the agent cannot see the tree.
 
-        # Only add node suggestion task if requested
-        tasks = """1. Analyze the situation:
-   - Start from your parent node's current state
-   - Consider what other sibling nodes have tried (but remember these are alternative universes, not your history)
-   - Learn from their outcomes to avoid repeating unsuccessful approaches
-   - Contextualize the feedback based on the entire tree structure and outcomes
-2. Suggest the next action for your branch"""
-
-        if self.include_node_suggestion:
-            tasks += """
-3. Having now reached a finished state, suggest which node to expand next by setting suggested_node_id in your response
-   - This can help guide the search towards promising branches, and eventually reach improved solutions."""
-
-        base_prompt += f"\n**Your Task:**\n{tasks}"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️  CRITICAL: Guide the agent to explore new solutions by learning from (but not 
+repeating) what worked and failed in other branches. Since the agent cannot see 
+the tree, you must explain these attempts and their outcomes."""
 
         return base_prompt
 
