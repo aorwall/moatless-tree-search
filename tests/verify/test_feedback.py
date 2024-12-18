@@ -6,6 +6,7 @@ from moatless.completion.completion import CompletionModel
 from moatless.feedback.feedback_agent import FeedbackAgent
 from moatless.benchmark.utils import get_moatless_instance
 from moatless.benchmark.swebench import create_repository, create_index
+from moatless.node import Node
 import json
 
 def verify_generated_action(
@@ -50,11 +51,39 @@ def verify_generated_action(
         code_index=code_index,
     )
 
-    # Get the specific node
-    node = search_tree.get_node_by_id(node_id)
-    if not node:
+    # Get the specific node from trajectory
+    trajectory_node = search_tree.get_node_by_id(node_id)
+    if not trajectory_node:
         print(f"Node {node_id} not found in trajectory")
         return
+
+    # Create a fresh node with minimum required state
+    node = Node(
+        node_id=node_id,
+        parent=trajectory_node.parent,
+        file_context=trajectory_node.file_context,
+        max_expansions=trajectory_node.max_expansions,
+        agent_settings=trajectory_node.agent_settings,
+        search_tree=search_tree,
+    )
+    
+    # Copy necessary context from trajectory node
+    if hasattr(trajectory_node, 'pre_action_message'):
+        node.message = trajectory_node.pre_action_message
+    else:
+        node.message = trajectory_node.message if trajectory_node.message else ""
+
+    # Ensure parent nodes have their pre-action state
+    if node.parent:
+        current = node.parent
+        while current:
+            if hasattr(current, 'pre_action_message'):
+                current.message = current.pre_action_message
+            else:
+                current.message = current.message if current.message else ""
+            current.observation = None
+            current.action_steps = []
+            current = current.parent
 
     # Print debug info about the node
     print(f"\nNode {node_id} details:")

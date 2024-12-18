@@ -26,6 +26,7 @@ from moatless.value_function.model import Reward
 from moatless.feedback.feedback_agent import FeedbackAgent
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class SearchTree(BaseModel):
@@ -323,7 +324,8 @@ class SearchTree(BaseModel):
 
         child_node = self.expander.expand(node, self)
 
-        if self.feedback_generator:
+        # Only add feedback if this is the second expansion from this node
+        if self.feedback_generator and len(node.children) >= 2:
             child_node.feedback_data = self.feedback_generator.generate_feedback(
                 child_node,
                 self.agent.actions,
@@ -405,39 +407,47 @@ class SearchTree(BaseModel):
         return self.discriminator.select(nodes)
 
     def is_finished(self):
+        # Check max cost
         total_cost = self.total_usage().completion_cost
         if (
             self.max_cost
             and self.total_usage().completion_cost
             and total_cost >= self.max_cost
         ):
+            logger.info(f"Search finished: Reached max cost {self.max_cost}")
             return True
 
+        # Check max iterations
         if len(self.root.get_all_nodes()) >= self.max_iterations:
+            logger.info(f"Search finished: Reached max iterations {self.max_iterations}")
             return True
 
         finished_nodes = self.get_finished_nodes()
-
         unique_finished_parents = set()
         for node in finished_nodes:
             unique_finished_parents.add(node.parent.node_id)
 
+        # Check max finished nodes
         if (
             self.max_finished_nodes
             and len(unique_finished_parents) >= self.max_finished_nodes
         ):
+            logger.info(f"Search finished: Reached max finished nodes {self.max_finished_nodes}")
             return True
 
+        # Check reward threshold
         if self.reward_threshold and any(
             node.reward and node.reward.value >= self.reward_threshold
             for node in finished_nodes
         ):
-            return (
-                not self.min_finished_nodes
-                or len(unique_finished_parents) >= self.min_finished_nodes
-            )
+            if not self.min_finished_nodes or len(unique_finished_parents) >= self.min_finished_nodes:
+                logger.info(f"Search finished: Found solution meeting reward threshold {self.reward_threshold}")
+                return True
 
-        if not self.root.get_expandable_descendants():
+        # Check if there are no more expandable nodes
+        expandable_nodes = self.root.get_expandable_descendants()
+        if not expandable_nodes:
+            logger.info("Search finished: No more expandable nodes")
             return True
 
         return False

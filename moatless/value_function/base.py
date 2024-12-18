@@ -121,13 +121,18 @@ class ValueFunction(BaseModel):
         if not messages:
             messages = [ChatCompletionUserMessage(role="user", content="No message history available")]
         
-        completion_response = self.completion_model.create_completion(
-            messages=messages, 
-            system_prompt=system_prompt, 
-            response_model=Reward
-        )
+        try:
+            completion_response = self.completion_model.create_completion(
+                messages=messages, 
+                system_prompt=system_prompt, 
+                response_model=Reward
+            )
+            
+            return completion_response.structured_output, completion_response.completion
 
-        return completion_response.structured_output, completion_response.completion
+        except Exception as e:
+            logger.error(f"Error getting reward: {e}")
+            raise
 
     def _create_system_prompt(self, node: Node, coding_reward: Optional[Reward] = None) -> str:
         base_prompt = self._build_system_prompt(node)

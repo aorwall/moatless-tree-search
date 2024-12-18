@@ -102,14 +102,14 @@ def load_swebench_data(instance_id: str) -> Optional[Dict]:
 
 def extract_diffs(trajectory_file: str, finished_only: bool = False) -> List[Dict]:
     """
-    Extract all git diffs from a trajectory file.
+    Extract all git diffs from a trajectory file, grouping diffs by node_id.
     
     Args:
         trajectory_file: Path to the trajectory JSON file
         finished_only: If True, only extract diffs from nodes with "Finish" actions
     
     Returns:
-        List of dictionaries containing file path, diff content, and node_id.
+        List of dictionaries containing grouped diffs per node_id.
     """
     with open(trajectory_file, 'r') as f:
         data = json.load(f)
@@ -119,16 +119,32 @@ def extract_diffs(trajectory_file: str, finished_only: bool = False) -> List[Dic
     if 'metadata' in data and 'instance_id' in data['metadata']:
         instance_id = data['metadata']['instance_id']
     
-    diffs = []
+    # Use a dictionary to group diffs by node_id
+    diffs_by_node = {}
     
     def is_finished_state(node):
         """Check if a node represents a finished state"""
         if isinstance(node, dict):
-            # Check for Finish action
+            # Check action_steps array
+            if 'action_steps' in node and isinstance(node['action_steps'], list):
+                for step in node['action_steps']:
+                    if isinstance(step, dict) and 'action' in step:
+                        action = step['action']
+                        if isinstance(action, dict):
+                            action_args_class = action.get('action_args_class', '').lower()
+                            if 'finish' in action_args_class:
+                                return True
+            
+            # Check direct action field
             if 'action' in node:
                 action = node['action']
-                if isinstance(action, dict) and action.get('action_args_class', '').endswith('FinishArgs'):
+                if isinstance(action, dict):
+                    action_args_class = action.get('action_args_class', '').lower()
+                    if 'finish' in action_args_class:
+                        return True
+                elif isinstance(action, str) and 'finish' in action.lower():
                     return True
+                
             # Check observation for terminal state
             if 'observation' in node:
                 obs = node['observation']
@@ -143,29 +159,29 @@ def extract_diffs(trajectory_file: str, finished_only: bool = False) -> List[Dic
         current_finished = parent_finished or is_finished_state(obj)
         
         if isinstance(obj, dict):
-            # Get node_id if present
             current_node_id = obj.get('node_id', node_id)
             
             if not finished_only or current_finished:
                 if 'file_path' in obj and 'patch' in obj:
                     if obj['patch']:
-                        diffs.append({
+                        if current_node_id not in diffs_by_node:
+                            diffs_by_node[current_node_id] = []
+                        diffs_by_node[current_node_id].append({
                             'file_path': obj['file_path'],
-                            'diff': obj['patch'],
-                            'node_id': current_node_id
+                            'diff': obj['patch']
                         })
                 
                 if 'properties' in obj and isinstance(obj['properties'], dict):
                     if 'diff' in obj['properties']:
                         diff = obj['properties']['diff']
                         if diff:
-                            diffs.append({
+                            if current_node_id not in diffs_by_node:
+                                diffs_by_node[current_node_id] = []
+                            diffs_by_node[current_node_id].append({
                                 'file_path': diff.split('\n')[0].replace('--- ', ''),
-                                'diff': diff,
-                                'node_id': current_node_id
+                                'diff': diff
                             })
             
-            # Recursively search with current node_id
             for key, value in obj.items():
                 search_for_diffs(value, current_finished, current_node_id)
         
@@ -175,9 +191,22 @@ def extract_diffs(trajectory_file: str, finished_only: bool = False) -> List[Dic
 
     search_for_diffs(data)
     
-    # Debug info
+    # Convert the grouped diffs into the final format
+    diffs = []
+    for node_id, node_diffs in diffs_by_node.items():
+        # Combine all diffs for this node
+        combined_diff = ""
+        for diff_info in node_diffs:
+            combined_diff += f"=== {diff_info['file_path']} ===\n{diff_info['diff']}\n\n"
+        
+        diffs.append({
+            'node_id': node_id or 'unknown',
+            'diff': combined_diff.strip(),
+            'file_paths': [d['file_path'] for d in node_diffs]
+        })
+    
     if finished_only:
-        print(f"Found {len(diffs)} diffs in finished states", file=sys.stderr)
+        print(f"Found {len(diffs)} nodes with diffs in finished states", file=sys.stderr)
     
     return diffs, instance_id
 
@@ -193,7 +222,7 @@ def save_analysis(trajectory_file: Path, swebench_data: Dict, diffs: List[Dict],
         "trajectory_file": str(trajectory_path),
         "swebench_data": swebench_data,
         "generated_diffs": [{
-            "file_path": diff["file_path"],
+            "file_paths": diff["file_paths"],
             "diff": diff["diff"],
             "node_id": diff.get("node_id", "unknown")
         } for diff in diffs],
@@ -250,7 +279,7 @@ def save_text_analysis(trajectory_file: Path, swebench_data: Dict, diffs: List[D
         f.write("-" * 80 + "\n")
         for diff in diffs:
             f.write(f"\nNode ID: {diff.get('node_id', 'unknown')}\n")
-            f.write(f"File: {diff['file_path']}\n")
+            f.write(f"Files: {', '.join(diff['file_paths'])}\n")
             f.write("-" * 40 + "\n")
             f.write(diff["diff"])
             f.write("\n")
@@ -318,7 +347,7 @@ def main():
     print("\n=== Extracted Diffs ===")
     for diff_info in diffs:
         print(f"\nNode ID: {diff_info.get('node_id', 'unknown')}")
-        print(f"File: {diff_info['file_path']}")
+        print(f"Files: {', '.join(diff_info['file_paths'])}")
         print("=" * 80)
         print(diff_info['diff'])
         print("=" * 80)
@@ -340,4 +369,10 @@ def main():
         save_text_analysis(args.trajectory_file, swebench_data, diffs, claude_analysis)
 
 if __name__ == "__main__":
+
+    # sys.argv = [
+    #     "moatless/analysis/extract_diffs.py",
+    #     "/share/edc/home/antonis/_swe-planner/moatless-tree-search/evaluations/debug/coding_value_function/13_feedback_tests_fin_bef/claude-3-5-haiku-latest/django__django-11848/trajectory.json",
+    #     "-g", "-a", "-s"
+    # ]
     main()
