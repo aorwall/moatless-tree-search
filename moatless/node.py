@@ -106,7 +106,7 @@ class Node(BaseModel):
         """Backward compatibility: Set action on the current/new action step"""
 
         if not self.action_steps:
-            self.action_steps.append(ActionStep(action=value))
+            self.action_steps = [ActionStep(action=value)]
         else:
             self.action_steps[-1].action = value
 

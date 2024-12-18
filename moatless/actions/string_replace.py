@@ -31,7 +31,10 @@ class StringReplaceArgs(ActionArguments):
 
     Notes:
     * The old_str parameter must match EXACTLY one or more consecutive lines from the original file
-    * Whitespace and indentation must match exactly
+    * Whitespace and indentation must match exactly:
+      - Use spaces for indentation, not tabs
+      - Match the exact number of spaces from the original code
+      - Do not modify the indentation pattern
     * The old_str must be unique within the file - include enough surrounding context to ensure uniqueness
     * The new_str parameter contains the replacement text that will replace old_str
     * No changes will be made if old_str appears multiple times or cannot be found

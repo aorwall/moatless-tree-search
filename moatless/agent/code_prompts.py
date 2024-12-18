@@ -20,6 +20,10 @@ WORKFLOW_PROMPT = """
 
 3. **Apply Code Changes**
  * **One Step at a Time:** You can only plan and implement one code change at a time.
+ * **Indentation Requirements:**
+    * Use spaces for indentation, not tabs
+    * Match the exact indentation of the original code
+    * Include enough context to ensure unique matches
  * **Choose the Appropriate Action:**
     * Use StringReplace to edit existing files (format: <path>, <old_str>, <new_str>)
     * Use CreateFile to create new files (format: <path>, <file_text>)

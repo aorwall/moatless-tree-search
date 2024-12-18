@@ -68,7 +68,6 @@ class CodeModificationMixin:
 
         return path, None
 
-
     def run_tests(
         self,
         file_path: str,

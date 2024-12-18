@@ -67,10 +67,9 @@ def build_graph(
     G = nx.DiGraph()
     
     # Determine if this is a linear trajectory
-    is_linear = getattr(root_node, "max_expansions", None) == 1
-    
+
     # Add debug logging
-    logger.info(f"Building graph from root node {root_node.node_id} (linear: {is_linear})")
+    logger.info(f"Building graph from root node {root_node.node_id})")
 
     def is_resolved(node_id):
         if not eval_result:
@@ -150,12 +149,11 @@ def build_graph(
                 "context_status": context_stats.status if context_stats else None,
                 "patch_status": context_stats.patch_status if context_stats else None,
                 "explanation": str(node.reward.explanation).replace('"', '\\"').replace('\\', '\\\\') if node.reward else "",
-                "is_linear": is_linear,
             })
-            
+
             # Remove None values to avoid Graphviz issues
             node_attrs = {k: v for k, v in node_attrs.items() if v is not None}
-            
+
             G.add_node(node_id, **node_attrs)
 
         # Add edge from parent if provided
@@ -178,7 +176,6 @@ def build_graph(
         if len(in_edges) > 1:
             logger.error(f"Node {node} has multiple parents: {in_edges}")
     
-    # Use simpler graph attributes to avoid syntax errors
     G.graph["graph"] = {
         "rankdir": "TB",
         "ranksep": "1.5",
@@ -525,8 +522,8 @@ def update_visualization(
             search_tree.root, st.session_state.max_node_id
         )
         
-        is_linear = force_linear if force_linear is not None else getattr(search_tree.root, "max_expansions", None) == 1
-        
+        is_linear = force_linear or getattr(search_tree.root, "max_expansions", 1) == 1
+
         if is_linear:
             # Use the new table visualization for linear trajectories
             nodes = search_tree.root.get_all_nodes()

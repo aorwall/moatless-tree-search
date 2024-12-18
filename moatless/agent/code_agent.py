@@ -55,6 +55,13 @@ class CodingAgent(ActionAgent):
         message_history_type: MessageHistoryType | None = None,
         **kwargs,
     ):
+
+        if message_history_type is None:
+            if completion_model.response_format == LLMResponseFormat.TOOLS:
+                message_history_type = MessageHistoryType.MESSAGES
+            else:
+                message_history_type = MessageHistoryType.REACT
+
         if completion_model.supports_anthropic_computer_use:
             actions = create_claude_coding_actions(
                 repository=repository,
@@ -71,15 +78,14 @@ class CodingAgent(ActionAgent):
                 code_index=code_index,
                 completion_model=completion_model,
             )
-            system_prompt = SYSTEM_PROMPT
+
+            if completion_model.response_format == LLMResponseFormat.REACT:
+                system_prompt = REACT_SYSTEM_PROMPT
+            else:
+                system_prompt = SYSTEM_PROMPT
+
             action_type = "standard edit code actions"
             use_few_shots = True
-
-        if message_history_type is None:
-            if completion_model.response_format == LLMResponseFormat.TOOLS:
-                message_history_type = MessageHistoryType.MESSAGES
-            else:
-                message_history_type = MessageHistoryType.REACT
 
         message_generator = MessageHistoryGenerator(
             message_history_type=message_history_type,

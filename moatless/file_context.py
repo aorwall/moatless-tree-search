@@ -18,6 +18,7 @@ from moatless.codeblocks.codeblocks import (
     SpanType,
 )
 from moatless.codeblocks.module import Module
+from moatless.index.code_index import is_test
 from moatless.repository import FileRepository
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment, TestResult
@@ -1223,7 +1224,7 @@ class FileContext(BaseModel):
     def has_patch(self):
         return any(file.patch for file in self._files.values())
 
-    def generate_git_patch(self) -> str:
+    def generate_git_patch(self, ignore_tests: bool = False) -> str:
         """
         Generates a full patch for all files with changes in the FileContext.
         The patch is formatted like a git diff.
@@ -1233,6 +1234,8 @@ class FileContext(BaseModel):
         """
         full_patch = []
         for file_path, context_file in self._files.items():
+            if ignore_tests and is_test(file_path):
+                continue
             if context_file.patch:
                 full_patch.append(context_file.patch)
 

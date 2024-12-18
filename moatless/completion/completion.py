@@ -86,8 +86,8 @@ class CompletionModel(BaseModel):
         description="The API key for the model",
         exclude=True
     )
-    response_format: LLMResponseFormat = Field(
-        LLMResponseFormat.TOOLS, description="The response format expected from the LLM"
+    response_format: Optional[LLMResponseFormat] = Field(
+        None, description="The response format expected from the LLM"
     )
     stop_words: Optional[list[str]] = Field(
         default=None, description="The stop words to use for completion"
@@ -98,7 +98,7 @@ class CompletionModel(BaseModel):
 
     @model_validator(mode="after")
     def validate_response_format(self):
-        if self.response_format == LLMResponseFormat.TOOLS:
+        if not self.response_format:
             # Always use JSON response format for deepseek chat as it isn't reliable with tools
             if self.model == "deepseek/deepseek-chat":
                 self.response_format = LLMResponseFormat.JSON
@@ -115,7 +115,8 @@ class CompletionModel(BaseModel):
                         f"The model {self.model} doens't support function calling, set response format to JSON"
                     )
                     self.response_format = LLMResponseFormat.JSON
-
+                else:
+                    self.response_format = LLMResponseFormat.TOOLS
         return self
 
     @property
@@ -159,7 +160,7 @@ class CompletionModel(BaseModel):
             elif self.response_format == LLMResponseFormat.REACT and isinstance(
                 response_model, list
             ):
-                action_args, completion_response = self._litellm_react_completion(
+                return self._litellm_react_completion(
                     completion_messages, system_prompt, response_model
                 )
             elif self.response_format == LLMResponseFormat.TOOLS:
@@ -167,8 +168,8 @@ class CompletionModel(BaseModel):
                     completion_messages, system_prompt, response_model
                 )
             else:
-                action_args, completion_response = self._litellm_completion(
-                    completion_messages, system_prompt, response_model
+                return self._litellm_completion(
+                   completion_messages, system_prompt, response_model
                 )
         except CompletionError as e:
             raise e
@@ -193,15 +194,6 @@ class CompletionModel(BaseModel):
                 last_completion=completion_response,
             ) from e
 
-        if completion_response:
-            completion = Completion.from_llm_completion(
-                input_messages=completion_messages,
-                completion_response=completion_response,
-                model=self.model,
-            )
-        else:
-            completion = None
-
         if (
             "stop_reason" in completion.response
             and completion.response["stop_reason"] == "max_tokens"
@@ -212,7 +204,7 @@ class CompletionModel(BaseModel):
                 last_completion=completion_response,
             )
 
-        return CompletionResponse.single(action_args, completion)
+        raise RuntimeError("Shouldnt reach this point")
 
     def _litellm_tool_completion(
             self,
@@ -407,8 +399,6 @@ Make sure to return an instance of the JSON, not the schema itself.""")
                     metadata=self.metadata or {},
                 )
 
-                logger.info(json.dumps(messages, indent=2))
-                logger.info(json.dumps(completion_response.model_dump(), indent=2))
                 if not completion_response or not completion_response.choices:
                     raise CompletionRuntimeError("No completion response or choices returned")
 
@@ -426,14 +416,17 @@ Make sure to return an instance of the JSON, not the schema itself.""")
 
                 messages.append({"role": "assistant", "content": assistant_message})
 
-                response = response_model.from_response(
-                    completion_response, mode=instructor.Mode.JSON
+                response = response_model.model_validate_json(assistant_message)
+
+                completion = Completion.from_llm_completion(
+                    input_messages=messages,
+                    completion_response=completion_response,
+                    model=self.model,
                 )
-
                 if hasattr(response, "action"):
-                    return response.action, completion_response
+                    return CompletionResponse.create(output=response.action, completion=completion)
 
-                return response, completion_response
+                return CompletionResponse.create(output=response, completion=completion)
 
             except (ValidationError, json.JSONDecodeError) as e:
                 logger.warning(
@@ -578,7 +571,16 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                         )
 
                 action_request.thoughts = thought
-                return action_request, completion_response
+                completion = Completion.from_llm_completion(
+                    input_messages=messages,
+                    completion_response=completion_response,
+                    model=self.model,
+                )
+
+                return CompletionResponse(
+                    structured_outputs=[action_request],
+                    completion=completion
+                )
 
             except Exception as e:
                 logger.warning(f"ReAct parsing failed: {e}. Response: {response_text}")
@@ -601,6 +603,27 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
             return retries(_do_completion)
         except tenacity.RetryError as e:
             raise e.reraise()
+
+    def _litellm_text_completion(self, messages: list[dict]) -> Tuple[str, ModelResponse]:
+        litellm.drop_params = True
+
+        completion_kwargs = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "messages": messages,
+            "metadata": self.metadata or {},  # Always pass at least an empty dict
+        }
+
+        if self.model_base_url:
+            completion_kwargs["api_base"] = self.model_base_url
+        if self.model_api_key:
+            completion_kwargs["api_key"] = self.model_api_key
+        if self.stop_words:
+            completion_kwargs["stop"] = self.stop_words
+
+        completion_response = litellm.completion(**completion_kwargs)
+        return completion_response.choices[0].message.content, completion_response
 
     def _anthropic_completion(
         self,
