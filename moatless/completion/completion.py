@@ -265,7 +265,6 @@ class CompletionModel(BaseModel):
                 invalid_function_names = []
                 if llm_completion_response.choices[0].message.tool_calls:
                     for tool_call in llm_completion_response.choices[0].message.tool_calls:
-                        tool_args = json.loads(tool_call.function.arguments)
                         action = get_response_model(tool_call.function.name)
 
                         if not action:
@@ -273,7 +272,7 @@ class CompletionModel(BaseModel):
                             invalid_function_names.append(tool_call.function.name)
                             continue
 
-                        response_object = action.model_validate(tool_args)
+                        response_object = action.model_validate_json(tool_call.function.arguments)
                         response_objects.append(response_object)
 
                     if invalid_function_names:

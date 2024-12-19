@@ -113,7 +113,7 @@ class TreeSearchSettings(BaseModel):
     )
 
     provide_feedback: bool = Field(
-        True,
+        False,
         description="Whether to provide feedback from previosly evaluated transitions.",
     )
 

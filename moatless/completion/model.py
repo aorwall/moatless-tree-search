@@ -319,7 +319,18 @@ class StructuredOutput(BaseModel):
 
         try:
             parsed_data = json.loads(json_data, strict=False)
-            cleaned_json = json.dumps(parsed_data)
+
+            def unescape_values(obj):
+                if isinstance(obj, dict):
+                    return {k: unescape_values(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [unescape_values(v) for v in obj]
+                elif isinstance(obj, str) and '\\' in obj:
+                    return obj.encode().decode('unicode_escape')
+                return obj
+                
+            cleaned_data = unescape_values(parsed_data)
+            cleaned_json = json.dumps(cleaned_data)
             return super().model_validate_json(cleaned_json, **kwarg)
 
         except (json.JSONDecodeError, ValidationError) as e:
