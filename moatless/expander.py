@@ -19,26 +19,24 @@ class Expander(BaseModel):
         description="The settings for the agent model",
     )
 
-    def expand(self, node: Node, search_tree) -> None | Node:
+    def expand(self, node: Node, search_tree, force_expansion: bool = False) -> None | Node:
         """Handle all node expansion logic in one place"""
-        if node.is_fully_expanded():
+        if not force_expansion and node.is_fully_expanded():
             return None
 
-        # Find first unexecuted child if it exists
+        # Return the first unexecuted child if one exists
         for child in node.children:
             if not child.observation:
                 logger.info(f"Found unexecuted child {child.node_id} for node {node.node_id}")
                 return child
 
         num_expansions = node.max_expansions or self.max_expansions
-        if len(node.children) >= num_expansions:
+        if not force_expansion and len(node.children) >= num_expansions:
             logger.info(f"Max expansions reached for node {node.node_id}")
             return None
 
-        # Get agent settings for this expansion
         settings_to_use = self._get_agent_settings(node)
-        
-        # Create the new node
+
         child_node = Node(
             node_id=search_tree._generate_unique_id(),
             parent=node,
@@ -46,8 +44,7 @@ class Expander(BaseModel):
             max_expansions=self.max_expansions,
             agent_settings=settings_to_use[0] if settings_to_use else None,
         )
-        
-        # Add child to parent
+
         node.add_child(child_node)
 
         logger.info(f"Expanded Node{node.node_id} to new Node{child_node.node_id}")

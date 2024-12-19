@@ -560,6 +560,17 @@ class Node(BaseModel):
         else:
             raise ValueError("Format must be either 'list' or 'tree'")
 
+    def truncate_children_by_id(self, max_id: int):
+        """Truncate children to only include nodes with IDs less than or equal to the specified value.
+        
+        Args:
+            max_id (int): Maximum node ID to keep (inclusive)
+        """
+        self.children = [child for child in self.children if child.node_id <= max_id]
+        # Recursively truncate remaining children
+        for child in self.children:
+            child.truncate_children_by_id(max_id)
+
 
 def generate_ascii_tree(
     root: Node,

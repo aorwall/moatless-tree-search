@@ -41,6 +41,9 @@ class MessageHistoryGenerator(BaseModel):
         default=True,
         description="Whether to include git patch in messages"
     )
+    include_root_node: bool = Field(
+        default=True
+    )
     max_tokens: int = Field(
         default=20000,
         description="Maximum number of tokens allowed in message history"
@@ -75,7 +78,8 @@ class MessageHistoryGenerator(BaseModel):
             MessageHistoryType.REACT: self._generate_react_history,
             MessageHistoryType.MESSAGES: self._generate_message_history
         }
-        previous_nodes = node.get_trajectory()[:-1]
+        start_idx = 0 if self.include_root_node else 1
+        previous_nodes = node.get_trajectory()[start_idx:-1]
         return generators[self.message_history_type](node, previous_nodes)
 
     def _generate_message_history(self, node: Node, previous_nodes: List["Node"]) -> List[dict[str, Any]]:
@@ -183,10 +187,14 @@ class MessageHistoryGenerator(BaseModel):
         formatted_history: List[str] = []
         counter = 0
 
-        content = node.get_root().message
-
-        if not previous_nodes:
-            return [ChatCompletionUserMessage(role="user", content=content)]
+        if self.include_root_node:
+            content = node.get_root().message
+            if not previous_nodes:
+                return [ChatCompletionUserMessage(role="user", content=content)]
+        else:
+            content = ""
+            if not previous_nodes:
+                return []
 
         for i, previous_node in enumerate(previous_nodes):
             if previous_node.action:
@@ -209,7 +217,7 @@ class MessageHistoryGenerator(BaseModel):
 
                 formatted_history.append(formatted_state)
 
-        content += "\n\nBelow is the history of previously executed actions and their observations.\n"
+        # content += "\n\nBelow is the history of previously executed actions and their observations.\n"
         content += "<history>\n"
         content += "\n".join(formatted_history)
         content += "\n</history>\n\n"

@@ -76,6 +76,7 @@ class FeedbackAgent(FeedbackGenerator):
     include_tree: bool = Field(True)
     include_node_suggestion: bool = Field(True)
 
+
     def model_post_init(self, __context) -> None:
         """Initialize feedback file after model initialization"""
         super().model_post_init(__context)
@@ -98,18 +99,15 @@ class FeedbackAgent(FeedbackGenerator):
         node: Node, 
         actions: List[Action] | None = None
     ) -> FeedbackData | None:
-        if not node.parent or not node.parent.parent:
+        if not node.parent:
             logger.info(
                 f"Node {node.node_id} has no parent node, skipping feedback generation"
             )
             return None
 
-        # Only get siblings that have been run (have actions set)
-        sibling_nodes = [s for s in node.get_sibling_nodes() if s.action is not None]
-        
+
         messages = self._create_analysis_messages(
             node, 
-            sibling_nodes,
         )
         system_prompt = self._create_system_prompt(
             actions
@@ -135,7 +133,7 @@ class FeedbackAgent(FeedbackGenerator):
             feedback_message = (
                 "System Analysis: I've analyzed your previous actions and alternative attempts. "
                 "Here's strategic guidance for your next steps:\n\n"
-                f"Feedback: {feedback_response.analysis}\n\n"
+                f"Feedback: {feedback_response.feedback}\n\n"
                 "Note: This feedback is based on the outcomes of various solution attempts. "
                 "While alternative attempts mentioned are from separate branches and "
                 "have not affected your current state, you should carefully consider their "
@@ -170,10 +168,12 @@ class FeedbackAgent(FeedbackGenerator):
 
     def _create_analysis_messages(
         self, 
-        current_node: Node, 
-        sibling_nodes: List[Node],
+        current_node: Node
     ) -> List[ChatCompletionUserMessage]:
         messages = []
+
+        # Only get siblings that have been run (have actions set)
+        sibling_nodes = [s for s in current_node.get_sibling_nodes() if s.action is not None]
 
         # Format tree visualization section
         if self.include_tree:
@@ -205,59 +205,52 @@ class FeedbackAgent(FeedbackGenerator):
         # Format root task section
         root_node = current_node.get_root()
         first_message = "# Original Task\n"
-        first_message += "<task>\n"
-        first_message += f"Root Node {root_node.node_id}:\n{root_node.message}\n"
-        first_message += "</task>\n\n"
+        first_message += root_node.message
         messages.append(ChatCompletionUserMessage(role="user", content=first_message))
 
         # Format message history section
         message_generator = MessageHistoryGenerator(
             message_history_type=MessageHistoryType.SUMMARY,
             include_file_context=True,
-            include_git_patch=True
+            include_git_patch=True,
+            include_root_node=False
         )
         history_messages = message_generator.generate(current_node)
-        
-        # Add node IDs to the message history
-        trajectory = current_node.get_trajectory()
-        for i, msg in enumerate(history_messages):
-            if i < len(trajectory) and "content" in msg:
-                node = trajectory[i]
-                parent_id = node.parent.node_id if node.parent else 'None'
-                msg["content"] = f"# Node {node.node_id} (Parent: {parent_id})\n<history>\n{msg['content']}\n</history>\n"
-        
-        messages.extend(history_messages)
+
+        if history_messages:
+            history_messages[0]["content"] = "Below is the history of previously executed actions and their observations before the current node.\n\n" + history_messages[0]["content"]
+            messages.extend(history_messages)
 
         # Format alternative attempts section
-        analysis_message = "# alternative Solution Attempts\n"
-        has_finish_attempt = False
+        if sibling_nodes:
+            analysis_message = "# Alternative Solution Attempts\n"
+            has_finish_attempt = False
 
-        for sibling in sibling_nodes:
-            if not sibling.action:
-                continue
+            for sibling in sibling_nodes:
+                if not sibling.action:
+                    continue
 
-            if sibling.action.name == "Finish":
-                has_finish_attempt = True
+                if sibling.action.name == "Finish":
+                    has_finish_attempt = True
 
-            analysis_message += f"<attempt_{sibling.node_id}>\n"
-            analysis_message += f"Node {sibling.node_id} (Parent: {sibling.parent.node_id if sibling.parent else 'None'})\n"
-            analysis_message += f"Action: {sibling.action.name}\n"
-            analysis_message += sibling.action.to_prompt()
+                analysis_message += f"<attempt_{sibling.node_id}>\n"
+                analysis_message += f"Node {sibling.node_id} (Parent: {sibling.parent.node_id if sibling.parent else 'None'})\n"
+                analysis_message += f"Action: {sibling.action.name}\n"
+                analysis_message += sibling.action.to_prompt()
 
-            if sibling.observation:
-                analysis_message += "\nObservation:\n"
-                analysis_message += sibling.observation.message
-            
-            analysis_message += f"\n</attempt_{sibling.node_id}>\n\n"
+                if sibling.observation:
+                    analysis_message += "\nObservation:\n"
+                    analysis_message += sibling.observation.message
 
-        if has_finish_attempt:
-            analysis_message += "<warning>\n"
-            analysis_message += "FINISH ACTION HAS ALREADY BEEN ATTEMPTED!\n"
-            analysis_message += "- Trying to finish again would be ineffective\n"
-            analysis_message += "- Focus on exploring alternative solutions instead\n"
-            analysis_message += "</warning>\n"
+                analysis_message += f"\n</attempt_{sibling.node_id}>\n\n"
 
-        if analysis_message != "# alternative Solution Attempts\n":
+            if has_finish_attempt:
+                analysis_message += "<warning>\n"
+                analysis_message += "FINISH ACTION HAS ALREADY BEEN ATTEMPTED!\n"
+                analysis_message += "- Trying to finish again would be ineffective\n"
+                analysis_message += "- Focus on exploring alternative solutions instead\n"
+                analysis_message += "</warning>\n"
+
             messages.append(ChatCompletionUserMessage(role="user", content=analysis_message))
 
         return messages

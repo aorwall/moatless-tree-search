@@ -314,7 +314,7 @@ class SearchTree(BaseModel):
         # If we have a finished node or exceeded depth, use normal selection
         return self.selector.select(expandable_nodes)
 
-    def _expand(self, node: Node) -> Node:
+    def _expand(self, node: Node, force_expansion: bool = False) -> Node:
         """Expand the node and return a child node."""
 
         # Check that selected node was executed (except for the root node), if not return it
@@ -322,7 +322,7 @@ class SearchTree(BaseModel):
             self.log(logger.info, f"Returning unexecuted Node{node.node_id}")
             return node
 
-        child_node = self.expander.expand(node, self)
+        child_node = self.expander.expand(node, self, force_expansion)
 
         # Only add feedback if this is the second expansion from this node
         if self.feedback_generator and len(node.children) >= 2:

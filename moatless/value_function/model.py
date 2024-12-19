@@ -9,8 +9,8 @@ class Reward(StructuredOutput):
     
     name: str = "provide_reward"  # Required for tool calling
     
-    explanation: str = Field(  # Changed from Optional[str] to str with default
-        default="No explanation provided",
+    explanation: Optional[str] = Field(
+        default=None,
         description="An explanation and the reasoning behind your decision."
     )
     feedback: Optional[str] = Field(
