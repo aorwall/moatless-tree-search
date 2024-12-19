@@ -130,11 +130,17 @@ class Usage(BaseModel):
         )
 
     def __add__(self, other: "Usage") -> "Usage":
+        # Get completion cost, defaulting to 0 if not available
+        other_cost = getattr(other, "completion_cost", 0)
+        other_completion = getattr(other, "completion_tokens", 0)
+        other_prompt = getattr(other, "prompt_tokens", 0)
+        other_cached = getattr(other, "cached_tokens", 0)
+        
         return Usage(
-            completion_cost=self.completion_cost + other.completion_cost,
-            completion_tokens=self.completion_tokens + other.completion_tokens,
-            prompt_tokens=self.prompt_tokens + other.prompt_tokens,
-            cached_tokens=self.cached_tokens + other.cached_tokens,
+            completion_cost=self.completion_cost + other_cost,
+            completion_tokens=self.completion_tokens + other_completion,
+            prompt_tokens=self.prompt_tokens + other_prompt,
+            cached_tokens=self.cached_tokens + other_cached,
         )
 
     def __str__(self) -> str:

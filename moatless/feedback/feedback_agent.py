@@ -266,6 +266,7 @@ class FeedbackAgent(FeedbackGenerator):
         self, 
         actions: List[Action],
     ) -> str:
+        start_num = 1
         base_prompt = """You are a feedback agent that guides an AI assistant's next action.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -276,6 +277,7 @@ The action agent receiving your feedback:
 • Has NO CONTEXT about node relationships
 • Only knows about actions in its direct trajectory
 • Cannot understand references to nodes without proper context
+• Is at a new node that has NO ACTION YET - it needs your guidance for what to do next
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📋  REQUIRED FEEDBACK STRUCTURE
@@ -283,46 +285,28 @@ The action agent receiving your feedback:
 1. CURRENT NODE CONTEXT
    You must start by describing:
    • Position in tree: "You are at Node X, which is [position relative to root]"
-   • Current state: "You are currently [describe action/state]"
+   • Current state: "Your node is currently empty and awaiting your first action"
    • Parent context: "Your parent node (Node Y) [describe what parent did]"
    • Relationship to solutions: "There are [N] terminal nodes in [relationship] branches"
 
-2. NODE REFERENCES
-   When mentioning ANY node, use this format:
-   "Node [ID] (a [relationship] to your current node) which [describe what was attempted]"
-
-3. TRAJECTORY CLARITY
-   Always specify if nodes are:
-   • In current trajectory (marked with *)
-   • From parallel branches
-   • Sibling attempts
-   • Completely separate solution paths
+Note: The current node is ALWAYS empty and awaiting its first action - never describe 
+it as having done something already.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ✅  CORRECT EXAMPLES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Current Node Context:
-"You are at Node 8, which is your first action from the root. Your parent (Node 1) 
-performed a FindCodeSnippet action that didn't add new context. There are three 
-terminal nodes in parallel branches (Nodes 7, 9, and 14) that have reached finished 
-states with different approaches."
+"You are at Node 8, which is your first action from the root. Your node is currently 
+empty and awaiting your first action. Your parent (Node 1) performed a FindCodeSnippet 
+action that didn't add new context. There are three terminal nodes in parallel branches 
+(Nodes 7, 9, and 14) that have reached finished states with different approaches."
 
-Node References:
-"Node 7 (a sibling attempt from your parent) tried implementing a file lock mechanism 
-but failed due to permission issues"
-
-"Node 10 (from a parallel branch) attempted to fix the issue by rewriting the class 
-structure, which passed all tests but introduced complexity"
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ❌  INCORRECT EXAMPLES - DO NOT USE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• "Look at Node 7's solution"
-• "Nodes 7 and 10 have proposed solutions"
-• "The solutions in Nodes 7, 10, and 14 are equivalent"
-• "Previous attempts have solved this"
-• Any reference to a node without explaining its relationship and what it attempted
-
+• "Node 8 is empty and expandable"
+• "The current node needs to explore improvements"
+• "We should validate the existing solution"
+• Any description implying the current node has already taken an action
 """
         # Add Input Structure section
         base_prompt += """
@@ -338,12 +322,26 @@ structure, which passed all tests but introduced complexity"
    • Rewards and visit counts
    • Key outcomes and observations"""
 
-        # ... rest of the input structure section ...
+        base_prompt += f"""
+{start_num}. Original Task: The problem to solve
+
+{start_num + 1}. Message History: Chain of executed actions leading to current state
+
+{start_num + 2}. Tree Structure:
+   • Parent Node: Your current starting point - the last successfully executed action
+   • Current Node: Your branch from the parent, waiting for your next action
+   • Sibling Nodes: Other independent solution attempts branching from the same parent
+     (These are from different trajectories and have not happened in your current path)
+
+{start_num + 3}. Alternative Node Information:
+   • Their proposed actions and parameters
+   • Their outcomes (from separate, independent trajectories)
+   • Warning flags for previously attempted approaches"""
 
         base_prompt += """
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📋  YOUR TASK
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━���━━━━━━━━
 1. Analyze the situation:
    • Start with current node context (position, state, parent, solutions)
    • Consider sibling attempts (remember these are alternative universes)
@@ -365,10 +363,50 @@ Remember: Focus on helping the agent achieve novel solutions and, while learning
 parallel attempts and avoiding re-implementing them. Always provide proper context since the agent cannot see the tree.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-⚠️  CRITICAL: Guide the agent to explore new solutions by learning from (but not 
-repeating) what worked and failed in other branches. Since the agent cannot see 
-the tree, you must explain these attempts and their outcomes."""
+⚠️  CRITICAL: EXPLORATION MANDATE  ⚠️
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Your primary goal is to encourage novel solution exploration:
+• ALWAYS suggest new approaches, even when existing solutions work well
+• Never discourage further exploration just because current solutions are "good enough"
+• Actively promote trying completely different strategies and implementations
+• Encourage creative combinations of existing approaches into novel solutions
+• Look for opportunities to work on entirely new files or components
+• Consider radical departures from conventional approaches
+• Never assume we have a "working" solution
 
+Examples of encouraging exploration:
+1. Fresh Starts
+   "While the Redis caching works, let's try a completely new approach:
+   • Create a new distributed/sharding.py module
+   • Implement a custom consistent hashing algorithm
+   • Design a new interface for shard management"
+
+2. Solution Evolution
+   "The async query optimization shows promise. Let's expand it:
+   • Combine the connection pooling from Node 7 with the caching from Node 12
+   • Extend the compiler.py changes to also optimize joins.py and aggregates.py
+   • Transform the basic LRU cache into a predictive pre-fetching system"
+
+3. Comprehensive Testing
+   • Add concurrent access tests with high load patterns
+   • Create chaos testing suite for network partitions
+   • Implement performance benchmarks comparing all approaches"
+
+✓ GOOD EXAMPLE:
+While Node 3's implementation of parse_http_date() works, let's explore:
+• Moving the year calculation logic to a new utils/date_parsing.py module
+• Adding property-based testing using hypothesis to generate edge cases
+• Implementing a date parsing cache with TTL for repeated requests
+
+✗ BAD EXAMPLE:
+We could try:
+• Adding more tests
+• Optimizing performance
+• Improving documentation
+• The current solution is complete and correct, making further exploration unnecessary
+• Both implementations work well, so we should stop here
+• No need to explore further since all tests are passing
+"""
         return base_prompt
 
     def save_feedback(

@@ -628,10 +628,14 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
         self,
         messages: list[dict],
         system_prompt: str,
-        response_model: type[StructuredOutput]
-        | List[type[StructuredOutput]]
-        | None = None,
+        response_model: type[StructuredOutput] | List[type[StructuredOutput]] | None = None,
     ) -> CompletionResponse:
+        # Convert Message objects to dictionaries if needed
+        messages = [
+            msg.model_dump() if hasattr(msg, 'model_dump') else msg 
+            for msg in messages
+        ]
+        
         tools = []
         tool_choice = {"type": "any"}
 
