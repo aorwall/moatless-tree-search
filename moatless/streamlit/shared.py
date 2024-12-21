@@ -350,6 +350,7 @@ def show_completion(completion):
             st.subheader("Input prompts")
             for input_idx, input_msg in enumerate(completion.input):
                 try:
+
                     if "content" in input_msg:
                         if isinstance(input_msg["content"], str):
                             content = input_msg["content"]
@@ -369,6 +370,9 @@ def show_completion(completion):
                             expanded=(input_idx == len(completion.input) - 1),
                         ):
                             st.code(content, language="")
+
+                            if "tool_calls" in input_msg:
+                                st.json(input_msg["tool_calls"])
                     else:
                         with st.expander(
                             f"Message {input_idx + 1} by {input_msg['role']}",

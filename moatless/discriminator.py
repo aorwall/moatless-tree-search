@@ -1,9 +1,8 @@
 import logging
-from typing import List
+from typing import List, Optional
+from pydantic import Field, BaseModel, ConfigDict
 
 from litellm.types.llms.openai import ChatCompletionUserMessage
-from pydantic import Field, BaseModel
-
 from moatless.completion.completion import CompletionModel
 from moatless.completion.model import StructuredOutput
 from moatless.debate import MultiAgentDebate
@@ -13,7 +12,9 @@ logger = logging.getLogger(__name__)
 
 
 class Discriminator(BaseModel):
-    def select(self, nodes: List[Node]) -> Node | None:
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def select(self, nodes: List[Node]) -> Optional[Node]:
         raise NotImplementedError
 
 

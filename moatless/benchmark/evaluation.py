@@ -15,7 +15,7 @@ from typing import Optional, Any
 
 import random
 import litellm
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Discriminator, Field
 from tqdm.auto import tqdm
 
 from moatless.agent.code_agent import CodingAgent
@@ -31,7 +31,8 @@ from moatless.benchmark.swebench import (
 from moatless.benchmark.utils import get_moatless_instance
 from moatless.completion.completion import CompletionModel
 from moatless.completion.log_handler import LogHandler
-from moatless.discriminator import AgentDiscriminator
+from moatless.discriminator import Discriminator, AgentDiscriminator
+from moatless.feedback.feedback import FeedbackGenerator
 from moatless.feedback.feedback_agent import FeedbackAgent
 from moatless.feedback.reward_feedback import RewardFeedbackGenerator
 from moatless.schema import MessageHistoryType
@@ -113,7 +114,7 @@ class TreeSearchSettings(BaseModel):
     )
 
     provide_feedback: bool = Field(
-        False,
+        True,
         description="Whether to provide feedback from previosly evaluated transitions.",
     )
 
@@ -147,15 +148,25 @@ class TreeSearchSettings(BaseModel):
         description="The maximum depth for one trajectory in simulations.",
     )
 
+    discriminator: Optional[Discriminator] = Field(
+        None,
+        description="The discriminator to use for the tree search.",
+    )   
+
     debate_settings: DebateSettings | None = Field(
         None,
         description="The settings for the debate.",
     )
 
     feedback_type: Optional[str] = Field(
-        "agent",
+        None,
         options=["reward", "agent", None],
         description="Type of feedback generator to use ('reward', 'agent', or None).",
+    )
+
+    feedback_generator: Optional[FeedbackGenerator] = Field(
+        None,
+        description="The feedback generator to use for the tree search.",
     )
 
     agent_message_history_type: Optional[MessageHistoryType] = Field(
@@ -558,14 +569,19 @@ class Evaluation:
                             value_function = None
 
                         # discriminator = MeanAwardDiscriminator()
-                        discriminator = AgentDiscriminator(
-                            completion=self._create_completion_model(),
-                            n_agents=self.settings.debate_n_agents,
-                            n_rounds=self.settings.debate_n_rounds,
-                        )
+                        if self.settings.discriminator:
+                            discriminator = self.settings.discriminator
+                        else:
+                            discriminator = AgentDiscriminator(
+                                completion=self._create_completion_model(),
+                                n_agents=self.settings.debate_n_agents,
+                                n_rounds=self.settings.debate_n_rounds,
+                            )
 
                         if self.settings.provide_feedback:
-                            if self.settings.feedback_type == "agent":
+                            if self.settings.feedback_generator:
+                                feedback = self.settings.feedback_generator 
+                            elif self.settings.feedback_type == "agent":
                                 feedback = FeedbackAgent(
                                     completion_model=self._create_completion_model(),
                                     instance_dir=instance_dir,
@@ -612,7 +628,11 @@ class Evaluation:
                     with open(eval_result_path, "w") as f:
                         json.dump(eval_result, f, indent=2)
 
-                search_tree.run_search()
+                try:
+                    search_tree.run_search()
+                except Exception:
+                    logger.exception("Failed")
+
                 best_node = search_tree.get_best_trajectory()
                 self.log_event(instance_id, "search_tree_execution_completed")
                 if best_node:

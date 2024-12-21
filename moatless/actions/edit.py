@@ -4,13 +4,14 @@ from typing import Literal, Optional, List
 
 from pydantic import Field, PrivateAttr
 
-from moatless.actions import RunTests, CreateFile
+from moatless.actions import RunTests, CreateFile, ViewCode
 from moatless.actions.action import Action
 from moatless.actions.code_modification_mixin import CodeModificationMixin
 from moatless.actions.create_file import CreateFileArgs
 from moatless.actions.model import ActionArguments, Observation, RetryException
 from moatless.actions.run_tests import RunTestsArgs
 from moatless.actions.string_replace import StringReplace, StringReplaceArgs
+from moatless.actions.view_code import ViewCodeArgs, CodeSpan
 from moatless.completion.model import ToolCall
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
@@ -96,6 +97,9 @@ class ClaudeEditTool(Action, CodeModificationMixin):
             runtime=self._runtime,
             code_index=self._code_index,
             repository=self._repository,
+        )
+        self._view_code = ViewCode(
+            repository=self._repository
         )
 
     def execute(
@@ -234,17 +238,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
     def _view(
         self, file_context: FileContext, path: Path, args: EditActionArguments
     ) -> Observation:
-        context_file = file_context.get_context_file(str(path))
-        if not context_file:
-            return Observation(
-                message=f"Could not get context for file: {path}",
-                properties={"fail_reason": "context_error"},
-            )
-
-        file_content = context_file.content
-        init_line = 1
-        file_lines = file_content.split("\n")
-        n_lines = len(file_lines)
+        codespan = CodeSpan(file_path=str(path))
 
         view_range = args.view_range
         if view_range:
@@ -253,50 +247,13 @@ class ClaudeEditTool(Action, CodeModificationMixin):
                     message="Invalid view_range. It should be a list of two integers.",
                     action_args=args,
                 )
-            init_line, final_line = view_range
+            codespan.start_line, codespan.end_line = view_range
 
-            if init_line < 1 or init_line > n_lines:
-                raise RetryException(
-                    message=f"Invalid view_range start line: {init_line}. Should be between 1 and {n_lines}",
-                    action_args=args,
-                )
-
-            if final_line == -1:
-                file_content = "\n".join(file_lines[init_line - 1 :])
-            else:
-                file_content = "\n".join(file_lines[init_line - 1 : final_line])
-        else:
-            final_line = n_lines
-
-        tokens = count_tokens(file_content)
-        if tokens > self.max_tokens_to_view:
-            view_context = FileContext(self._repository)
-            view_context.add_file(str(path), show_all_spans=True)
-
-            file_content = view_context.create_prompt(
-                show_span_ids=True,
-                show_outcommented_code=True,
-                only_signatures=True,
-                show_line_numbers=True,
-            )
-
-            raise RetryException(
-                message=f"File {path} is too large ({tokens} tokens) to view in its entirety. Maximum allowed is {self.max_tokens_to_view} tokens. "
-                f"Please specify a line range using view_range or spans with ViewCode to view specific parts of the file.\n"
-                f"Here's a structure of the file {file_content}",
-                action_args=args,
-            )
-
-        properties = {}
-        added_spans = file_context.add_line_span_to_context(
-            str(path), init_line, final_line
+        view_code_args = ViewCodeArgs(
+            thoughts=args.thoughts,
+            files=[codespan]
         )
-        if not added_spans:
-            properties["flag"] = "no_new_spans"
-
-        message = self._make_output(file_content, f"{path}", init_line)
-
-        return Observation(message=message, properties=properties)
+        return self._view_code.execute(view_code_args, file_context=file_context)
 
     def _create(
         self, file_context: FileContext, path: Path, file_text: str

@@ -112,61 +112,18 @@ class SearchBaseAction(Action):
 
     _repository: Repository = PrivateAttr()
     _code_index: CodeIndex = PrivateAttr()
-    _solutions_file: Path = PrivateAttr()
 
     def __init__(
         self,
         repository: Repository = None,
         code_index: CodeIndex | None = None,
         completion_model: CompletionModel | None = None,
-        instance_id: str | None = None,
-        evaluation_name: str | None = None,
         **data,
     ):
         super().__init__(completion_model=completion_model, **data)
         self._repository = repository
         self._code_index = code_index
-        
-        # Construct solutions file path from instance metadata
-        if instance_id and evaluation_name:
-            # Create path like: evaluations/{evaluation_name}/{instance_id}/solutions.json
-            solutions_path = Path("evaluations") / evaluation_name / instance_id / "solutions.json"
-            self._solutions_file = solutions_path
-        else:
-            self._solutions_file = Path("solutions.json")
-            logger.warning("No instance metadata provided, using default solutions.json path")
 
-    def _save_diff(self, diff_info: dict):
-        """Save a diff to the solutions file"""
-        try:
-            # Load existing solutions
-            if self._solutions_file.exists():
-                with open(self._solutions_file, 'r') as f:
-                    solutions = json.load(f)
-            else:
-                solutions = {"diffs": []}
-
-            # Add new diff if it doesn't exist
-            diff_exists = False
-            for existing_diff in solutions["diffs"]:
-                if (existing_diff["file_path"] == diff_info["file_path"] and 
-                    existing_diff["diff"] == diff_info["diff"]):
-                    diff_exists = True
-                    break
-
-            if not diff_exists:
-                solutions["diffs"].append(diff_info)
-                
-                # Create directory if it doesn't exist
-                self._solutions_file.parent.mkdir(parents=True, exist_ok=True)
-                
-                # Save updated solutions
-                with open(self._solutions_file, 'w') as f:
-                    json.dump(solutions, f, indent=2)
-                logger.info(f"Saved diff to {self._solutions_file}")
-
-        except Exception as e:
-            logger.error(f"Error saving diff to solutions file: {e}")
 
     def execute(
         self, args: SearchBaseArgs, file_context: FileContext | None = None, workspace: Workspace | None = None
@@ -242,7 +199,6 @@ class SearchBaseAction(Action):
                 show_outcommented_code=True,
             )
 
-        new_span_ids = file_context.add_file_context(view_context)
         properties["new_span_ids"] = new_span_ids
 
         logger.info(
@@ -370,7 +326,8 @@ class SearchBaseAction(Action):
                 )
 
                 messages.append(
-                    UserMessage(
+                    ChatCompletionUserMessage(
+                        role="user",
                         content=f"The identified code sections are too large ({tokens} tokens). Maximum allowed is {self.max_search_tokens} tokens. "
                         f"Please identify a smaller subset of the most relevant code sections."
                     )

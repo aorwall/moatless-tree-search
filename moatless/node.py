@@ -46,8 +46,8 @@ class ActionStep(BaseModel):
 
 class FeedbackData(BaseModel):
     """Structured feedback data model"""
-    analysis: str = Field(..., description="Analysis of the task and alternative branch attempts")
     feedback: str = Field(..., description="Direct feedback to the AI assistant")
+    analysis: Optional[str] = Field(None, description="Analysis of the task and alternative branch attempts")
     suggested_node_id: Optional[int] = Field(
         None, description="ID of the node that should be expanded next (optional)"
     )
@@ -255,6 +255,10 @@ class Node(BaseModel):
             node = self
 
         return node._get_all_nodes()
+
+    def get_leaf_nodes(self) -> List["Node"]:
+        """Get all leaf nodes ."""
+        return [node for node in self.get_root().get_all_nodes() if node.is_leaf()]
 
     def _get_all_nodes(self) -> List["Node"]:
         nodes = []

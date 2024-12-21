@@ -106,7 +106,7 @@ class CodingValueFunction(ValueFunction):
             if isinstance(node.action, SearchBaseArgs):
                 if not node.observation.properties.get("new_span_ids"):  # TODO Use fail reason?
                     return Reward(
-                        value=-25,
+                        value=25,
                         explanation="Search returned results but did not add any new spans to the context",
                     ), None
 
@@ -170,7 +170,7 @@ class CodingValueFunction(ValueFunction):
                         explanation=f"Test failures decreased: {previous_failure_count}->{failure_count}, errors {previous_error_count}->{error_count}{test_suggestion}",
                     ), None
                 else:
-                    new_value = max(-100, passed_count - 25)
+                    new_value = max(-100, previous_reward - 25)
                     return Reward(
                         value=new_value,
                         explanation=f"No improvement in test results: failures {failure_count}, errors {error_count}{test_suggestion}",
@@ -195,7 +195,7 @@ class CodingValueFunction(ValueFunction):
                 ), None
 
             return Reward(
-                value=-25, explanation="Request completed but no new context was needed"
+                value=25, explanation="Request completed but no new context was needed"
             ), None
 
         return super().get_reward(node)

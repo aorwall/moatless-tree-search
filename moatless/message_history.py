@@ -79,7 +79,7 @@ class MessageHistoryGenerator(BaseModel):
             MessageHistoryType.MESSAGES: self._generate_message_history
         }
         start_idx = 0 if self.include_root_node else 1
-        previous_nodes = node.get_trajectory()[start_idx:-1]
+        previous_nodes = node.get_trajectory()[start_idx:]
         return generators[self.message_history_type](node, previous_nodes)
 
     def _generate_message_history(self, node: Node, previous_nodes: List["Node"]) -> List[dict[str, Any]]:
@@ -105,6 +105,9 @@ class MessageHistoryGenerator(BaseModel):
 
             tool_calls = []
             tool_responses = []
+
+            if previous_node.feedback_data:
+                messages.append(ChatCompletionUserMessage(role="user", content=previous_node.feedback_data.feedback))
 
             if not previous_node.assistant_message and not previous_node.action_steps:
                 continue
@@ -145,9 +148,6 @@ class MessageHistoryGenerator(BaseModel):
 
             messages.append(assistant_message)
             messages.extend(tool_responses)
-
-        if node.feedback_data:
-            messages.append(ChatCompletionUserMessage(role="user", content=node.feedback_data.feedback))
 
         logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
 

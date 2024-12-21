@@ -146,25 +146,13 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
             message=success_msg,
             properties={"diff": diff, "success": True},
         )
-
-        if not self._runtime:
-            return observation
-
-        run_tests = RunTests(
-            repository=self._repository,
-            runtime=self._runtime,
-            code_index=self._code_index,
-        )
-        test_observation = run_tests.execute(
-            RunTestsArgs(
-                thoughts=args.thoughts,
-                test_files=[args.path],
-            ),
-            file_context,
+        test_summary = self.run_tests(
+            file_path=str(path),
+            file_context=file_context,
         )
 
-        observation.properties.update(test_observation.properties)
-        observation.message += "\n\n" + test_observation.message
+        if test_summary:
+            observation.message += f"\n\n{test_summary}"
 
         return observation
 

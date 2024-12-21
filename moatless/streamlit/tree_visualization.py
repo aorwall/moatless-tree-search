@@ -690,7 +690,7 @@ def update_visualization(
                         if selected_node.action and selected_node.completions.get("build_action"):
                             tabs.append("Build")
 
-                        if selected_node.action and selected_node.completions.get("execute_action"):
+                        if selected_node.action and (selected_node.completions.get("execute_action") or (selected_node.observation and selected_node.observation.execution_completion)):
                             tabs.append("Execution")
 
                         # Check for selector completion
@@ -701,7 +701,7 @@ def update_visualization(
                         if has_selector:
                             tabs.append("Selector")
 
-                        if selected_node.completions.get("value_function"):
+                        if selected_node.reward:
                             tabs.append("Reward")
 
                         # Always add JSON tab if we have a selected node
@@ -727,7 +727,7 @@ def update_visualization(
                             # Show feedback if it exists
                             if selected_node and selected_node.feedback_data:
                                 st.subheader("Feedback")
-                                st.success(selected_node.feedback_data.feedback)
+                                st.markdown(selected_node.feedback_data.feedback)
 
                             # Show reward information
                             if selected_node.reward:
@@ -768,7 +768,10 @@ def update_visualization(
 
                         if "Execution" in tabs:
                             with tab_contents[tabs.index("Execution")]:
-                                completion = selected_node.completions.get("execute_action")
+                                if selected_node.observation.execution_completion:
+                                    completion = selected_node.observation.execution_completion
+                                else:
+                                    completion = selected_node.completions.get("execute_action")
                                 show_completion(completion)
 
                         if "Selector" in tabs:
@@ -801,28 +804,29 @@ def update_visualization(
 
                         if "Feedback" in tabs:
                             with tab_contents[tabs.index("Feedback")]:
-                                try:
-                                    # Access the feedback completion from the completions dictionary
-                                    feedback_completion = selected_node.completions["feedback"]
-                                    
+
+                                # Display feedback summary
+                                st.subheader("Feedback")
+                                st.markdown("**Analysis**")
+                                st.markdown(selected_node.feedback_data.analysis)
+                                st.markdown("**Feedback**")
+                                st.markdown(selected_node.feedback_data.feedback)
+
+                                # Access the feedback completion from the completions dictionary
+                                feedback_completion = selected_node.completions.get("feedback")
+                                if feedback_completion:
+
                                     # Debug logging
                                     logger.debug(f"Feedback completion type: {type(feedback_completion)}")
-                                    
+
                                     # Convert the completion to a dictionary first
                                     completion_data = (
-                                        feedback_completion.model_dump() 
-                                        if hasattr(feedback_completion, 'model_dump') 
+                                        feedback_completion.model_dump()
+                                        if hasattr(feedback_completion, 'model_dump')
                                         else feedback_completion
                                     )
-                                    
+
                                     response_data = completion_data.get('response', {})
-                                    
-                                    # Display feedback summary
-                                    st.subheader("Feedback")
-                                    st.markdown("**Analysis**")
-                                    st.info(selected_node.feedback_data.analysis)
-                                    st.markdown("**Feedback**")
-                                    st.success(selected_node.feedback_data.feedback)
 
                                     # System Prompt
                                     with st.expander("System Prompt"):
@@ -842,17 +846,17 @@ def update_visualization(
                                                     # Debug logging
                                                     logger.debug(f"Message type: {type(msg)}")
                                                     logger.debug(f"Message content: {msg}")
-                                                    
+
                                                     # Ensure we're working with a dictionary
                                                     msg_dict = (
                                                         msg.model_dump() if hasattr(msg, 'model_dump')
                                                         else msg if isinstance(msg, dict)
                                                         else {'role': 'unknown', 'content': str(msg)}
                                                     )
-                                                    
+
                                                     role = msg_dict.get('role', 'unknown')
                                                     content = msg_dict.get('content', '')
-                                                    
+
                                                     st.markdown(f"**{role}**")
                                                     st.text(content)
                                                     st.markdown("---")
@@ -876,23 +880,20 @@ def update_visualization(
                                         st.subheader("Usage Information")
                                         col1, col2 = st.columns(2)
                                         with col1:
-                                            st.metric("Completion Cost", 
+                                            st.metric("Completion Cost",
                                                     f"${usage_data.get('completion_cost', 0):.4f}")
-                                            st.metric("Completion Tokens", 
+                                            st.metric("Completion Tokens",
                                                     usage_data.get('completion_tokens', 0))
                                         with col2:
-                                            st.metric("Prompt Tokens", 
+                                            st.metric("Prompt Tokens",
                                                     usage_data.get('prompt_tokens', 0))
-                                            st.metric("Cached Tokens", 
+                                            st.metric("Cached Tokens",
                                                     usage_data.get('cached_tokens', 0))
 
                                     # Timestamp if available
                                     timestamp = response_data.get('timestamp')
                                     if timestamp:
                                         st.caption(f"Generated at: {timestamp}")
-                                except Exception as e:
-                                    st.error(f"Error displaying feedback: {str(e)}")
-                                    logger.exception("Error in feedback visualization")
 
                     else:
                         st.info("Select a node in the graph or from the dropdown to view details")

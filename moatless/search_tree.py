@@ -86,7 +86,7 @@ class SearchTree(BaseModel):
         None, description="The maximum depth for one trajectory in simulations."
     )
     finish_before_reexpanding: bool = Field(
-        True, description="Whether to reach a Finish state before reexpanding."
+        False, description="Whether to reach a Finish state before reexpanding."
     )
     finish_before_reexpanding_depth: Optional[int] = Field(
         20, description="The depth to reach a Finish state before reexpanding."
@@ -288,7 +288,7 @@ class SearchTree(BaseModel):
             self.log(logger.info, "No expandable nodes found.")
             return None
         
-        if expandable_nodes:
+        if expandable_nodes and self.finish_before_reexpanding:
             # Sort by node_id to get the most recently created node
             latest_node = max(expandable_nodes, key=lambda n: n.node_id)
             

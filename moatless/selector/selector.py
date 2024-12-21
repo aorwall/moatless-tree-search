@@ -108,6 +108,10 @@ class Selector(BaseModel):
     type: Literal["BestFirstSelector", "SoftmaxSelector"] = Field(
         ..., description="The type of selector"
     )
+    minimum_reward_threshold: float = Field(
+        default=-float('inf'),
+        description="Minimum reward threshold for node selection. Nodes below this value will not be considered."
+    )
     exploitation_weight: float = Field(
         default=1.0,
         description="Weight factor for the exploitation term in the UCT score calculation. Higher values favor exploitation over exploration.",
@@ -180,7 +184,38 @@ class Selector(BaseModel):
     _similarity_cache: Dict[Tuple[int, int], float] = PrivateAttr(default_factory=dict)
 
     def select(self, expandable_nodes: List[Node]) -> Node:
-        raise NotImplementedError("Subclasses must implement the select method.")
+        """Base select method with common validation logic"""
+        if len(expandable_nodes) == 0:
+            raise ValueError("No expandable nodes provided")
+            
+        if len(expandable_nodes) == 1:
+            return expandable_nodes[0]
+            
+        # Filter nodes based on minimum reward threshold
+        valid_nodes = [
+            node for node in expandable_nodes 
+            if self._get_reward(node) >= self.minimum_reward_threshold
+        ]
+        
+        # If no nodes meet the threshold, return root if it's expandable
+        if not valid_nodes:
+            root = expandable_nodes[0].get_root()
+            if root.is_expandable():
+                return root
+            # If root is not expandable, return None
+            return None
+            
+        return self._select_node(valid_nodes)
+
+    def _get_reward(self, node: Node):
+        if self.use_average_reward:
+            return node.calculate_mean_reward()
+        else:
+            return node.reward.value if node.reward else 0
+
+    def _select_node(self, nodes: List[Node]) -> Node:
+        """Internal selection method to be implemented by subclasses"""
+        raise NotImplementedError("Subclasses must implement _select_node method")
 
     def uct_score(self, node: Node) -> UCTScore:
         """
@@ -547,17 +582,14 @@ class Selector(BaseModel):
 
 class BestFirstSelector(Selector):
     type: Literal["BestFirstSelector"] = "BestFirstSelector"
-
-    def select(self, expandable_nodes: List[Node]) -> Node:
-        if len(expandable_nodes) == 1:
-            return expandable_nodes[0]
-
-        # Calculate UCT scores with components
-        nodes_with_scores = [(node, self.uct_score(node)) for node in expandable_nodes]
+    
+    def _select_node(self, nodes: List[Node]) -> Node:
+        # Move existing selection logic here
+        nodes_with_scores = [(node, self.uct_score(node)) for node in nodes]
         sorted_nodes = sorted(
             nodes_with_scores, key=lambda x: x[1].final_score, reverse=True
         )
-
+        
         # Log top nodes with detailed score breakdowns
         top_nodes = sorted_nodes[: min(len(sorted_nodes), 10)]
         logger.info("Comparing top nodes:")
@@ -567,11 +599,10 @@ class BestFirstSelector(Selector):
                 f"Reward: {node.reward.value if node.reward else '-'} - "
                 f"\nScore components: {score}"
             )
-
-        # Select the node with the highest UCT score
+            
         selected_node = sorted_nodes[0][0]
         selected_score = sorted_nodes[0][1].final_score
-
+        
         logger.info(
             f"Selected Node {selected_node.node_id} with UCT Score: {selected_score:.2f}"
         )
@@ -580,25 +611,23 @@ class BestFirstSelector(Selector):
 
 class SoftmaxSelector(Selector):
     type: Literal["SoftmaxSelector"] = "SoftmaxSelector"
-
-    def select(self, expandable_nodes: List[Node]) -> Node:
-        if len(expandable_nodes) == 1:
-            return expandable_nodes[0]
-        
-        nodes_with_scores = [(node, self.uct_score(node)) for node in expandable_nodes]
+    
+    def _select_node(self, nodes: List[Node]) -> Node:
+        # Move existing selection logic here
+        nodes_with_scores = [(node, self.uct_score(node)) for node in nodes]
         uct_scores = [score.final_score for _, score in nodes_with_scores]
-
+        
         # Calculate softmax probabilities
         softmax_scores = np.exp(uct_scores - np.max(uct_scores))
         probabilities = softmax_scores / softmax_scores.sum()
-
-        # Log summary for top nodes (limited to 10)
+        
+        # Log summary for top nodes
         top_nodes = sorted(
-            zip(expandable_nodes, uct_scores, probabilities),
+            zip(nodes, uct_scores, probabilities),
             key=lambda x: x[1],
             reverse=True,
         )[:10]
-
+        
         logger.info("Softmax selection summary (top 10 nodes):")
         for node, score, prob in top_nodes:
             logger.info(
@@ -606,17 +635,17 @@ class SoftmaxSelector(Selector):
                 f"Reward={node.reward.value if node.reward else '-'}, "
                 f"UCTScore={score:.2f}, Probability={prob:.4f}"
             )
-
+            
         # Select a node based on the probabilities
-        selected_node = random.choices(expandable_nodes, weights=probabilities, k=1)[0]
-        selected_index = expandable_nodes.index(selected_node)
-
+        selected_node = random.choices(nodes, weights=probabilities, k=1)[0]
+        selected_index = nodes.index(selected_node)
+        
         logger.info(
             f"Selected Node {selected_node.node_id}: "
             f"UCTScore={uct_scores[selected_index]:.2f}, "
             f"Probability={probabilities[selected_index]:.4f}"
         )
-
+        
         return selected_node
     
 
