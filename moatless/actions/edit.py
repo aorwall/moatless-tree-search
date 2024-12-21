@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 from typing import Literal, Optional, List
 
-from pydantic import Field, PrivateAttr
+from pydantic import Field, PrivateAttr, field_validator
 
 from moatless.actions import RunTests, CreateFile, ViewCode
 from moatless.actions.action import Action
@@ -50,6 +50,51 @@ class EditActionArguments(ActionArguments):
     old_str: Optional[str] = Field(None, description="String to replace")
     new_str: Optional[str] = Field(None, description="Replacement string")
     insert_line: Optional[int] = Field(None, description="Line number for insertion")
+
+    @field_validator("file_text")
+    @classmethod
+    def validate_file_text(cls, v, info):
+        if info.data.get("command") == "create" and not v:
+            raise ValueError("Parameter `file_text` is required for command: create")
+        return v
+
+    @field_validator("old_str")
+    @classmethod
+    def validate_old_str(cls, v, info):
+        if info.data.get("command") == "str_replace" and not v:
+            raise ValueError("Parameter `old_str` is required for command: str_replace")
+        return v
+
+    @field_validator("new_str")
+    @classmethod
+    def validate_new_str(cls, v, info):
+        if info.data.get("command") == "str_replace" and v is None:
+            raise ValueError("Parameter `new_str` cannot be null for command: str_replace")
+        if info.data.get("command") == "insert" and v is None:
+            raise ValueError("Parameter `new_str` is required for command: insert")
+        return v
+
+    @field_validator("insert_line")
+    @classmethod
+    def validate_insert_line(cls, v, info):
+        if info.data.get("command") == "insert" and v is None:
+            raise ValueError("Parameter `insert_line` is required for command: insert")
+        return v
+
+    @field_validator("view_range")
+    @classmethod
+    def validate_view_range(cls, v):
+        if v is not None and len(v) != 2:
+            raise ValueError("Invalid view_range. It should be a list of two integers.")
+        return v
+
+    @field_validator("command")
+    @classmethod
+    def validate_command(cls, v):
+        valid_commands = {"view", "create", "str_replace", "insert", "undo_edit"}
+        if v not in valid_commands:
+            raise ValueError(f"Unknown command: {v}")
+        return v
 
     class Config:
         title = "str_replace_editor"
@@ -128,11 +173,6 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         if args.command == "view":
             return self._view(file_context, path, args)
         elif args.command == "create":
-            if not args.file_text:
-                raise RetryException(
-                    message="Parameter `file_text` is required for command: create",
-                    action_args=args,
-                )
             return self._create_file.execute(
                 CreateFileArgs(
                     path=args.path,
@@ -142,18 +182,6 @@ class ClaudeEditTool(Action, CodeModificationMixin):
                 file_context,
             )
         elif args.command == "str_replace":
-            if not args.old_str:
-                raise RetryException(
-                    message="Parameter `old_str` is required for command: str_replace",
-                    action_args=args,
-                )
-
-            if args.new_str is None:
-                raise RetryException(
-                    message="Parameter `new_str` cannot be null for command: str_replace",
-                    action_args=args,
-                )
-
             return self._str_replace.execute(
                 StringReplaceArgs(
                     path=args.path,
@@ -164,16 +192,6 @@ class ClaudeEditTool(Action, CodeModificationMixin):
                 file_context,
             )
         elif args.command == "insert":
-            if args.insert_line is None:
-                raise RetryException(
-                    message="Parameter `insert_line` is required for command: insert",
-                    action_args=args,
-                )
-            if args.new_str is None:
-                raise RetryException(
-                    message="Parameter `new_str` is required for command: insert",
-                    action_args=args,
-                )
             observation = self._insert(
                 file_context, path, args.insert_line, args.new_str
             )
@@ -242,11 +260,6 @@ class ClaudeEditTool(Action, CodeModificationMixin):
 
         view_range = args.view_range
         if view_range:
-            if len(view_range) != 2:
-                raise RetryException(
-                    message="Invalid view_range. It should be a list of two integers.",
-                    action_args=args,
-                )
             codespan.start_line, codespan.end_line = view_range
 
         view_code_args = ViewCodeArgs(
