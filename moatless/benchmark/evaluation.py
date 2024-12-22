@@ -435,22 +435,19 @@ class Evaluation:
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
 
-        # Check for existing evaluation only if not overwriting
-        if not self.overwrite and os.path.exists(eval_result_path):
-            try:
-                with open(eval_result_path) as f:
-                    eval_result = json.load(f)
-                    if eval_result.get("status") == "completed":
-                        logger.info(f"Skipping completed instance {instance_id} (use --overwrite to force re-evaluation)")
-                        return eval_result
-            except json.JSONDecodeError:
-                # If file is corrupted, we'll start fresh
-                pass
-
         # Initialize fresh eval_result
         eval_result = {
             "node_results": {},
         }
+        
+        if os.path.exists(eval_result_path):
+            try:
+                with open(eval_result_path) as f:
+                    eval_result = json.load(f)
+            except json.JSONDecodeError:
+                # If file is corrupted, we'll start fresh
+                pass
+
 
         logger.info(f"Evaluating {instance_id}")
         problem_statement = f"<task>\nSolve the following reported issue in the {instance['repo']} repository:\n\n{instance['problem_statement']}\n</task>"
@@ -470,6 +467,14 @@ class Evaluation:
                     if persisted_tree.is_finished():
                         logger.info(f"Found completed search tree for {instance_id}")
                         search_tree = persisted_tree
+                        # Check for existing evaluation only if not overwriting
+
+                        if not self.overwrite:
+                            
+                            if eval_result.get("status") == "completed":
+                                logger.info(f"Skipping completed instance {instance_id} (use --overwrite to force re-evaluation)")
+                                return eval_result
+                            
                 except json.JSONDecodeError as e:
                     logger.error(
                         f"Failed to parse search tree from {trajectory_path}. Will remove file to start over. Error: {e}"

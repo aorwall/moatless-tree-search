@@ -333,8 +333,6 @@ def create_trajectory_stats(
             else None
         )
 
-    result.reward = trajectory_state.reward.value if trajectory_state.reward else None
-
     if trajectory_state.file_context:
         patch = trajectory_state.file_context.generate_git_patch()
         result.has_diff = bool(patch.strip())
@@ -490,18 +488,14 @@ def to_result(
                     .get("resolved")
                     is not None
                 ):
-                    if (
-                        eval_report["node_results"]
-                        .get(str(traj.state_id), {})
-                        .get("resolved", False)
-                    ):
+                    if traj.resolved is True:
                         result.resolved_solutions += 1
                         if traj.reward and (
                             result.resolved_max_reward is None
                             or traj.reward > result.resolved_max_reward
                         ):
                             result.resolved_max_reward = traj.reward
-                    else:
+                    elif traj.resolved is False:
                         result.failed_solutions += 1
                         if traj.reward and (
                             result.failed_max_reward is None

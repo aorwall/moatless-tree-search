@@ -260,21 +260,22 @@ def create_linear_table(nodes: List[Node], max_node_id: int, eval_result: Option
             
             # Input tab
             with action_tabs[0]:
-                if hasattr(node.action, "thoughts") and node.action.thoughts:
-                    st.markdown(node.action.thoughts)
-            
-                if hasattr(node.action, "old_str"):
-                    st.markdown(f"**File path:** `{node.action.path}`")
-                    st.markdown("**Old string:**")
-                    st.code(node.action.old_str)
-                    st.markdown("**New string:**")
-                    st.code(node.action.new_str)
-                elif hasattr(node.action, "file_text"):
-                    st.write(f"File path: {node.action.path}")
-                    st.markdown("**File text:**")
-                    st.code(node.action.file_text)
-                else:
-                    st.json(node.action.model_dump(exclude={"thoughts"}, exclude_none=True))
+                if node.assistant_message:
+                    st.markdown(node.assistant_message)
+                    
+                for action_step in node.action_steps:
+                    if hasattr(action_step.action, "old_str"):
+                        st.markdown(f"**File path:** `{action_step.action.path}`")
+                        st.markdown("**Old string:**")
+                        st.code(action_step.action.old_str)
+                        st.markdown("**New string:**")
+                        st.code(action_step.action.new_str)
+                    elif hasattr(node.action, "file_text"):
+                        st.write(f"File path: {action_step.action.path}")
+                        st.markdown("**File text:**")
+                        st.code(action_step.action.file_text)
+                    else:
+                        st.json(action_step.action.model_dump(exclude_none=True))
 
             # Build tab
             with action_tabs[1]:

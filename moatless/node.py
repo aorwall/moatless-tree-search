@@ -27,6 +27,10 @@ class ActionStep(BaseModel):
     observation: Optional[Observation] = None
     completion: Optional[Completion] = None
 
+    def is_executed(self) -> bool:
+        """Check if this action step has been executed by verifying if it has observations."""
+        return self.observation is not None
+
     def model_dump(self, **kwargs):
         data = super().model_dump(**kwargs)
 
@@ -295,6 +299,9 @@ class Node(BaseModel):
         for step in self.action_steps:
             if step.completion:
                 total_usage += step.completion.usage
+
+        for completion in self.completions.values():
+            total_usage += completion.usage
 
         return total_usage
 
@@ -575,6 +582,10 @@ class Node(BaseModel):
         for child in self.children:
             child.truncate_children_by_id(max_id)
 
+    def has_unexecuted_actions(self) -> bool:
+        """Check if any action step in this node has not been executed."""
+        return any(not step.is_executed() for step in self.action_steps)
+
 
 def generate_ascii_tree(
     root: Node,
@@ -631,9 +642,12 @@ def _append_ascii_node(
 
     # Build node information
     state_params = []
-    if node.action:
-        state_params.append(node.action.name)
-        if node.observation and node.observation.expect_correction:
+    if node.action_steps:
+        # Include all action names from action steps
+        action_names = [step.action.name for step in node.action_steps if step.action]
+        state_params.extend(action_names)
+        # Check if any action step expects correction
+        if any(step.observation and step.observation.expect_correction for step in node.action_steps):
             state_params.append("expect_correction")
 
     # Build reward string
@@ -712,15 +726,18 @@ def _append_ascii_node(
                     tree_lines.append(f"{content_prefix}│  {formatted_line}")
 
     # Add action details if available
-    if include_action_details and node.action:
-        tree_lines.append(f"{content_prefix}│ Action Details:")
-        tree_lines.append(f"{content_prefix}│  Prompt: {node.action.to_prompt()}")
-        if node.observation:
-            tree_lines.append(f"{content_prefix}│  Output: {node.observation.message}")
-            if node.observation.extra:
-                tree_lines.append(f"{content_prefix}│  Extra: {node.observation.extra}")
-            if node.observation.expect_correction:
-                tree_lines.append(f"{content_prefix}│  Expects Correction: True")
+    if include_action_details and node.action_steps:
+        tree_lines.append(f"{content_prefix}│ Action Steps:")
+        for i, step in enumerate(node.action_steps, 1):
+            tree_lines.append(f"{content_prefix}│ Step {i}:")
+            tree_lines.append(f"{content_prefix}│  Action: {step.action.name}")
+            tree_lines.append(f"{content_prefix}│  Prompt: {step.action.to_prompt()}")
+            if step.observation:
+                tree_lines.append(f"{content_prefix}│  Output: {step.observation.message}")
+                if step.observation.extra:
+                    tree_lines.append(f"{content_prefix}│  Extra: {step.observation.extra}")
+                if step.observation.expect_correction:
+                    tree_lines.append(f"{content_prefix}│  Expects Correction: True")
 
     # Add file context if available
     if include_file_context and node.file_context and not node.file_context.is_empty():

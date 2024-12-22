@@ -70,7 +70,7 @@ class MessageHistoryGenerator(BaseModel):
         return message_history_type.value
 
     def generate(self, node: "Node") -> List[AllMessageValues]:  # type: ignore
-        logger.info(
+        logger.debug(
             f"Generating message history for Node{node.node_id}: {self.message_history_type}"
         )
         generators = {
@@ -289,46 +289,47 @@ class MessageHistoryGenerator(BaseModel):
         for i, previous_node in enumerate(reversed(previous_nodes)):
             current_messages = []
             
-            if previous_node.action:
-                if previous_node.action.name == "ViewCode":
-                    # Always include ViewCode actions
-                    file_path = previous_node.action.files[0].file_path
+            if previous_node.action_steps:
+                for action_step in previous_node.action_steps:
+                    if action_step.action.name == "ViewCode":
+                        # Always include ViewCode actions
+                        file_path = action_step.action.files[0].file_path
 
-                    if file_path not in shown_files:
-                        context_file = previous_node.file_context.get_context_file(file_path)
-                        if context_file and (context_file.span_ids or context_file.show_all_spans):
-                            shown_files.add(context_file.file_path)
-                            observation = context_file.to_prompt(
-                                show_span_ids=False,
-                                show_line_numbers=True,
-                                exclude_comments=False,
-                                show_outcommented_code=True,
-                                outcomment_code_comment="... rest of the code",
-                            )
-                        else:
-                            observation = previous_node.observation.message
-                        current_messages.append((previous_node.action, observation))
-                else:
-                    # Count tokens for non-ViewCode actions
-                    observation_str = (
-                        previous_node.observation.summary
-                        if self.include_file_context and hasattr(previous_node.observation, "summary") and previous_node.observation.summary
-                        else previous_node.observation.message if previous_node.observation
-                        else "No output found."
-                    )
-
-                    # Calculate tokens for this message pair
-                    action_tokens = count_tokens(previous_node.action.model_dump_json())
-                    observation_tokens = count_tokens(observation_str)
-                    message_tokens = action_tokens + observation_tokens
-                    
-                    # Only add if within token limit
-                    if total_tokens + message_tokens <= self.max_tokens:
-                        total_tokens += message_tokens
-                        current_messages.append((previous_node.action, observation_str))                       
+                        if file_path not in shown_files:
+                            context_file = previous_node.file_context.get_context_file(file_path)
+                            if context_file and (context_file.span_ids or context_file.show_all_spans):
+                                shown_files.add(context_file.file_path)
+                                observation = context_file.to_prompt(
+                                    show_span_ids=False,
+                                    show_line_numbers=True,
+                                    exclude_comments=False,
+                                    show_outcommented_code=True,
+                                    outcomment_code_comment="... rest of the code",
+                                )
+                            else:
+                                observation = action_step.observation.message
+                            current_messages.append((action_step.action, observation))
                     else:
-                        # Skip remaining non-ViewCode messages if we're over the limit
-                        continue
+                        # Count tokens for non-ViewCode actions
+                        observation_str = (
+                            action_step.observation.summary
+                            if self.include_file_context and hasattr(action_step.observation, "summary") and action_step.observation.summary
+                            else action_step.observation.message if action_step.observation
+                            else "No output found."
+                        )
+
+                        # Calculate tokens for this message pair
+                        action_tokens = count_tokens(action_step.action.model_dump_json())
+                        observation_tokens = count_tokens(observation_str)
+                        message_tokens = action_tokens + observation_tokens
+
+                        # Only add if within token limit
+                        if total_tokens + message_tokens <= self.max_tokens:
+                            total_tokens += message_tokens
+                            current_messages.append((action_step.action, observation_str))
+                        else:
+                            # Skip remaining non-ViewCode messages if we're over the limit
+                            continue
 
                 # Handle file context for non-ViewCode actions
                 if self.include_file_context and previous_node.action.name != "ViewCode":
@@ -339,14 +340,14 @@ class MessageHistoryGenerator(BaseModel):
                             files_to_show.add(context_file.file_path)
                         if context_file.was_edited:
                             has_edits = True
-                    
+
                     shown_files.update(files_to_show)
-                    
+
                     if files_to_show:
                         # Batch all files into a single ViewCode action
                         code_spans = []
                         observations = []
-                        
+
                         for file_path in files_to_show:
                             context_file = previous_node.file_context.get_context_file(file_path)
                             if context_file.show_all_spans:
@@ -355,7 +356,7 @@ class MessageHistoryGenerator(BaseModel):
                                 code_spans.append(CodeSpan(file_path=file_path, span_ids=context_file.span_ids))
                             else:
                                 continue
-                                
+
                             observations.append(context_file.to_prompt(
                                 show_span_ids=False,
                                 show_line_numbers=True,
@@ -363,7 +364,7 @@ class MessageHistoryGenerator(BaseModel):
                                 show_outcommented_code=True,
                                 outcomment_code_comment="... rest of the code",
                             ))
-                        
+
                         if code_spans:
                             thought = f"Let's view the content in the updated files"
                             args = ViewCodeArgs(files=code_spans, thoughts=thought)
@@ -383,25 +384,25 @@ class MessageHistoryGenerator(BaseModel):
                                 shown_diff = True
 
                     # Add test results only if status changed or first occurrence
-                    if (previous_node.observation and  
+                    if (previous_node.observation and
                         previous_node.observation.properties.get("diff")):
-                        
+
                         current_test_status = node.file_context.get_test_status()
                         if last_test_status is None or current_test_status != last_test_status:
                             run_tests_args = RunTestsArgs(
                                 thoughts=f"Run the tests to verify the changes.",
                                 test_files=list(node.file_context._test_files.keys())
                             )
-                            
+
                             test_output = ""
                             if last_test_status is None:
                                 # Show full details for first test run
                                 failure_details = node.file_context.get_test_failure_details()
                                 if failure_details:
                                     test_output += failure_details + "\n\n"
-                            
+
                             test_output += node.file_context.get_test_summary()
-                            
+
                             # Calculate and check token limits
                             test_tokens = count_tokens(test_output) + count_tokens(run_tests_args.model_dump_json())
                             if total_tokens + test_tokens <= self.max_tokens:
