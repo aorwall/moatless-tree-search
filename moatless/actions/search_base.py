@@ -297,22 +297,24 @@ class SearchBaseAction(Action):
                 system_prompt=IDENTIFY_SYSTEM_PROMPT,
                 response_model=Identify,
             )
-            identified_code = completion_response.structured_output
             logger.info(
-                f"Identifying relevant code sections. Attempt {retry_attempt + 1} of {MAX_RETRIES}.\n{identified_code.identified_spans}"
+                f"Identifying relevant code sections. Attempt {retry_attempt + 1} of {MAX_RETRIES}.{len(completion_response.structured_outputs)} identify requests."
             )
 
             view_context = FileContext(repo=self._repository)
-            if identified_code.identified_spans:
-                for identified_spans in identified_code.identified_spans:
-                    view_context.add_line_span_to_context(
-                        identified_spans.file_path,
-                        identified_spans.start_line,
-                        identified_spans.end_line,
-                        add_extra=True,
-                    )
-            else:
+            if not completion_response.structured_outputs:
+                logger.warning("No identified code in response")
                 return view_context, completion_response.completion
+
+            for identified_code in completion_response.structured_outputs:
+                if identified_code.identified_spans:
+                    for identified_spans in identified_code.identified_spans:
+                        view_context.add_line_span_to_context(
+                            identified_spans.file_path,
+                            identified_spans.start_line,
+                            identified_spans.end_line,
+                            add_extra=True,
+                        )
 
             tokens = view_context.context_size()
 

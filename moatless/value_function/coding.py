@@ -129,10 +129,9 @@ class CodingValueFunction(ValueFunction):
                 # Get previous test results
                 previous_failure_count = 0
                 previous_error_count = 0
-                previous_passed_count = 0
                 previous_reward = 0
                 parent_node = node.parent
-                if parent_node and parent_node.file_context:
+                if parent_node and parent_node.file_context and parent_node.file_context.was_edited():
                     previous_passed_count, previous_failure_count, previous_error_count = parent_node.file_context.get_test_counts()
                     if parent_node.reward:
                         previous_reward = parent_node.reward.value

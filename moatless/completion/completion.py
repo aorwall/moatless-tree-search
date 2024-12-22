@@ -681,62 +681,36 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
             _inject_prompt_caching(anthropic_messages)
             system_message["cache_control"] = {"type": "ephemeral"}
 
+        retries = tenacity.Retrying(
+            retry=tenacity.retry_if_not_exception_type(anthropic.BadRequestError),
+            stop=tenacity.stop_after_attempt(3),
+        )
 
-        completion_response = None
-        retry_message = None
-        for i in range(2):
-            if i > 0:
-                logger.warning(
-                    f"Retrying completion request: {retry_message} (attempt {i})"
-                )
-
+        def _do_completion():
+            completion_response = None
             try:
                 completion_response = anthropic_client.beta.messages.create(
                     model=self.model,
                     max_tokens=self.max_tokens,
                     temperature=self.temperature,
                     system=[system_message],
-                    # tool_choice=tool_choice,
                     tools=tools,
                     messages=anthropic_messages,
                     betas=betas,
                     extra_headers=extra_headers
                 )
-            except anthropic.BadRequestError as e:
-                logger.exception(
-                    f"Failed to create completion: {e}. Response Model: {response_model}. Input messages: {json.dumps(messages, indent=2)}"
-                )
-                last_completion = (
-                    completion_response.model_dump() if completion_response else None
-                )
-                raise CompletionRuntimeError(
-                    f"Failed to create completion: {e}. Response Model: {response_model}.",
-                    last_completion=last_completion,
-                    messages=messages,
-                ) from e
 
-            def get_response_format(name: str):
-                if len(actions) == 1:
-                    return actions[0]
-                else:
-                    for check_action in actions:
-                        if check_action.name == block.name:
-                            return check_action
-                return None
-
-            completion = Completion.from_llm_completion(
-                input_messages=messages,
-                completion_response=completion_response,
-                model=self.model,
-            )
-
-            tool_call_id = None
-            try:
+                def get_response_format(name: str):
+                    if len(actions) == 1:
+                        return actions[0]
+                    else:
+                        for check_action in actions:
+                            if check_action.name == block.name:
+                                return check_action
+                    return None
+                
                 text = None
-
-                if not actions:
-                    return CompletionResponse(text=completion_response.content[0].text, completion_response=completion_response)
-
+                structured_outputs = []
                 for block in completion_response.content:
                     if isinstance(block, ToolUseBlock) or isinstance(
                         block, BetaToolUseBlock
@@ -757,63 +731,56 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                             raise ValueError(f"Unknown action {block.name}")
 
                         action_args = action.model_validate(block.input)
-
-                        if (
-                            hasattr(action_args, "thoughts")
-                            and text
-                            and not action_args.thoughts
-                        ):
-                            action_args.thoughts = text
-
-                        # TODO: We only support one action at the moment
-                        return CompletionResponse.create(text=text, output=[action_args], completion=completion)
+                        structured_outputs.append(action_args)
 
                     elif isinstance(block, TextBlock) or isinstance(
                         block, BetaTextBlock
                     ):
                         text = block.text
-                        # Extract thoughts from <thoughts> tags if present
-                        if "<thoughts>" in text and "</thoughts>" in text:
-                            start = text.index("<thoughts>") + len("<thoughts>")
-                            end = text.index("</thoughts>")
-                            text = text[start:end].strip()
+
                     else:
                         logger.warning(f"Unexpected block {block}]")
 
-                logger.warning(f"No tool call found in completion response. Response text: {text}")
-                retry_message = f"You're an autonomous agent that can't communicate with the user. Please provide a tool call."
-            except anthropic.APIError as e:
-                if hasattr(e, "status_code"):
-                    raise CompletionRuntimeError(
-                        f"Failed to call Anthropic API. Status code: {e.status_code}, Response: {e.body}"
-                    ) from e
+                completion = Completion.from_llm_completion(
+                    input_messages=messages,
+                    completion_response=completion_response,
+                    model=self.model,
+                )
+
+                # Log summary of the response
+                action_names = [output.__class__.__name__ for output in structured_outputs]
+                has_text = bool(text and text.strip())
+                if action_names:
+                    logger.info(f"Completion response summary - Actions: {action_names}, Has text: {has_text}")
                 else:
-                    raise CompletionRuntimeError(
-                        f"Failed to call Anthropic API. {e}"
-                    ) from e
+                    logger.info(f"Completion response summary - Text only: {text[:200]}...")
+
+                return CompletionResponse(
+                    structured_outputs=structured_outputs,
+                    text_response=text,
+                    completion=completion
+                )
+
             except ValidationError as e:
-                logger.exception(f"Failed to validate: {json.dumps(completion_response.model_dump(), indent=2)}")
-                retry_message = f"The request was invalid. Please try again. Error: {e}"
+                logger.warning(f"Validation failed: {json.dumps(completion_response.model_dump() if completion_response else None, indent=2)}")
+                messages.append({"role": "assistant", "content": [block.model_dump() for block in completion_response.content]})
+                messages.append(self._create_user_message(tool_call_id, f"The response was invalid. Fix the errors: {e}"))
+                raise CompletionRejectError(
+                    message=str(e),
+                    last_completion=completion_response,
+                    messages=messages,
+                )
             except Exception as e:
                 raise CompletionRuntimeError(
                     f"Failed to get completion response: {e}",
                     messages=messages,
                     last_completion=completion_response,
-                ) from e
+                )
 
-            response_content = [
-                block.model_dump() for block in completion_response.content
-            ]
-            messages.append({"role": "assistant", "content": response_content})
-
-            user_message = self._create_user_message(tool_call_id, retry_message)
-            messages.append(user_message)
-
-        raise CompletionRejectError(
-            f"Failed to create completion: {retry_message}",
-            messages=messages,
-            last_completion=completion_response,
-        )
+        try:
+            return retries(_do_completion)
+        except tenacity.RetryError as e:
+            raise e.reraise()
 
     def _map_completion_messages(self, messages: list[Message]) -> list[dict]:
         tool_call_id = None

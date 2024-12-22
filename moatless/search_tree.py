@@ -317,12 +317,15 @@ class SearchTree(BaseModel):
     def _expand(self, node: Node, force_expansion: bool = False) -> Node:
         """Expand the node and return a child node."""
 
-        # Check that selected node was executed (except for the root node), if not return it
-        if node.parent and node.observation is None:
-            self.log(logger.info, f"Returning unexecuted Node{node.node_id}")
+        # Check if any action step was not executed, if so return the node
+        if node.action_steps and node.has_unexecuted_actions():
+            self.log(logger.info, f"Returning Node{node.node_id} with unexecuted actions")
             return node
 
         child_node = self.expander.expand(node, self, force_expansion)
+
+        if not node.action_steps:
+            child_node.user_message = "You're an autonomous AI agent that must respond with one of the provided functions"
 
         # Only add feedback if this is the second expansion from this node
         if self.feedback_generator and len(node.children) >= 2:
