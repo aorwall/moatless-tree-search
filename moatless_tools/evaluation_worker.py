@@ -238,7 +238,7 @@ async def create_evaluation(request: EvaluationRequest):
     # Check for existing evaluation directory and modify name if needed
     evaluation_name = base_evaluation_name
     counter = 1
-    while os.path.exists(os.path.join(EVALUATIONS_DIR, evaluation_name)):
+    while os.path.exists(os.path.join(get_evaluations_dir(), evaluation_name)):
         evaluation_name = f"{base_evaluation_name}_{counter}"
         counter += 1
     
@@ -270,7 +270,7 @@ async def create_evaluation(request: EvaluationRequest):
 
     # Create evaluation without running it
     evaluation = Evaluation.create(
-        evaluations_dir=EVALUATIONS_DIR,
+        evaluations_dir=get_evaluations_dir(),
         evaluation_name=evaluation_name,
         settings=tree_search_settings,
         split="combo",
@@ -279,7 +279,7 @@ async def create_evaluation(request: EvaluationRequest):
         num_workers=1,
         use_testbed=True,
         dataset_name="princeton-nlp/SWE-bench_Verified",
-        repo_base_dir=request.repo_base_dir or DEFAULT_REPO_BASE_DIR  # Use default if not provided
+        repo_base_dir=os.getenv("REPO_DIR", "/tmp/repos")
     )
 
     evaluations[evaluation_name] = evaluation
