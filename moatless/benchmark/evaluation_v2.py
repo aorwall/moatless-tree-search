@@ -604,10 +604,10 @@ class Evaluation(BaseModel):
                 
             except Exception as e:
                 eval_result["status"] = "error"
-                eval_result["error"] = str(e)
+                eval_result["error"] = traceback.format_exc()
                 eval_result["duration"] = time.time() - start_time
-                logger.error(f"Error in search tree execution: {e}")
-                logger.error(traceback.format_exc())
+                logger.exception(f"Error in search tree execution")
+                
                 raise
             
             finally:
