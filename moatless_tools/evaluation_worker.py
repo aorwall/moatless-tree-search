@@ -25,22 +25,15 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-EVALUATIONS_DIR = os.getenv("MOATLESS_DIR", "./evals")
-DEFAULT_REPO_BASE_DIR = os.getenv("REPO_DIR", "/tmp/repos")
-
 app = FastAPI(title="Moatless Evaluation API")
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize app state with default evaluation directory."""
-    if not hasattr(app.state, "EVALUATIONS_DIR"):
-        app.state.EVALUATIONS_DIR = EVALUATIONS_DIR
-    """Load existing evaluations on startup."""
     load_existing_evaluations()
 
 def get_evaluations_dir():
     """Get the current evaluations directory from app state."""
-    return app.state.EVALUATIONS_DIR
+    return os.getenv("MOATLESS_DIR", "./evals")
 
 # Store running evaluations
 evaluations: Dict[str, Evaluation] = {}
@@ -169,7 +162,7 @@ def run_evaluation(evaluation_name: str, request: EvaluationRequest):
             num_workers=1,
             use_testbed=True,
             dataset_name="princeton-nlp/SWE-bench_Verified",
-            repo_base_dir=request.repo_base_dir or DEFAULT_REPO_BASE_DIR  # Use default if not provided
+            repo_base_dir=os.getenv("REPO_DIR", "/tmp/repos")
         )
 
         def event_handler(event: EvaluationEvent):
@@ -374,7 +367,7 @@ async def get_evaluation_events(evaluation_name: str, since: Optional[str] = Non
 if __name__ == "__main__":
     logger = logging.getLogger(__name__)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
-
+    load_dotenv()
     uvicorn.run(
         "evaluation_worker:app",
         host="0.0.0.0",
