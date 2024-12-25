@@ -66,7 +66,7 @@ def create_repository(
     instance: Optional[dict] = None,
     instance_id: Optional[str] = None,
     repo_base_dir: Optional[str] = None,
-    shallow_clone: bool = True,
+    shallow_clone: bool = False,
 ) -> GitRepository:
     """
     Create a workspace for the given SWE-bench instance.
