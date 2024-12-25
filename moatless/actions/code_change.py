@@ -217,7 +217,7 @@ class RequestCodeChange(Action):
             context_file = file_context.get_file(args.file_path)
             message = f"File {args.file_path} is not in context."
             if context_file.module:
-                message += f"At least one span must be added. Use RequestMoreContext to one ore more of the available spans: {self.span_id_list(context_file.module.span_ids)}"
+                message += f"At least one span must be added. Use ViewCode to one ore more of the available spans: {self.span_id_list(context_file.module.span_ids)}"
 
             return Observation(
                 message=message,
@@ -466,7 +466,7 @@ class RequestCodeChange(Action):
         self, context_file: ContextFile, args: RequestCodeChangeArgs
     ) -> Optional[str]:
         if not args.start_line:
-            message = "You must specify the start line and end line of the code change in the variables start_line and end_line. If you want to update the first line in the file, set start line to 1. If you believe that the lines you want to edit isn't in the file context, you can request more context by providing the file path and the line numbers or span ids to the RequestMoreContext function."
+            message = "You must specify the start line and end line of the code change in the variables start_line and end_line. If you want to update the first line in the file, set start line to 1. If you believe that the lines you want to edit isn't in the file context, you can request more context by providing the file path and the line numbers or span ids to the ViewCode function."
             return message
 
         if not args.end_line:
@@ -496,7 +496,7 @@ Please provide instructions for the code change again."""
                 and code_block.belongs_to_span
                 and code_block.belongs_to_span.span_id not in context_file.span_ids
             ):
-                return f"The code span {code_block.belongs_to_span.span_id} between lines {args.start_line} - {args.end_line} is not in the context. Please use the RequestMoreContext to add the correct line numbers or span ids to context."
+                return f"The code span {code_block.belongs_to_span.span_id} between lines {args.start_line} - {args.end_line} is not in the context. Please use the ViewCode to add the correct line numbers or span ids to context."
             # TODO: Handle if no code block is found
 
         code_lines = context_file.content.split("\n")

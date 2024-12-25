@@ -145,7 +145,7 @@ poetry install --with dev
 Basic setup similar to the moatless-tools agent.
 
 ```python
-from moatless.agent import CodingAgent
+from moatless.agent.code_agent import CodingAgent
 from moatless.agent.code_prompts import SIMPLE_CODE_PROMPT
 from moatless.benchmark.swebench import create_repository
 from moatless.benchmark.utils import get_moatless_instance
@@ -203,7 +203,7 @@ print(node.observation.message)
 How to setup the evaluation flow with MCTS and testbeds.
 
 ```python
-from moatless.agent import CodingAgent
+from moatless.agent.code_agent import CodingAgent
 from moatless.benchmark.swebench import create_repository
 from moatless.benchmark.utils import get_moatless_instance
 from moatless.completion import CompletionModel
@@ -213,8 +213,8 @@ from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.search_tree import SearchTree
 from moatless.selector import BestFirstSelector
-from moatless.actions import FindClass, FindFunction, FindCodeSnippet, SemanticSearch, RequestMoreContext, RequestCodeChange, Finish, Reject, RunTests
-from moatless.value_function import ValueFunction
+from moatless.actions import FindClass, FindFunction, FindCodeSnippet, SemanticSearch, ViewCode, Finish, Reject, RunTests, StringReplace, CreateFile
+from moatless.value_function.base import ValueFunction
 from testbeds.sdk import TestbedSDK
 from moatless.runtime.testbed import TestbedEnvironment
 
@@ -260,7 +260,6 @@ actions = [
     ViewCode(repository=repository),
     StringReplace(repository=repository, code_index=code_index),
     CreateFile(repository=repository, code_index=code_index),
-    AppendString(repository=repository, code_index=code_index),
     RunTests(repository=repository, code_index=code_index),
     Finish(),
     Reject()
