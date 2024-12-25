@@ -26,7 +26,7 @@ class SemanticSearchArgs(SearchBaseArgs):
     query: str = Field(
         ..., description="Natural language description of what you're looking for."
     )
-    category: str = Field(
+    category: Optional[str] = Field(
         "implementation",
         description="The category of files to search for. This can be 'implementation' for core implementation files or 'test' for test files.",
     )

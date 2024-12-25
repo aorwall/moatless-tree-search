@@ -116,16 +116,20 @@ class MessageHistoryGenerator(BaseModel):
                 tool_idx += 1
                 tool_call_id = f"tool_{tool_idx}"
 
+                exclude = None
+                if not self.thoughts_in_action:
+                    exclude = {"thoughts"}
+
                 tool_calls.append({
                     "id": tool_call_id,
                     "type": "function",
                     "function": {
                         "name": action_step.action.name,
-                        "arguments": action_step.action.model_dump_json(),
+                        "arguments": action_step.action.model_dump_json(exclude=exclude),
                     },
                 })
 
-                tokens += count_tokens(action_step.action.model_dump_json())
+                tokens += count_tokens(action_step.action.model_dump_json(exclude=exclude))
 
                 tool_responses.append({
                     "role": "tool",

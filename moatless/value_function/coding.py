@@ -6,6 +6,7 @@ from moatless.completion.model import Completion
 from moatless.node import Node
 from moatless.value_function.base import ValueFunction
 from moatless.value_function.model import Reward
+from moatless.value_function.terminal import TerminalValueFunction
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ class CodingValueFunction(ValueFunction):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._terminal_function = TerminalValueFunction(completion_model=self.completion_model)
 
     def is_test(self, file_path: str) -> bool:
         """
@@ -83,6 +85,10 @@ class CodingValueFunction(ValueFunction):
             )
             return Reward(value=final_reward, explanation="Expects a correction"), None
 
+        if node.action.name == "Finish":
+            logger.info(f"Run finish function")
+            return self._terminal_function.get_reward(node)
+
         if node.action.name == "Reject":
             logger.info(f"Reject action, assigning reward -100")
             return Reward(value=-100, explanation="Reject action"), None
@@ -106,12 +112,11 @@ class CodingValueFunction(ValueFunction):
             if isinstance(node.action, SearchBaseArgs):
                 if not node.observation.properties.get("new_span_ids"):  # TODO Use fail reason?
                     return Reward(
-                        value=25,
+                        value=0,
                         explanation="Search returned results but did not add any new spans to the context",
                     ), None
-
                 return Reward(
-                    value=50,
+                    value=100,
                     explanation="Search returned results and added new spans to the context",
                 ), None
 
@@ -129,50 +134,40 @@ class CodingValueFunction(ValueFunction):
                 # Get previous test results
                 previous_failure_count = 0
                 previous_error_count = 0
-                previous_reward = 0
+                previous_reward = 100
                 parent_node = node.parent
                 if parent_node and parent_node.file_context and parent_node.file_context.was_edited():
                     previous_passed_count, previous_failure_count, previous_error_count = parent_node.file_context.get_test_counts()
                     if parent_node.reward:
                         previous_reward = parent_node.reward.value
 
-                # If no tests were added/modified, append testing encouragement
-                test_suggestion = "" if (has_test_changes or has_new_tests) else (
-                    "\n\nConsider adding tests that cover:\n"
-                    "- Edge cases (empty inputs, null values, boundary conditions)\n"
-                    "- Error scenarios and exception handling\n"
-                    "- Different input types and formats\n"
-                    "- Integration with dependent components\n"
-                    "- Performance and resource constraints"
-                )
-
                 if total_tests == 0:
                     return Reward(
-                        value=25,
-                        explanation=f"No tests run{test_suggestion}"
+                        value=50,
+                        explanation=f"No tests run"
                     ), None
                 elif failure_count == 0 and error_count == 0:
                     return Reward(
                         value=100,
-                        explanation=f"All {passed_count} tests passing{test_suggestion}"
+                        explanation=f"All {passed_count} tests passing"
                     ), None
                 elif failure_count > previous_failure_count or error_count > previous_error_count:
-                    new_value = max(-100, previous_reward - 50)
+                    new_value = max(-100, previous_reward - 25)
                     return Reward(
                         value=new_value,
-                        explanation=f"Test failures increased: {previous_failure_count}->{failure_count}, errors {previous_error_count}->{error_count}{test_suggestion}",
+                        explanation=f"Test failures increased: {previous_failure_count}->{failure_count}, errors {previous_error_count}->{error_count}",
                     ), None
                 elif failure_count < previous_failure_count and error_count <= previous_error_count:
                     new_value = min(75, previous_reward + 25)
                     return Reward(
                         value=new_value,
-                        explanation=f"Test failures decreased: {previous_failure_count}->{failure_count}, errors {previous_error_count}->{error_count}{test_suggestion}",
+                        explanation=f"Test failures decreased: {previous_failure_count}->{failure_count}, errors {previous_error_count}->{error_count}",
                     ), None
                 else:
                     new_value = max(-100, previous_reward - 25)
                     return Reward(
                         value=new_value,
-                        explanation=f"No improvement in test results: failures {failure_count}, errors {error_count}{test_suggestion}",
+                        explanation=f"No improvement in test results: failures {failure_count}, errors {error_count}",
                     ), None
 
         if node.action.name == "ViewCode":
@@ -197,4 +192,7 @@ class CodingValueFunction(ValueFunction):
                 value=25, explanation="Request completed but no new context was needed"
             ), None
 
-        return super().get_reward(node)
+        logger.warning("Return default reward")
+        return Reward(
+            value=50, explanation=""
+        ), None

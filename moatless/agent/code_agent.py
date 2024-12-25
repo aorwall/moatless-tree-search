@@ -142,7 +142,7 @@ def create_base_actions(
             repository=repository,
             completion_model=completion_model,
         ),
-        ViewCode(repository=repository),
+        ViewCode(repository=repository, completion_model=completion_model),
     ]
 
 

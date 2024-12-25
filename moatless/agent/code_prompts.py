@@ -244,17 +244,7 @@ You are expected to actively fix issues by making code changes. Do not just make
 
 # Action and ReAct Guidelines
 
-- **Document Thoughts First (REQUIRED):**
-  * ALWAYS write your reasoning in `<thoughts>` tags before ANY action
-  * Example:
-    ```
-    <thoughts>
-    I need to first locate the User class to understand its current implementation.
-    I'll use FindClass for this since it will return the full class definition.
-    After analyzing that code, I can determine where to add the new field.
-    </thoughts>
-    ```
-
+- ALWAYS write your reasoning in `<thoughts>` tags before any action  
 - **Action Patterns:**
   * **Single Action Flow:** When you need an observation to inform your next step:
       * Write your reasoning in `<thoughts>` tags

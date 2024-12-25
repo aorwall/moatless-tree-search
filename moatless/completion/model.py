@@ -230,8 +230,50 @@ class StructuredOutput(BaseModel):
                 for item in obj:
                     remove_defaults(item)
 
+        def resolve_refs(obj: dict, defs: dict) -> dict:
+            """Recursively resolve $ref references in the schema"""
+            if not isinstance(obj, dict):
+                return obj
+            
+            result = {}
+            for k, v in obj.items():
+                if k == "items" and isinstance(v, dict) and "$ref" in v:
+                    # Handle array items that use $ref
+                    ref_path = v["$ref"]
+                    if ref_path.startswith("#/$defs/"):
+                        ref_name = ref_path.split("/")[-1]
+                        if ref_name in defs:
+                            result[k] = defs[ref_name].copy()
+                            continue
+                elif k == "$ref":
+                    ref_path = v
+                    if ref_path.startswith("#/$defs/"):
+                        ref_name = ref_path.split("/")[-1]
+                        if ref_name in defs:
+                            # Create a new dict with all properties except $ref
+                            resolved = {k2: v2 for k2, v2 in obj.items() if k2 != "$ref"}
+                            # Merge with the referenced definition
+                            referenced = defs[ref_name].copy()
+                            referenced.update(resolved)
+                            return resolve_refs(referenced, defs)
+                
+                # Recursively resolve nested objects/arrays
+                if isinstance(v, dict):
+                    result[k] = resolve_refs(v, defs)
+                elif isinstance(v, list):
+                    result[k] = [resolve_refs(item, defs) if isinstance(item, dict) else item for item in v]
+                else:
+                    result[k] = v
+            
+            return result
+
         # Remove default field from all properties recursively
         remove_defaults(parameters)
+
+        # Resolve all $ref references
+        if "$defs" in parameters:
+            defs = parameters.pop("$defs")
+            parameters = resolve_refs(parameters, defs)
 
         for param in docstring.params:
             if (name := param.arg_name) in parameters["properties"] and (

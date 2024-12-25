@@ -158,11 +158,11 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
             if context_file.lines_is_in_context(match['start_line'], match['end_line'])
         ]
 
-        if len(in_context_exact_matches) == 1:
-            # We found exactly one match that's in context
-            exact_matches = in_context_exact_matches
-
+        # Set flag if we have exactly one in-context match but more total matches
         properties = {}
+        if len(in_context_exact_matches) == 1 and len(exact_matches) > len(in_context_exact_matches):
+            properties["flags"] = ["targeted_in_context_replacement"]
+            exact_matches = in_context_exact_matches
 
         if len(exact_matches) == 0:
             potential_matches = find_match_when_ignoring_indentation(old_str, file_content)
@@ -269,6 +269,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                 return Observation(
                     message=f"String '{old_str}' not found in {path}.\n\nRemember to write out the exact string you want to replace with the same indentation and no placeholders.",
                     properties={"fail_reason": "string_not_found"},
+                    expect_correction=True
                 )
         elif len(exact_matches) > 1:
             matches_info = "\n".join(
@@ -289,7 +290,22 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                 f"Lines {start_line}-{end_line} are not in context for {path}"
             )
 
-        new_file_content = file_content.replace(args.old_str, args.new_str)
+        # If we have exactly one in-context match and there are more total matches,
+        # only replace the in-context occurrence to preserve other matches
+        if "targeted_in_context_replacement" in properties.get("flags", []):
+            match = in_context_exact_matches[0]
+            # Count newlines up to the start of the match to find its position
+            start_pos = 0
+            for _ in range(match['start_line'] - 1):
+                start_pos = file_content.find('\n', start_pos) + 1
+            # Find the exact position of this occurrence
+            start_pos = file_content.find(old_str, start_pos)
+            # Replace only this occurrence
+            logger.info(f"Do targeted replacement on line {start_pos}")
+            
+            new_file_content = file_content[:start_pos] + new_str + file_content[start_pos + len(old_str):]
+        else:
+            new_file_content = file_content.replace(args.old_str, args.new_str)
         
         # Generate diff and apply changes
         diff = do_diff(str(path), file_content, new_file_content)

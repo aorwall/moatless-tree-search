@@ -2,6 +2,7 @@ import json
 import logging
 import os
 from typing import Optional, Dict, Any, List, Callable, Union
+from datetime import datetime
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -91,6 +92,7 @@ class SearchTree(BaseModel):
     finish_before_reexpanding_depth: Optional[int] = Field(
         20, description="The depth to reach a Finish state before reexpanding."
     )
+    event_handlers: List[Callable] = Field(default_factory=list, description="Event handlers for tree events", exclude=True)
 
 
     class Config:
@@ -263,6 +265,16 @@ class SearchTree(BaseModel):
                 self._backpropagate(new_node)
                 self.maybe_persist()
                 self.log(logger.info, generate_ascii_tree(self.root, new_node))
+                
+                # Emit iteration event
+                self.emit_event("tree_iteration", {
+                    "iteration": len(self.root.get_all_nodes()),
+                    "total_cost": total_cost,
+                    "best_reward": max((n.reward.value if n.reward else 0) for n in self.root.get_all_nodes()),
+                    "finished_nodes": len(self.get_finished_nodes()),
+                    "total_nodes": len(self.root.get_all_nodes()),
+                    "best_node_id": self.get_best_trajectory().node_id if self.get_best_trajectory() else None
+                })
             else:
                 self.log(logger.info, "Search complete: no more nodes to expand.")
                 break
@@ -716,6 +728,7 @@ class SearchTree(BaseModel):
                 "feedback_generator",
                 "discriminator",
                 "persist_path",
+                "event_handlers"
             ]
         }
 
@@ -764,3 +777,16 @@ class SearchTree(BaseModel):
                 instance_dir=instance_dir
             )
         return self.feedback_generator
+
+    def add_event_handler(self, handler: Callable):
+        """Add an event handler for tree events."""
+        self.event_handlers.append(handler)
+
+    def emit_event(self, event_type: str, data: dict):
+        """Emit an event to all registered handlers."""
+        for handler in self.event_handlers:
+            handler({
+                "event_type": event_type,
+                "data": data,
+                "timestamp": datetime.now().isoformat()
+            })

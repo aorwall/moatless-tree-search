@@ -15,6 +15,17 @@ from moatless.codeblocks import CodeBlockType
 from moatless.file_context import FileContext, ContextFile
 from moatless.repository.repository import Repository
 from moatless.workspace import Workspace
+from moatless.actions.search_base import (
+    SearchBaseArgs,
+    IDENTIFY_SYSTEM_PROMPT,
+    Identify,
+    IdentifiedSpans,
+)
+from litellm.types.llms.openai import ChatCompletionAssistantMessage, ChatCompletionUserMessage
+from moatless.completion import CompletionModel
+from moatless.completion.model import Completion
+from moatless.exceptions import CompletionRejectError
+from moatless.actions.identify_mixin import IdentifyMixin
 
 logger = logging.getLogger(__name__)
 
@@ -79,13 +90,18 @@ class ViewCodeArgs(ActionArguments):
         return prompt
 
 
-class ViewCode(Action):
+class ViewCode(Action, IdentifyMixin):
     args_schema = ViewCodeArgs
 
     _repository: Repository = PrivateAttr()
 
-    def __init__(self, repository: Repository | None = None, **data):
-        super().__init__(**data)
+    def __init__(
+        self,
+        repository: Repository = None,
+        completion_model: CompletionModel | None = None,
+        **data
+    ):
+        super().__init__(completion_model=completion_model, **data)
         self._repository = repository
 
     max_tokens: int = Field(
@@ -94,6 +110,13 @@ class ViewCode(Action):
     )
 
     def execute(self, args: ViewCodeArgs, file_context: FileContext | None = None, workspace: Workspace | None = None) -> Observation:
+        if file_context is None:
+            raise ValueError(
+                "File context must be provided to execute the view action."
+            )
+
+        properties = {"files": {}}
+
         # Group files by filepath and combine span_ids
         grouped_files = {}
         for file_with_spans in args.files:
@@ -103,8 +126,6 @@ class ViewCode(Action):
                 grouped_files[file_with_spans.file_path].span_ids.extend(
                     file_with_spans.span_ids
                 )
-
-        properties = {"files": {}}
 
         # Validate all file spans before processing
         for file_path, file_span in grouped_files.items():
@@ -128,9 +149,9 @@ class ViewCode(Action):
                 )
 
         view_context = FileContext(repo=self._repository)
+        completion = None
 
         for file_path, file_span in grouped_files.items():
-
             file = file_context.get_file(file_path)
 
             if file_span.span_ids:
@@ -192,23 +213,9 @@ class ViewCode(Action):
                     view_file.set_patch(file.patch)
 
             if view_context.context_size() > self.max_tokens:
-                content = view_context.create_prompt(
-                    show_span_ids=False,
-                    show_line_numbers=True,
-                    show_outcommented_code=True,
-                    outcomment_code_comment="...",
-                    only_signatures=True,
-                )
-                return Observation(
-                    message=f"The request code is too large ({view_context.context_size()} tokens) to view in its entirety. Maximum allowed is {self.max_tokens} tokens. "
-                    f"Please specify the functions or classes to view.\n"
-                    f"Here's a structure of the requested code spans:\n{content}",
-                    summary="The requested code is too large to view in its entirety.",
-                    properties=properties,
-                    expect_correction=True,
-                )
-            new_span_ids = file_context.add_file_context(view_context)
+                view_context, completion = self._identify_code(args, view_context, self.max_tokens)
 
+            new_span_ids = file_context.add_file_context(view_context)
             properties["files"][file_path] = {
                 "new_span_ids": list(new_span_ids),
             }
@@ -244,8 +251,42 @@ class ViewCode(Action):
             message=message,
             summary=summary,
             properties=properties,
-            expect_correction=False,
+            execution_completion=completion,
         )
+
+    def _search_for_alternative_suggestion(self, args: ViewCodeArgs):
+        return None
+
+    def _select_span_instructions(self, search_result) -> str:
+        return "The requested code is too large. You must identify the most relevant code sections to view."
+
+    @classmethod
+    def get_few_shot_examples(cls) -> List[FewShotExample]:
+        return [
+            FewShotExample.create(
+                user_input="Show me the implementation of the authenticate method in the AuthenticationService class",
+                action=ViewCodeArgs(
+                    thoughts="To understand the authentication implementation, we need to examine the authenticate method within the AuthenticationService class.",
+                    files=[
+                        CodeSpan(
+                            file_path="auth/service.py",
+                            span_ids=["AuthenticationService.authenticate"],
+                        )
+                    ],
+                ),
+            ),
+            FewShotExample.create(
+                user_input="Show me lines 50-75 of the database configuration file",
+                action=ViewCodeArgs(
+                    thoughts="To examine the database configuration settings, we'll look at the specified line range in the config file.",
+                    files=[
+                        CodeSpan(
+                            file_path="config/database.py", start_line=50, end_line=75
+                        )
+                    ],
+                ),
+            ),
+        ]
 
     def create_retry_message(self, file: ContextFile, message: str):
         retry_message = f"\n\nProblems when trying to find spans in {file.file_path}. "
@@ -320,33 +361,5 @@ class ViewCode(Action):
                 min_value=-49,
                 max_value=-1,
                 description="The requested context is irrelevant, demonstrates misunderstanding, or the agent is hallucinating code that doesn't exist.",
-            ),
-        ]
-
-    @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        return [
-            FewShotExample.create(
-                user_input="I need to see the implementation of the authenticate method in the AuthenticationService class",
-                action=ViewCodeArgs(
-                    thoughts="To understand the authentication implementation, we need to examine the authenticate method within the AuthenticationService class.",
-                    files=[
-                        CodeSpan(
-                            file_path="auth/service.py",
-                            span_ids=["AuthenticationService.authenticate"],
-                        )
-                    ],
-                ),
-            ),
-            FewShotExample.create(
-                user_input="Show me lines 50-75 of the database configuration file",
-                action=ViewCodeArgs(
-                    thoughts="To examine the database configuration settings, we'll look at the specified line range in the config file.",
-                    files=[
-                        CodeSpan(
-                            file_path="config/database.py", start_line=50, end_line=75
-                        )
-                    ],
-                ),
             ),
         ]

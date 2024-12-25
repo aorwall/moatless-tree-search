@@ -66,8 +66,9 @@ class CompletionResponse(BaseModel):
     @property
     def structured_output(self) -> Optional[StructuredOutput]:
         """Get the first structured output"""
-        if len(self.structured_outputs) > 0:
-            logger.warning("Multiple structured outputs found in completion response, returning the first one")
+        if len(self.structured_outputs) > 1:
+            ignored_outputs = [output.__class__.__name__ for output in self.structured_outputs[1:]]
+            logger.warning(f"Multiple structured outputs found in completion response, returning {self.structured_outputs[0].__class__.__name__} and ignoring: {ignored_outputs}")
         return self.structured_outputs[0] if self.structured_outputs else None
 
 
@@ -657,9 +658,9 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                 else:
                     schema = action.anthropic_schema()
 
-                    # # Remove scratch pad field, use regular text block for thoughts
-                    # if "thoughts" in schema["input_schema"]["properties"]:
-                    #     del schema["input_schema"]["properties"]["thoughts"]
+                    # Remove scratch pad field, use regular text block for thoughts
+                    if "thoughts" in schema["input_schema"]["properties"]:
+                        del schema["input_schema"]["properties"]["thoughts"]
 
                     tools.append(schema)
 
@@ -765,11 +766,7 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                 logger.warning(f"Validation failed: {json.dumps(completion_response.model_dump() if completion_response else None, indent=2)}")
                 messages.append({"role": "assistant", "content": [block.model_dump() for block in completion_response.content]})
                 messages.append(self._create_user_message(tool_call_id, f"The response was invalid. Fix the errors: {e}"))
-                raise CompletionRejectError(
-                    message=str(e),
-                    last_completion=completion_response,
-                    messages=messages,
-                )
+                
             except Exception as e:
                 raise CompletionRuntimeError(
                     f"Failed to get completion response: {e}",

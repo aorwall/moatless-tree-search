@@ -301,7 +301,8 @@ class Node(BaseModel):
                 total_usage += step.completion.usage
 
         for completion in self.completions.values():
-            total_usage += completion.usage
+            if completion:
+                total_usage += completion.usage
 
         return total_usage
 

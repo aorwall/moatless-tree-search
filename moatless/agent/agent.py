@@ -301,6 +301,46 @@ class ActionAgent(BaseModel):
 
         return super().model_validate(obj)
 
+    @classmethod
+    def from_dict(
+        cls,
+        data: Dict[str, Any],
+        repository: Repository | None = None,
+        code_index: CodeIndex | None = None,
+        runtime: Any | None = None,
+    ) -> "ActionAgent":
+        """Create an ActionAgent from a dictionary, properly handling dependencies."""
+        data = data.copy()
+        
+        # Handle completion model
+        if "completion" in data and isinstance(data["completion"], dict):
+            data["completion"] = CompletionModel.model_validate(data["completion"])
+            
+        # Handle actions with dependencies
+        if repository and "actions" in data and isinstance(data["actions"], list):
+            data["actions"] = [
+                Action.model_validate(
+                    action_data,
+                    repository=repository,
+                    runtime=runtime,
+                    code_index=code_index,
+                )
+                for action_data in data["actions"]
+            ]
+            
+        # Handle message generator
+        if "message_generator" in data and isinstance(data["message_generator"], dict):
+            data["message_generator"] = MessageHistoryGenerator.model_validate(data["message_generator"])
+            
+        # Handle agent class if specified
+        if "agent_class" in data:
+            module_name, class_name = data["agent_class"].rsplit(".", 1)
+            module = importlib.import_module(module_name)
+            agent_class = getattr(module, class_name)
+            return agent_class(**data)
+            
+        return cls.model_validate(data)
+
     @property
     def completion(self) -> CompletionModel:
         return self._completion

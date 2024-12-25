@@ -137,12 +137,13 @@ def create_linear_table(nodes: List[Node], max_node_id: int, eval_result: Option
                 # Determine node status/color
                 color = "gray"
                 test_status = ""
+                diff_stats = ""
+                fail_reason = ""
+
                 if node.observation:
                     if node.observation.properties.get("fail_reason"):
                         color = "red"
-                        fail_reason = node.observation.properties.get("fail_reason", "")
-                    else:
-                        fail_reason = ""
+                        fail_reason = node.observation.properties.get("fail_reason", "")        
                     
                     if node.file_context and node.file_context.test_files:
                         test_status = node.file_context.get_test_status()
@@ -157,7 +158,6 @@ def create_linear_table(nodes: List[Node], max_node_id: int, eval_result: Option
                                 color = "green"
                                 test_status = "✅ Passed"
                 
-                    diff_stats = ""
                     if node.observation.properties.get("diff"):
                         diff_lines = node.observation.properties["diff"].split('\n')
                         additions = sum(1 for line in diff_lines if line.startswith('+') and not line.startswith('+++'))
