@@ -616,8 +616,8 @@ class Evaluation(BaseModel):
                     json.dump(eval_result, f, indent=2)
                 
                 # Clean up
-                if repository:
-                    shutil.rmtree(repository.repo_dir, ignore_errors=True)
+                # if repository:
+                #    shutil.rmtree(repository.repo_dir, ignore_errors=True)
                 
                 del runtime
                 del repository

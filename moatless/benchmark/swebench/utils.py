@@ -47,17 +47,17 @@ def repository_lock(lock_path: str):
                 logger.warning(f"Error cleaning up lock file: {e}")
 
 def verify_repository(repo_path: str, github_url: str) -> bool:
-    """Verify if the repository at repo_path is valid and matches the expected remote"""
+    """Verify if the directory at repo_path is a valid git repository"""
     try:
         import subprocess
         result = subprocess.run(
-            ['git', 'remote', '-v'],
+            ['git', 'rev-parse', '--git-dir'],
             cwd=repo_path,
             capture_output=True,
             text=True,
             check=True
         )
-        return github_url in result.stdout
+        return True
     except Exception as e:
         logger.warning(f"Repository verification failed: {e}")
         return False
@@ -175,7 +175,7 @@ def create_repository(
                         if not line and process.poll() is not None:
                             break
                         if line:
-                            logger.info(line.strip())
+                            logger.debug(line.strip())
                     except Exception as e:
                         logger.warning(f"Error reading git progress: {e}")
                 
