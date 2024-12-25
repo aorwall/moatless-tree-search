@@ -75,9 +75,9 @@ def verify_model(model: str, api_key: str = None, base_url: str = None):
     evaluation = Evaluation(
         settings=tree_search_settings,
         evaluations_dir=evaluations_dir,
-        evaluation_name="20241221_sonnet_tree_search_novel_feedback_temp_0",
+        evaluation_name="20241222_haiku_tree_search_novel_feedback_temp_0_2",
         max_file_context_tokens=16000,
-        num_workers=4,
+        num_workers=8,
         use_testbed=True,
         dataset_name="princeton-nlp/SWE-bench_Lite",
         selector=selector
@@ -88,11 +88,13 @@ def verify_model(model: str, api_key: str = None, base_url: str = None):
         "django__django-11964",
         #"django__django-14999"
     ]
+    instance_ids = ["pylint-dev__pylint-7080", "sympy__sympy-21379"] #, "django__django-11999", "sympy__sympy-20154"]
+
     evaluation.run_evaluation(
         split="combo",
         #instance_ids=instance_ids,
-        exclude_instance_ids=["sympy__sympy-16792"],
-        max_resolved=2,
+        #exclude_instance_ids=["sympy__sympy-16792"],
+        max_resolved=8,
         min_resolved=2
     )
 
@@ -109,7 +111,7 @@ def verify_model(model: str, api_key: str = None, base_url: str = None):
 
 #verify_model("openai/Qwen/Qwen2.5-72B-Instruct")
 #verify_model("claude-3-5-sonnet-20241022")
-verify_model("anthropic.claude-3-5-sonnet-20241022-v2:0")
-#verify_model("anthropic.claude-3-5-haiku-20241022-v1:0")
+#verify_model("anthropic.claude-3-5-sonnet-20241022-v2:0")
+verify_model("anthropic.claude-3-5-haiku-20241022-v1:0")
 #verify_model("us.anthropic.claude-3-5-sonnet-20241022-v2:0")
 #verify_model("claude-3-5-haiku-20241022")

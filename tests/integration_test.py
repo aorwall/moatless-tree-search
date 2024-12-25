@@ -30,9 +30,9 @@ pytest.mark.llm_integration = pytest.mark.skipif(
     "model",
     [
         # "claude-3-5-sonnet-20241022",
-        "claude-3-5-haiku-20241022",
+        # "claude-3-5-haiku-20241022",
         # "anthropic.claude-3-5-sonnet-20241022-v2:0",
-        # "anthropic.claude-3-5-haiku-20241022-v1:0",
+        "anthropic.claude-3-5-haiku-20241022-v1:0",
         # "claude-3-5-sonnet-20241022",
         # "azure/gpt-4o-mini",
         # "gpt-4o-2024-08-06",
@@ -42,7 +42,7 @@ pytest.mark.llm_integration = pytest.mark.skipif(
 )
 @pytest.mark.llm_integration
 def test_basic_coding_tree(model):
-    completion_model = CompletionModel(model=model, temperature=0.0, response_format=LLMResponseFormat.REACT)
+    completion_model = CompletionModel(model=model, temperature=0.0, response_format=LLMResponseFormat.TOOLS)
 
     instance = load_instance("django__django-16379")
     repository = create_repository(instance)
@@ -56,7 +56,7 @@ def test_basic_coding_tree(model):
         completion_model=completion_model,
         repository=repository,
         code_index=code_index,
-        message_history_type=MessageHistoryType.REACT
+        message_history_type=MessageHistoryType.MESSAGES
     )
 
     persist_path = f"itegration_test_{model.replace('.', '_').replace('/', '_')}.json"
