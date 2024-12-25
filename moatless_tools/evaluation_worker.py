@@ -1,10 +1,3 @@
-import asyncio
-from fastapi import FastAPI, BackgroundTasks
-from pydantic import BaseModel
-from typing import List, Optional, Dict
-import uvicorn
-from datetime import datetime
-import json
 import os
 from pathlib import Path
 import logging
@@ -20,11 +13,20 @@ import shutil
 import concurrent.futures
 from tqdm import tqdm
 import traceback
-from datetime import timezone
+from datetime import timezone, datetime
+import json
+import asyncio
+from fastapi import FastAPI, BackgroundTasks
+from pydantic import BaseModel
+from typing import List, Optional, Dict
+import uvicorn
+from dotenv import load_dotenv
 
+# Load environment variables
+load_dotenv()
 
-EVALUATIONS_DIR = "./evals"
-DEFAULT_REPO_BASE_DIR = "/tmp/repos"  # Default repository base directory
+EVALUATIONS_DIR = os.getenv("MOATLESS_DIR", "./evals")
+DEFAULT_REPO_BASE_DIR = os.getenv("REPO_DIR", "/tmp/repos")
 
 app = FastAPI(title="Moatless Evaluation API")
 
