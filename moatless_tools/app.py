@@ -242,10 +242,14 @@ def show_evaluation_progress(evaluation_name: str):
         st.rerun()
     
     # Get current status
+    logger.info(f"Fetching status for evaluation: {evaluation_name}")
     status = asyncio.run(get_evaluation_status(evaluation_name))
     if "error" in status:
+        logger.error(f"Failed to get evaluation status: {status['error']}")
         st.error("Evaluation not found!")
         return
+    
+    logger.info(f"Retrieved status with {len(status.get('instances', {}))} instances")
     
     # Show settings in a collapsed section
     with st.expander("Evaluation Settings"):
@@ -314,7 +318,8 @@ def show_evaluation_progress(evaluation_name: str):
                 st.rerun()
     
     # Show instance progress
-    instances = status["instances"]
+    instances = status.get("instances", {})
+    logger.info(f"Processing {len(instances)} instances for display")
     completed = sum(1 for inst in instances.values() 
                    if inst["status"] == InstanceStatus.COMPLETED)
     total = len(instances)
@@ -332,16 +337,14 @@ def show_evaluation_progress(evaluation_name: str):
     # Show instances in a table with tree search progress
     instances_data = []
     for instance_id, instance in instances.items():
+        logger.debug(f"Processing instance data for {instance_id}")
         progress = st.session_state.instance_progress.get(instance_id, {})
-        benchmark_result = progress.get('benchmark_result', {})
+        benchmark_result = instance.get('benchmark_result', {})
         
         # Get token counts from benchmark result
-        prompt_tokens = benchmark_result.get('token_usage', {}).get('prompt_tokens', 0)
-        completion_tokens = benchmark_result.get('token_usage', {}).get('completion_tokens', 0)
-        total_tokens = prompt_tokens + completion_tokens
-        
-        # Get transition count from benchmark result
-        transitions = benchmark_result.get('transitions', 0) if benchmark_result else 0
+        token_usage = benchmark_result.get('token_usage', {}) if benchmark_result else {}
+        prompt_tokens = token_usage.get('prompt_tokens', 0)
+        completion_tokens = token_usage.get('completion_tokens', 0)
         
         instances_data.append({
             "Instance": instance_id,
@@ -353,10 +356,12 @@ def show_evaluation_progress(evaluation_name: str):
             "Error": instance["error"] or "",
             "Tree Progress": f"{progress.get('iteration', 0)}/{settings['max_iterations']}",
             "Total Cost": f"${progress.get('total_cost', 0):.4f}" if progress.get('total_cost') else None,
-            "Transitions": transitions,
+            "Transitions": benchmark_result.get('transitions', 0) if benchmark_result else 0,
             "Prompt/Completion": f"{prompt_tokens}/{completion_tokens}"
         })
+        logger.debug(f"Added instance {instance_id} to display data")
     
+    logger.info(f"Displaying table with {len(instances_data)} instances")
     df = pd.DataFrame(instances_data)
     st.dataframe(
         df,

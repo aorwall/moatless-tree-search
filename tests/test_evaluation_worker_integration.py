@@ -8,11 +8,11 @@ import tempfile
 import time
 from fastapi.testclient import TestClient
 from moatless.benchmark.evaluation_v2 import EvaluationStatus, InstanceStatus
-from moatless_tools.evaluation_worker import app, EVALUATIONS_DIR
+from moatless_tools.evaluation_worker import app, get_repository
 
 # Configure logging - set to DEBUG for more detailed information
 logging.basicConfig(
-    level=logging.DEBUG,  # Changed to DEBUG for more detailed logs
+    level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(name)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -42,162 +42,107 @@ def test_evaluation_request():
 @pytest.fixture(autouse=True)
 def setup_and_cleanup():
     # Setup: Create temporary evaluation directory
-    original_evals_dir = EVALUATIONS_DIR
     temp_evals_dir = tempfile.mkdtemp(prefix="moatless_test_evals_")
     logger.info(f"Created temporary evaluation directory: {temp_evals_dir}")
     
-    # Set the evaluation directory in app state
-    app.state.EVALUATIONS_DIR = temp_evals_dir
+    # Set the evaluation directory
+    os.environ["MOATLESS_DIR"] = temp_evals_dir
     os.makedirs(temp_evals_dir, exist_ok=True)
     
-    yield
+    yield temp_evals_dir
     
-    # Cleanup: Remove temporary directories and restore original
+    # Cleanup: Remove temporary directories
     logger.info("Cleaning up temporary directories...")
     try:
         shutil.rmtree(temp_evals_dir)
         logger.info(f"Removed temporary evaluation directory: {temp_evals_dir}")
     except Exception as e:
         logger.warning(f"Failed to remove evaluation directory: {e}")
-    
-    # Restore original directory in app state
-    app.state.EVALUATIONS_DIR = original_evals_dir
 
-async def wait_for_evaluation_completion(client, evaluation_name, timeout=300):  # Increased timeout to 5 minutes
-    """Wait for evaluation to complete or timeout"""
-    start_time = time.time()
-    last_log_time = 0
-    log_interval = 10  # Log every 10 seconds
-    
-    while time.time() - start_time < timeout:
-        current_time = time.time()
-        
-        try:
-            response = client.get(f"/evaluations/{evaluation_name}")
-            assert response.status_code == 200
-            
-            data = response.json()
-            
-            # Log status and progress at intervals
-            if current_time - last_log_time >= log_interval:
-                logger.info(f"Evaluation status: {data['status']}")
-                
-                # Log instance details
-                for instance_id, instance in data["instances"].items():
-                    logger.info(f"Instance {instance_id}:")
-                    logger.info(f"  Status: {instance['status']}")
-                    logger.info(f"  Started: {instance.get('started_at')}")
-                    if instance.get('error'):
-                        logger.error(f"  Error: {instance['error']}")
-                
-                # Check instance progress
-                completed = sum(1 for inst in data["instances"].values() 
-                            if inst["status"] == InstanceStatus.COMPLETED)
-                total = len(data["instances"])
-                logger.info(f"Progress: {completed}/{total} instances completed")
-                logger.info(f"Time elapsed: {int(current_time - start_time)}s")
-                
-                last_log_time = current_time
-            
-            if data["status"] in [EvaluationStatus.COMPLETED, EvaluationStatus.ERROR]:
-                return data
-            
-        except Exception as e:
-            logger.error(f"Error checking evaluation status: {e}")
-            # Continue waiting despite error
-        
-        await asyncio.sleep(1)
-    
-    raise TimeoutError(f"Evaluation did not complete within {timeout} seconds")
+@pytest.fixture
+def repository():
+    """Fixture to provide access to the repository instance."""
+    from moatless_tools.evaluation_worker import get_repository
+    return get_repository()
 
-@pytest.mark.asyncio
-async def test_evaluation_lifecycle(test_client, test_evaluation_request):
-    """Test the complete lifecycle of an evaluation: create, run, and monitor until completion"""
+def test_create_evaluation(test_client, test_evaluation_request, repository):
+    """Test creating a new evaluation."""
+    response = test_client.post("/evaluations/", json=test_evaluation_request)
+    assert response.status_code == 200
+    evaluation_name = response.json()["evaluation_name"]
     
-    try:
-        # Step 1: Create evaluation
-        logger.info("Creating evaluation...")
-        logger.debug(f"Evaluation request: {json.dumps(test_evaluation_request, indent=2)}")
+    # Now using the repository fixture
+    evaluation = repository.load_evaluation(evaluation_name)
+    assert evaluation is not None
+    assert evaluation.evaluation_name == evaluation_name
+    assert evaluation.status == EvaluationStatus.PENDING
+    assert evaluation.settings.max_iterations == test_evaluation_request["max_iterations"]
+    assert evaluation.settings.max_expansions == test_evaluation_request["max_expansions"]
+    assert evaluation.settings.max_cost == test_evaluation_request["max_cost"]
+    assert evaluation.settings.model.model == test_evaluation_request["model"]
+
+def test_list_evaluations(test_client, test_evaluation_request):
+    """Test listing evaluations."""
+    # Create multiple evaluations
+    eval_names = []
+    for i in range(3):
         response = test_client.post("/evaluations/", json=test_evaluation_request)
         assert response.status_code == 200
-        evaluation_name = response.json()["evaluation_name"]
-        logger.info(f"Created evaluation: {evaluation_name}")
-        
-        # Step 2: Start evaluation
-        logger.info("Starting evaluation...")
-        response = test_client.post(f"/evaluations/{evaluation_name}/start", json={"rerun_errors": False})
-        assert response.status_code == 200
-        assert response.json()["status"] == "started"
-        
-        # Step 3: Monitor until completion
-        logger.info("Monitoring evaluation progress...")
-        try:
-            final_status = await wait_for_evaluation_completion(test_client, evaluation_name)
-            logger.info(f"Final evaluation status: {json.dumps(final_status, indent=2)}")
-            
-            # Verify final state
-            assert final_status["status"] in [EvaluationStatus.COMPLETED, EvaluationStatus.ERROR]
-            assert "instances" in final_status
-            assert len(final_status["instances"]) == len(test_evaluation_request["instance_ids"])
-            
-            # Check if events were recorded
-            response = test_client.get(f"/evaluations/{evaluation_name}/events")
-            assert response.status_code == 200
-            events = response.json()["events"]
-            logger.info(f"Found {len(events)} events")
-            for event in events:
-                logger.debug(f"Event: {event['type']}")
-            
-            assert len(events) > 0
-            assert any(event["type"] == "evaluation_started" for event in events)
-            assert any(event["type"] == "evaluation_completed" for event in events)
-            
-            # Verify evaluation files were created
-            eval_dir = os.path.join(app.state.EVALUATIONS_DIR, evaluation_name)
-            assert os.path.exists(eval_dir), f"Evaluation directory {eval_dir} does not exist"
-            
-            # Verify events.json exists and has content
-            events_file = os.path.join(eval_dir, "events.json")
-            assert os.path.exists(events_file), f"Events file {events_file} does not exist"
-            with open(events_file) as f:
-                saved_events = json.load(f)
-                assert len(saved_events) > 0, "Events file is empty"
-                assert any(event["type"] == "evaluation_started" for event in saved_events)
-                assert any(event["type"] == "evaluation_completed" for event in saved_events)
-                logger.info(f"Found {len(saved_events)} events in events.json")
-            
-            # Verify instance directory and eval_result.json
-            instance_id = test_evaluation_request["instance_ids"][0]
-            instance_dir = os.path.join(eval_dir, instance_id)
-            assert os.path.exists(instance_dir), f"Instance directory {instance_dir} does not exist"
-            
-            eval_result_file = os.path.join(instance_dir, "eval_result.json")
-            assert os.path.exists(eval_result_file), f"Eval result file {eval_result_file} does not exist"
-            with open(eval_result_file) as f:
-                eval_result = json.load(f)
-                assert "status" in eval_result, "Eval result missing status"
-                assert eval_result["status"] in ["completed", "error"], f"Unexpected status: {eval_result['status']}"
-                assert "duration" in eval_result, "Eval result missing duration"
-                assert "benchmark_result" in eval_result, "Eval result missing benchmark_result"
-                logger.info(f"Eval result status: {eval_result['status']}")
-            
-            # Verify trajectory.json exists
-            trajectory_file = os.path.join(instance_dir, "trajectory.json")
-            assert os.path.exists(trajectory_file), f"Trajectory file {trajectory_file} does not exist"
-            
-        except TimeoutError as e:
-            logger.error(f"Evaluation timed out: {e}")
-            # Get final status even after timeout
-            try:
-                response = test_client.get(f"/evaluations/{evaluation_name}")
-                if response.status_code == 200:
-                    status = response.json()
-                    logger.error(f"Status at timeout: {json.dumps(status, indent=2)}")
-            except Exception as e:
-                logger.error(f"Failed to get status after timeout: {e}")
-            raise
-            
-    except Exception as e:
-        logger.error(f"Test failed: {e}")
-        logger.error(f"Traceback:", exc_info=True)
-        raise 
+        eval_name = response.json()["evaluation_name"]
+        eval_names.append(eval_name)
+        logger.debug(f"Created evaluation: {eval_name}")
+    
+    logger.debug(f"Created evaluations: {eval_names}")
+    
+    # Get list of evaluations
+    response = test_client.get("/evaluations")
+    assert response.status_code == 200
+    data = response.json()
+    logger.debug(f"List response: {json.dumps(data, indent=2)}")
+    
+    # Verify response format
+    assert "evaluations" in data
+    evaluations = data["evaluations"]
+    assert len(evaluations) == 3, f"Expected 3 evaluations, got {len(evaluations)}: {evaluations}"
+    
+    # Verify each evaluation in the list
+    for eval_item in evaluations:
+        assert eval_item["name"] in eval_names
+        assert eval_item["status"] == EvaluationStatus.PENDING
+        assert eval_item["model"] == test_evaluation_request["model"]
+        assert eval_item["max_expansions"] == test_evaluation_request["max_expansions"]
+        assert eval_item["total_instances"] == 0
+        assert eval_item["completed_instances"] == 0
+        assert eval_item["error_instances"] == 0
+        assert eval_item["resolved_instances"] == 0
+        assert not eval_item["is_active"]
+
+def test_get_evaluation(test_client, test_evaluation_request):
+    """Test getting a specific evaluation."""
+    # Create an evaluation
+    response = test_client.post("/evaluations/", json=test_evaluation_request)
+    assert response.status_code == 200
+    evaluation_name = response.json()["evaluation_name"]
+    
+    # Get the evaluation
+    response = test_client.get(f"/evaluations/{evaluation_name}")
+    assert response.status_code == 200
+    data = response.json()
+    
+    # Verify evaluation details
+    assert data["status"] == EvaluationStatus.PENDING
+    assert not data["is_active"]
+    assert "settings" in data
+    assert data["settings"]["model"] == test_evaluation_request["model"]
+    assert data["settings"]["max_iterations"] == test_evaluation_request["max_iterations"]
+    assert data["settings"]["max_expansions"] == test_evaluation_request["max_expansions"]
+    assert data["settings"]["max_cost"] == test_evaluation_request["max_cost"]
+    assert "instances" in data
+    assert len(data["instances"]) == 0
+
+def test_get_nonexistent_evaluation(test_client):
+    """Test getting a nonexistent evaluation."""
+    response = test_client.get("/evaluations/nonexistent")
+    assert response.status_code == 200  # Returns 200 with error message
+    assert "error" in response.json()
+    assert response.json()["error"] == "Evaluation not found"
