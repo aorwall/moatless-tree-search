@@ -81,6 +81,8 @@ class EvaluationMonitor:
         self.logger = logger
         self.event_queue = queue.Queue()
         self.needs_update = False  # Flag to track if display needs update
+        self.needs_stats_update = False  # Flag to track if stats need update
+        self.last_log_update = 0  # Track last log update time
         
         # Remove existing handlers and add UI handler
         self.logger.handlers = []
@@ -97,7 +99,7 @@ class EvaluationMonitor:
         
         self.logger.info(f"Starting evaluation monitor for {evaluation.evaluation_name}")
         self.logger.info(f"Found {len(self.instances_data)} instances to evaluate")
-        
+
     def handle_event(self, event):
         """Handle evaluation events by putting them in the queue"""
         try:
@@ -122,37 +124,45 @@ class EvaluationMonitor:
             return
 
         if event_type == "instance_started":
-            self.instances_data[instance_id] = {
+            self.instances_data.setdefault(instance_id, {}).update({
                 'status': InstanceStatus.STARTED,
                 'duration': None,
                 'resolved': None,
                 'error': None,
-                'start_time': time.time()  # Add start time for sorting
-            }
+                'start_time': time.time()
+            })
             self.logger.info(f"Started instance: {instance_id}")
             
         elif event_type == "instance_completed":
-            self.instances_data[instance_id] = {
+            self.instances_data.setdefault(instance_id, {}).update({
                 'status': InstanceStatus.COMPLETED,
                 'resolved': data.get("resolved", False),
                 'duration': data.get("duration"),
                 'error': None,
                 'iteration': data.get("iteration", 0),
                 'total_cost': data.get("total_cost", 0),
-                'best_reward': data.get("best_reward", 0)
-            }
+                'best_reward': data.get("best_reward", 0),
+                'prompt_tokens': data.get("prompt_tokens", 0),
+                'completion_tokens': data.get("completion_tokens", 0),
+                'cached_tokens': data.get("cached_tokens", 0)
+            })
+            self.needs_stats_update = True
             self.logger.info(f"Completed instance: {instance_id} (resolved: {data.get('resolved', False)})")
             
         elif event_type == "instance_error":
-            self.instances_data[instance_id] = {
+            self.instances_data.setdefault(instance_id, {}).update({
                 'status': InstanceStatus.ERROR,
                 'resolved': False,
                 'duration': None,
                 'error': data.get("error"),
                 'iteration': data.get("iteration", 0),
                 'total_cost': data.get("total_cost", 0),
-                'best_reward': data.get("best_reward", 0)
-            }
+                'best_reward': data.get("best_reward", 0),
+                'prompt_tokens': data.get("prompt_tokens", 0),
+                'completion_tokens': data.get("completion_tokens", 0),
+                'cached_tokens': data.get("cached_tokens", 0)
+            })
+            self.needs_stats_update = True
             self.logger.error(f"Error in instance {instance_id}: {data.get('error')}")
             
         elif event_type == "tree_progress":
@@ -174,17 +184,25 @@ class EvaluationMonitor:
                     await self.process_event(event)
                     self.event_queue.task_done()
                 
+                current_time = time.time()
+                
+                # Update logs once per second
+                if current_time - self.last_log_update >= 1.0:
+                    self.needs_update = True
+                    self.last_log_update = current_time
+                
                 # Update display if needed
-                if self.needs_update and self.live:
+                if self.live and (self.needs_update or self.needs_stats_update):
                     self.live.update(self._create_layout())
                     self.needs_update = False
+                    self.needs_stats_update = False
                 
-                await asyncio.sleep(0.1)  # Small sleep to prevent busy waiting
+                await asyncio.sleep(1.0)
             except queue.Empty:
                 pass  # Queue is empty, continue
             except Exception as e:
                 self.logger.error(f"Error processing event: {e}")
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(1.0)
 
     def create_progress_table(self):
         """Create a rich table showing evaluation progress"""
@@ -330,8 +348,8 @@ class EvaluationMonitor:
         with Live(
             self._create_layout(),
             console=self.console,
-            refresh_per_second=10,  # Increased refresh rate
-            auto_refresh=True
+            refresh_per_second=1,  # Reduced refresh rate since we control updates manually
+            auto_refresh=False  # We'll handle updates manually
         ) as self.live:
             # Start event processing task
             event_task = asyncio.create_task(self.process_events())
@@ -343,11 +361,10 @@ class EvaluationMonitor:
                         self.logger.error("Evaluation not found!")
                         break
                     
-                    # Force update every second
-                    self.needs_update = True
-                    self.live.update(self._create_layout())
-                        
                     if evaluation.status in [EvaluationStatus.COMPLETED, EvaluationStatus.ERROR]:
+                        # Force final update of stats
+                        self.needs_stats_update = True
+                        self.live.update(self._create_layout())
                         break
                         
                     await asyncio.sleep(1.0)
@@ -407,6 +424,12 @@ def main():
     parser.add_argument("--ignore-repos", nargs="+", help="Ignore specific repositories")
     parser.add_argument("--max-resolved", type=int, help="Maximum number of resolved instances")
     parser.add_argument("--exclude-instance-ids", nargs="+", help="Instance IDs to exclude")
+    parser.add_argument("--response-format", 
+                       choices=[format.value for format in LLMResponseFormat],
+                       help="Response format for the model")
+    parser.add_argument("--message-history", 
+                       choices=[history.value for history in MessageHistoryType],
+                       help="Message history type")
     
     args = parser.parse_args()
     
@@ -417,13 +440,13 @@ def main():
         max_tokens=3000,
         api_key=args.api_key,
         base_url=args.base_url,
-        response_format=LLMResponseFormat.TOOLS
+        response_format=LLMResponseFormat(args.response_format) if args.response_format else None
     )
     
     # Create agent settings
     agent_settings = AgentSettings(
         completion_model=model_settings,
-        message_history_type=MessageHistoryType.MESSAGES,
+        message_history_type=MessageHistoryType(args.message_history) if args.message_history else MessageHistoryType.MESSAGES,
         system_prompt=None
     )
     
@@ -443,7 +466,9 @@ def main():
     evaluation_name = create_evaluation_name(
         model=args.model,
         date=None,
-        max_expansions=args.max_expansions
+        max_expansions=args.max_expansions,
+        response_format=LLMResponseFormat(args.response_format) if args.response_format else None,
+        message_history=MessageHistoryType(args.message_history) if args.message_history else None
     )
     
     # Create evaluation using factory

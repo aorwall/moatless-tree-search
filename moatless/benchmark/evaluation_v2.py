@@ -429,29 +429,28 @@ class EvaluationRunner:
 
 def create_evaluation_name(
     model: str,
-    date,
-    max_expansions=None,
-    **kwargs,
-):
-    if date:
-        date_str = date
-    else:
-        date_str = datetime.now(tz=timezone.utc).strftime("%Y%m%d")
-    # Make model name URL-safe (only alphanumeric and underscores)
-    model_name = model.split("/")[-1]
-    # Replace any non-alphanumeric chars with underscore
-    model_name = "".join(c if c.isalnum() else "_" for c in model_name)
-    # Remove repeated underscores and any leading/trailing underscores
-    model_name = "_".join(filter(None, model_name.split("_"))).strip("_")
+    date: str | None = None,
+    max_expansions: int | None = None,
+    response_format: LLMResponseFormat | None = None,
+    message_history: MessageHistoryType | None = None,
+) -> str:
+    """Create a unique name for an evaluation."""
+    if not date:
+        date = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    model_name = f"{date_str}_{model_name}"
+    # Clean model name
+    model_name = model.replace("/", "_").replace("-", "_")
+    
+    # Build name components
+    components = [model_name, date]
+    
+    if max_expansions is not None:
+        components.append(f"exp_{max_expansions}")
+        
+    if response_format:
+        components.append(f"fmt_{response_format.value}")
+        
+    if message_history:
+        components.append(f"hist_{message_history.value}")
 
-    if max_expansions:
-        model_name += f"_max_exp{max_expansions}"
-
-    for key, value in kwargs.items():
-        # Convert key-value pairs to URL-safe format
-        safe_value = "".join(c if c.isalnum() else "_" for c in str(value))
-        safe_value = "_".join(filter(None, safe_value.split("_"))).strip("_")
-        model_name += f"_{key}_{safe_value}"
-    return model_name.lower()  # Convert to lowercase for consistency
+    return "_".join(components)
