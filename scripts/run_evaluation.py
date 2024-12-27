@@ -348,8 +348,8 @@ class EvaluationMonitor:
         with Live(
             self._create_layout(),
             console=self.console,
-            refresh_per_second=1,  # Reduced refresh rate since we control updates manually
-            auto_refresh=False  # We'll handle updates manually
+            refresh_per_second=1,
+            auto_refresh=True
         ) as self.live:
             # Start event processing task
             event_task = asyncio.create_task(self.process_events())
