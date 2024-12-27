@@ -246,8 +246,6 @@ class CompletionModel(BaseModel):
                     metadata=self.metadata or {},
                 )
 
-                logger.info(json.dumps(messages, indent=2))
-                logger.info(json.dumps(llm_completion_response.model_dump(), indent=2))
                 if not llm_completion_response or not llm_completion_response.choices:
                     raise CompletionRuntimeError("No completion response or choices returned")
 

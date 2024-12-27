@@ -42,6 +42,9 @@ def create_evaluation(
         logger.info(f"Found {len(raw_instances)} instances that exist in both lite and verified datasets")
     else:
         file_path = os.path.join(os.path.dirname(__file__), f"swebench_{split}_all_evaluations.json")
+        if not os.path.exists(file_path):
+            logger.error(f"File not found: {file_path}")
+            raise FileNotFoundError(f"File not found: {file_path}")
         with open(file_path) as f:
             raw_instances = json.load(f)
         logger.info(f"Loaded {len(raw_instances)} instances from {file_path}")
@@ -92,13 +95,6 @@ def create_evaluation(
         logger.info(
             f"Running evaluation for {len(raw_instances)} instances filtered by max_resolved <= {max_resolved}"
         )
-    
-    if split == "sampled_50_instances":
-        raw_instances = [
-            instance for instance in raw_instances 
-            if instance["instance_id"] in sampled_50_instances
-        ]
-        logger.info(f"Running evaluation for {len(raw_instances)} instances from sampled_50_instances")
 
     if repos:
         raw_instances = [

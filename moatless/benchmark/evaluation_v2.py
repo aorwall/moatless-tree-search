@@ -89,7 +89,7 @@ class EvaluationRunner:
 
     def emit_event(self, evaluation_name: str, event_type: str, data: Any = None):
         """Emit an event to all registered handlers"""
-        logger.info(f"Emitting event {event_type} with data {data}")
+        logger.info(f"Emitting event {event_type}")
         event = EvaluationEvent(
             evaluation_name=evaluation_name,
             event_type=event_type,
@@ -276,22 +276,26 @@ class EvaluationRunner:
             try:
                 best_node = tree.run_search()
                 
-                # Generate final benchmark result
-                from moatless.benchmark.report import to_result
-                benchmark_result = to_result(tree)
-                
-                # Update eval_result with completion info
-                eval_result["status"] = "completed"
-                eval_result["duration"] = time.time() - start_time
-                eval_result["benchmark_result"] = benchmark_result.dict() if benchmark_result else None
-                
                 if best_node:
-                    patch = best_node.file_context.generate_git_patch()
                     eval_result["selected_node"] = best_node.node_id
-                    eval_result["patch"] = patch
-                
+
+                # Evaluate all leaf nodes if using testbed
+                if self.use_testbed:
+                    eval_result = self.evaluate_nodes(
+                        evaluation_name=evaluation.evaluation_name,
+                        instance_id=instance_id,
+                        instance=moatless_instance,
+                        tree=tree,
+                        eval_result=eval_result,
+                        eval_result_path=eval_result_path,
+                        runtime=runtime,
+                        repository=repository
+                    )
+
+                benchmark_result = to_result(tree, eval_report=eval_result)
+
                 # Complete instance with result
-                instance.complete(resolved=bool(best_node), benchmark_result=benchmark_result)
+                instance.complete(resolved=benchmark_result.resolved, benchmark_result=benchmark_result)
                 self.emit_event(evaluation.evaluation_name, "instance_completed", {
                     "instance_id": instance_id,
                     "resolved": instance.resolved,
@@ -329,6 +333,91 @@ class EvaluationRunner:
                 "error": str(e)
             })
             raise
+
+    def evaluate_nodes(
+        self,
+        evaluation_name: str,
+        instance_id: str,
+        instance: dict,
+        tree: SearchTree,
+        eval_result: dict,
+        eval_result_path: str,
+        runtime: Any = None,
+        repository: Any = None,
+    ):
+        """Evaluate all leaf nodes using the testbed."""
+        leaf_nodes = tree.get_leaf_nodes()
+        patch_results = {}
+
+        # Filter out already evaluated nodes
+        unevaluated_nodes = [
+            node
+            for node in leaf_nodes
+            if str(node.node_id) not in eval_result.get("node_results", {})
+        ]
+
+        if not unevaluated_nodes:
+            logger.info(
+                f"All {len(leaf_nodes)} nodes for instance {instance_id} have already been evaluated"
+            )
+            return
+
+        logger.info(
+            f"Found {len(leaf_nodes) - len(unevaluated_nodes)} already evaluated nodes, "
+            f"will evaluate remaining {len(unevaluated_nodes)} nodes for instance {instance_id}"
+        )
+
+        # Create runtime if not provided
+        if not runtime and repository:
+            from moatless.runtime.testbed import TestbedEnvironment
+            runtime = TestbedEnvironment(
+                repository=repository,
+                instance=instance,
+                dataset_name=self.dataset_name,
+                enable_cache=True,
+            )
+
+        for i, leaf_node in enumerate(unevaluated_nodes):
+            logger.info(
+                f"Evaluate Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id}"
+            )
+
+            if str(leaf_node.node_id) in eval_result["node_results"]:
+                logger.info(
+                    f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} that has already been evaluated"
+                )
+                continue
+
+            patch = leaf_node.file_context.generate_git_patch(ignore_tests=True)
+            if patch and patch.strip():
+                patch_hash = create_sha256_hash(patch)
+
+                if patch_hash in patch_results:
+                    logger.info(
+                        f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} as patch has already been evaluated."
+                    )
+                    eval_result["node_results"][leaf_node.node_id] = patch_results[patch_hash]
+                else:
+                    start_time = time.time()
+                    result = runtime.evaluate(patch=patch)
+                    if not result:
+                        logger.error(f"Error in evaluating patch for {instance_id}")
+                        continue
+
+                    eval_result["node_results"][leaf_node.node_id] = result.model_dump()
+                    patch_results[patch_hash] = result.model_dump()
+                    logger.info(
+                        f"Evaluated patch in {time.time() - start_time} seconds (resolved: {result.resolved})"
+                    )
+            else:
+                logger.info(
+                    f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} with no patch."
+                )
+
+            with open(eval_result_path, "w") as f:
+                json.dump(eval_result, f, indent=2)
+
+            return eval_result
 
     def read_trajectory(self, path) -> dict | None:
         if os.path.exists(path):
