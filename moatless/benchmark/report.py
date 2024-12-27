@@ -386,6 +386,7 @@ def to_result(
     instance = get_moatless_instance(info["instance_id"])
 
     if not eval_report:
+        logger.info(f"No eval report for {info['instance_id']}")
         eval_report = {}
 
     if previous_result:
@@ -403,6 +404,8 @@ def to_result(
 
         if not search_tree.is_finished():
             status = "running"
+        elif eval_report and eval_report.get("resolved", None) is not None:
+            resolved = eval_report.get("resolved")
         else:
             best_node = search_tree.get_best_trajectory()
             if best_node:

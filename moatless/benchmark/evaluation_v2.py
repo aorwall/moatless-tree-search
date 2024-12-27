@@ -269,9 +269,6 @@ class EvaluationRunner:
             try:
                 best_node = tree.run_search()
                 
-                if best_node:
-                    eval_result["selected_node"] = best_node.node_id
-
                 # Evaluate all leaf nodes if using testbed
                 if self.use_testbed:
                     eval_result = self.evaluate_nodes(
@@ -284,6 +281,10 @@ class EvaluationRunner:
                         runtime=runtime,
                         repository=repository
                     )
+
+                if best_node:
+                    eval_result["selected_node"] = best_node.node_id
+                    eval_result["resolved"] = eval_result.get("node_results", {}).get(str(best_node.node_id), {}).get("resolved", None)
 
                 benchmark_result = to_result(tree, eval_report=eval_result)
 
