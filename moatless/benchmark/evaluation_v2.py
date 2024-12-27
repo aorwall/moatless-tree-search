@@ -41,7 +41,7 @@ from moatless.benchmark.swebench import (
     create_index,
 )
 from moatless.benchmark.utils import get_moatless_instance
-from moatless.completion.completion import CompletionModel
+from moatless.completion.completion import CompletionModel, LLMResponseFormat
 from moatless.completion.log_handler import LogHandler
 from moatless.discriminator import Discriminator, AgentDiscriminator
 from moatless.feedback.feedback import FeedbackGenerator
