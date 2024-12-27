@@ -289,8 +289,15 @@ class EvaluationRunner:
                     )
 
                 if best_node:
+                    logger.info(f"Pick selected node  {best_node.node_id}")
                     eval_result["selected_node"] = best_node.node_id
-                    eval_result["resolved"] = eval_result.get("node_results", {}).get(str(best_node.node_id), {}).get("resolved", None)
+
+                    node_result = eval_result.get("node_results", {})
+                    if not node_result:
+                        logger.warning(f"No node result found for {best_node.node_id}")
+                    else:
+                        eval_result["resolved"] = node_result.get("resolved", None)
+                        logger.info(eval_result["resolved"])
 
                 benchmark_result = to_result(tree, eval_report=eval_result)
 
