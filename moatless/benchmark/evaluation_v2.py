@@ -71,6 +71,7 @@ class EvaluationRunner:
     def __init__(
         self,
         repository: EvaluationFileRepository,
+        evaluation: Evaluation,
         dataset_name: str = "princeton-nlp/SWE-bench_Lite",
         repo_base_dir: Union[str, None] = None,
         num_workers: int = 1,
@@ -78,6 +79,7 @@ class EvaluationRunner:
     ):
         self._event_handlers: List[Callable[[EvaluationEvent], None]] = []
         self.repository = repository
+        self.evaluation = evaluation
         self.dataset_name = dataset_name
         self.repo_base_dir = repo_base_dir
         self.num_workers = num_workers
@@ -98,11 +100,15 @@ class EvaluationRunner:
         for handler in self._event_handlers:
             handler(event)
 
-    def run_evaluation(self, evaluation: Evaluation, rerun_errors: bool = False):
+    def run_evaluation(self, evaluation: Evaluation | None = None, rerun_errors: bool = False):
         """Run the evaluation process."""
+
+        if not evaluation:
+            evaluation = self.evaluation
+
         # Create evaluation directory if it doesn't exist
         os.makedirs(self.repository.get_evaluation_dir(evaluation.evaluation_name), exist_ok=True)
-        
+
         evaluation.start_time = datetime.now(timezone.utc)
         evaluation.status = EvaluationStatus.RUNNING
         self.repository.save_evaluation(evaluation)

@@ -482,6 +482,7 @@ def main():
         # Create runner with event handler
         runner = EvaluationRunner(
             repository=repository,
+            evaluation=evaluation,
             dataset_name="princeton-nlp/SWE-bench_Lite",
             num_workers=args.num_workers,
             use_testbed=True
@@ -493,9 +494,10 @@ def main():
         # Create monitoring task
         monitoring_task = loop.create_task(monitor.start_monitoring())
         
+        logger.info("Running evaluation")
         # Run evaluation in executor and wait for both tasks
         loop.run_until_complete(asyncio.gather(
-            loop.run_in_executor(None, runner.run_evaluation, evaluation),
+            loop.run_in_executor(None, runner.run_evaluation),
             monitoring_task
         ))
     except Exception as e:
