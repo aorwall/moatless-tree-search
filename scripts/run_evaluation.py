@@ -497,7 +497,7 @@ def main():
         logger.info("Running evaluation")
         # Run evaluation in executor and wait for both tasks
         loop.run_until_complete(asyncio.gather(
-            loop.run_in_executor(None, runner.run_evaluation),
+            loop.run_in_executor(ThreadPoolExecutor(), runner.run_evaluation),
             monitoring_task
         ))
     except Exception as e:
