@@ -296,8 +296,9 @@ class EvaluationRunner:
                     if not node_result:
                         logger.warning(f"No node result found for {best_node.node_id}")
                     else:
+                        
                         eval_result["resolved"] = node_result.get("resolved", None)
-                        logger.info(eval_result["resolved"])
+                        logger.info(node_result["resolved"] + " from " + node_result)
 
                 benchmark_result = to_result(tree, eval_report=eval_result)
 
@@ -414,15 +415,12 @@ class EvaluationRunner:
                     eval_result["node_results"][leaf_node.node_id] = result.model_dump()
                     patch_results[patch_hash] = result.model_dump()
                     logger.info(
-                        f"Evaluated patch in {time.time() - start_time} seconds (resolved: {result.resolved})"
+                        f"Evaluated patch for node {leaf_node.node_id} in {time.time() - start_time} seconds (resolved: {result.resolved})"
                     )
             else:
                 logger.info(
                     f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} with no patch."
                 )
-
-        with open(eval_result_path, "w") as f:
-            json.dump(eval_result, f, indent=2)
 
         return eval_result
 
