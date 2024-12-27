@@ -292,7 +292,10 @@ class EvaluationRunner:
                     logger.info(f"Pick selected node  {best_node.node_id}")
                     eval_result["selected_node"] = best_node.node_id
 
-                    node_result = eval_result.get("node_results", {})
+                    node_result = eval_result.get("node_results", {}).get(str(best_node.node_id), {})
+                    if not node_result:
+                        node_result = eval_result.get("node_results", {}).get(best_node.node_id, {})
+
                     if not node_result:
                         logger.warning(f"No node result found for {best_node.node_id}")
                     else:
@@ -413,7 +416,6 @@ class EvaluationRunner:
                         continue
 
                     eval_result["node_results"][leaf_node.node_id] = result.model_dump()
-                    eval_result["node_results"][leaf_node.node_id]["resolved"] = result.resolved # FIXME
                     patch_results[patch_hash] = eval_result["node_results"][leaf_node.node_id]
                     logger.info(
                         f"Evaluated patch for node {leaf_node.node_id} in {time.time() - start_time} seconds (resolved: {result.resolved})"
