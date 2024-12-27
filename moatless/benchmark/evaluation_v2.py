@@ -296,9 +296,9 @@ class EvaluationRunner:
                     if not node_result:
                         logger.warning(f"No node result found for {best_node.node_id}")
                     else:
-                        
+
                         eval_result["resolved"] = node_result.get("resolved", None)
-                        logger.info(node_result["resolved"] + " from " + node_result)
+                        logger.info(node_result)
 
                 benchmark_result = to_result(tree, eval_report=eval_result)
 
@@ -413,7 +413,8 @@ class EvaluationRunner:
                         continue
 
                     eval_result["node_results"][leaf_node.node_id] = result.model_dump()
-                    patch_results[patch_hash] = result.model_dump()
+                    eval_result["node_results"][leaf_node.node_id]["resolved"] = result.resolved # FIXME
+                    patch_results[patch_hash] = eval_result["node_results"][leaf_node.node_id]
                     logger.info(
                         f"Evaluated patch for node {leaf_node.node_id} in {time.time() - start_time} seconds (resolved: {result.resolved})"
                     )
