@@ -252,12 +252,6 @@ class EvaluationRunner:
             # Add event handler to forward tree events
             def tree_event_handler(event):
                 if event["event_type"] == "tree_iteration":
-                    # Generate benchmark result after each iteration
-                    from moatless.benchmark.report import to_result
-                    benchmark_result = to_result(tree)
-                    instance.benchmark_result = benchmark_result
-                    
-                    # Emit event with benchmark result
                     self.emit_event(evaluation.evaluation_name, "tree_progress", {
                         "instance_id": instance_id,
                         "iteration": event["data"]["iteration"],
@@ -265,8 +259,7 @@ class EvaluationRunner:
                         "best_reward": event["data"]["best_reward"],
                         "finished_nodes": event["data"]["finished_nodes"],
                         "total_nodes": event["data"]["total_nodes"],
-                        "best_node_id": event["data"]["best_node_id"],
-                        "benchmark_result": benchmark_result.dict() if benchmark_result else None
+                        "best_node_id": event["data"]["best_node_id"]
                     })
 
             tree.add_event_handler(tree_event_handler)
@@ -414,10 +407,10 @@ class EvaluationRunner:
                     f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} with no patch."
                 )
 
-            with open(eval_result_path, "w") as f:
-                json.dump(eval_result, f, indent=2)
+        with open(eval_result_path, "w") as f:
+            json.dump(eval_result, f, indent=2)
 
-            return eval_result
+        return eval_result
 
     def read_trajectory(self, path) -> dict | None:
         if os.path.exists(path):
