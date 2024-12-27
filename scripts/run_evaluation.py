@@ -80,16 +80,16 @@ class EvaluationMonitor:
         self.log_panel = LogPanel(max_lines=1000, visible_lines=25)
         self.logger = logger
         self.event_queue = queue.Queue()
-        self.needs_update = False  # Flag to track if display needs update
-        self.needs_stats_update = False  # Flag to track if stats need update
-        self.last_log_update = 0  # Track last log update time
+        self.needs_update = False
+        self.needs_stats_update = False
+        self.last_log_update = 0
         
         # Remove existing handlers and add UI handler
         self.logger.handlers = []
         self.logger.addHandler(UILogger(self.log_panel))
         
         # Load initial instances
-        for instance in repository.list_instances(evaluation.evaluation_name):
+        for instance in self.repository.list_instances(self.evaluation.evaluation_name):
             self.instances_data[instance.instance_id] = {
                 'status': instance.status,
                 'duration': instance.duration,
@@ -391,21 +391,7 @@ def validate_evaluation_setup(repository, evaluation, args):
     if not evaluation:
         raise RuntimeError("Failed to create evaluation")
 
-    # Check if any instances exist
-    instances = repository.list_instances(evaluation.evaluation_name)
-    if not instances:
-        filters_info = {
-            "Instance IDs": args.instance_ids,
-            "Excluded Instance IDs": args.exclude_instance_ids,
-            "Repositories": args.repos,
-            "Ignored Repositories": args.ignore_repos,
-            "Min Resolved": args.min_resolved,
-            "Max Resolved": args.max_resolved,
-            "Split": args.split
-        }
-        raise ValueError(f"No instances found after applying filters: {json.dumps(filters_info, indent=2)}")
-
-    return evaluation, instances
+    return evaluation
 
 def main():
     parser = argparse.ArgumentParser(description="Run a model evaluation with progress monitoring")
@@ -486,9 +472,6 @@ def main():
     )
 
     try:
-        # Validate setup before starting UI
-        evaluation, instances = validate_evaluation_setup(repository, evaluation, args)
-        
         # Create event loop
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
