@@ -328,7 +328,8 @@ def create_linear_table(nodes: List[Node], max_node_id: int, eval_result: Option
                 
             # JSON tab
             with tabs[2]:
-                st.json(node.observation.model_dump(), expanded=False)
+                for action_step in node.action_steps:
+                    st.json(action_step.model_dump(), expanded=False)
         
         # Context column with tabs
         if node.file_context:

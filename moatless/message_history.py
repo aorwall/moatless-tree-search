@@ -134,10 +134,10 @@ class MessageHistoryGenerator(BaseModel):
                 tool_responses.append({
                     "role": "tool",
                     "tool_call_id": tool_call_id,
-                    "content": previous_node.observation.message,
+                    "content": action_step.observation.message,
                 })
 
-                tokens += count_tokens(previous_node.observation.message)
+                tokens += count_tokens(action_step.observation.message)
 
             assistant_message = {
                 "role": "assistant"

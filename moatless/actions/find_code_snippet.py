@@ -3,6 +3,7 @@ from typing import List, Optional, Tuple, Type, ClassVar
 
 from pydantic import Field, model_validator
 
+from fnmatch import fnmatch
 from moatless.actions.model import ActionArguments, FewShotExample, Observation
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
 from moatless.file_context import FileContext
@@ -64,13 +65,13 @@ class FindCodeSnippet(SearchBaseAction):
         )
 
         if args.file_pattern:
-            from fnmatch import fnmatch
             matches = [
                 (file_path, line_num) 
                 for file_path, line_num in matches 
                 if fnmatch(file_path, args.file_pattern)
             ]
 
+            
         search_result_context = FileContext(repo=self._repository)
         for file_path, start_line in matches[:self.max_hits]:
             num_lines = len(args.code_snippet.splitlines())

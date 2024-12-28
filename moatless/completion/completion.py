@@ -517,6 +517,8 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
         def _do_completion():
             response_text, completion_response = self._litellm_text_completion(messages)
 
+            logger.info(response_text)
+
             try:
                 self._validate_react_format(response_text)
 

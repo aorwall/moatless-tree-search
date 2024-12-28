@@ -27,33 +27,60 @@ from moatless.completion.completion import CompletionModel, LLMResponseFormat
 from moatless.schema import MessageHistoryType
 from moatless.agent.settings import AgentSettings
 from moatless.benchmark.evaluation_factory import create_evaluation
+from moatless.benchmark.schema import EvaluationDatasetSplit, EvaluationInstance
+from typing import Optional
 
 # Configure root logger
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+# Set up file logging
+os.makedirs("logs", exist_ok=True)
+log_file = os.path.join("logs", f"evaluation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+file_handler = logging.FileHandler(log_file)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+logger.addHandler(file_handler)
+
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
 load_dotenv()
 
-class LogPanel:
-    def __init__(self, max_lines=100, visible_lines=20):
-        self.logs = deque(maxlen=max_lines)
-        self.visible_lines = visible_lines
-        
-    def write(self, message):
-        self.logs.append(message.strip())
+class Event:
+    def __init__(self, event_type: str, message: str, timestamp: datetime = None):
+        self.event_type = event_type
+        self.message = message
+        self.timestamp = timestamp or datetime.now()
+
+class EventPanel:
+    def __init__(self, max_events=100, visible_events=20):
+        self.events = deque(maxlen=max_events)
+        self.visible_events = visible_events
+    
+    def add_event(self, event_type: str, message: str):
+        self.events.append(Event(event_type, message))
     
     def get_panel(self):
-        # Get the most recent logs up to visible_lines in reverse order
-        visible_logs = list(self.logs)[-self.visible_lines:]
-        visible_logs.reverse()  # Reverse to show newest first
-        log_text = Text("\n".join(visible_logs))
+        # Get the most recent events up to visible_events
+        visible_events = list(self.events)[-self.visible_events:]
+        visible_events.reverse()  # Reverse to show newest first
+        
+        table = Table(show_header=True, header_style="bold magenta", box=None)
+        table.add_column("Time", style="cyan", width=8)
+        table.add_column("Type", style="magenta", width=12)
+        table.add_column("Message", style="white")
+        
+        for event in visible_events:
+            time_str = event.timestamp.strftime("%H:%M:%S")
+            table.add_row(
+                time_str,
+                event.event_type,
+                event.message
+            )
+        
         return Panel(
-            log_text,
-            title=f"Logs (newest first, showing {len(visible_logs)} of {len(self.logs)} messages)",
-            border_style="blue",
-            height=self.visible_lines + 2  # +2 for panel borders
+            table,
+            title=f"Events (newest first, showing {len(visible_events)} of {len(self.events)} events)",
+            border_style="blue"
         )
 
 class UILogger(logging.Handler):
@@ -77,16 +104,12 @@ class EvaluationMonitor:
         self.start_time = time.time()
         self.instances_data = {}
         self.live = None
-        self.log_panel = LogPanel(max_lines=1000, visible_lines=25)
+        self.event_panel = EventPanel(max_events=1000, visible_events=25)
         self.logger = logger
         self.event_queue = queue.Queue()
         self.needs_update = False
         self.needs_stats_update = False
-        self.last_log_update = 0
-        
-        # Remove existing handlers and add UI handler
-        self.logger.handlers = []
-        self.logger.addHandler(UILogger(self.log_panel))
+        self.last_event_update = 0
         
         # Load initial instances
         for instance in self.repository.list_instances(self.evaluation.evaluation_name):
@@ -111,6 +134,7 @@ class EvaluationMonitor:
         instance_id = data.get("instance_id")
         
         if event_type == "evaluation_started":
+            self.event_panel.add_event("START", "Evaluation started")
             self.logger.info("Evaluation started")
             return
 
@@ -125,12 +149,16 @@ class EvaluationMonitor:
             self.needs_stats_update = True
             
             if event_type == "instance_started":
+                self.event_panel.add_event("START", f"Started instance: {instance_id}")
                 self.logger.info(f"Started instance: {instance_id}")
             elif event_type == "instance_completed":
+                status = "✓" if instance.resolved else "✗"
+                self.event_panel.add_event("COMPLETE", f"Completed {instance_id} ({status})")
                 self.logger.info(f"Completed instance: {instance_id} (resolved: {instance.resolved})")
             elif event_type == "instance_error":
+                self.event_panel.add_event("ERROR", f"Error in {instance_id}: {instance.error}")
                 self.logger.error(f"Error in instance {instance_id}: {instance.error}")
-            
+
     async def process_events(self):
         """Process events from the queue"""
         while True:
@@ -143,10 +171,10 @@ class EvaluationMonitor:
                 
                 current_time = time.time()
                 
-                # Update logs once per second
-                if current_time - self.last_log_update >= 1.0:
+                # Update events once per second
+                if current_time - self.last_event_update >= 1.0:
                     self.needs_update = True
-                    self.last_log_update = current_time
+                    self.last_event_update = current_time
                 
                 # Update display if needed
                 if self.live and (self.needs_update or self.needs_stats_update):
@@ -194,17 +222,17 @@ class EvaluationMonitor:
             resolved = "✓" if instance.resolved else "✗" if instance.resolved is False else "-"
             
             # Get iterations and tokens from benchmark result
-            iterations = 0
+            iterations = instance.iterations
             tokens = 0
             cost = "-"
-            if instance.benchmark_result:
-                iterations = instance.benchmark_result.transitions
+
+            if instance.usage:
                 tokens = (
-                    instance.benchmark_result.prompt_tokens +
-                    instance.benchmark_result.completion_tokens +
-                    instance.benchmark_result.cached_tokens
+                    instance.usage.prompt_tokens +
+                    instance.usage.completion_tokens +
+                    instance.usage.cached_tokens
                 )
-                cost = f"${instance.benchmark_result.total_cost:.2f}"
+                cost = f"${instance.usage.completion_cost:.2f}"
             
             status_style = {
                 'pending': 'white',
@@ -310,10 +338,10 @@ class EvaluationMonitor:
             Layout(self.create_stats_panel(), name="stats", size=10)
         )
         
-        # Split right side into info and logs with adjusted size for logs
+        # Split right side into info and events with adjusted size for events
         layout["right"].split_column(
             Layout(self.create_info_panel(), name="info", size=18),
-            Layout(self.log_panel.get_panel(), name="logs")
+            Layout(self.event_panel.get_panel(), name="events")
         )
         
         return layout
@@ -368,29 +396,66 @@ def validate_evaluation_setup(repository, evaluation, args):
 
     return evaluation
 
+def load_dataset_split(dataset_name: str) -> Optional[EvaluationDatasetSplit]:
+    """Load a dataset split from the datasets directory."""
+    dataset_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "datasets", f"{dataset_name}_dataset.json")
+    if not os.path.exists(dataset_path):
+        return None
+    
+    with open(dataset_path) as f:
+        data = json.load(f)
+        return EvaluationDatasetSplit(**data)
+
+def get_missing_instances(evaluation_dir: str, instance_ids: list[str]) -> list[str]:
+    """Get instances that haven't been evaluated yet."""
+    if not os.path.exists(evaluation_dir):
+        return instance_ids
+    
+    # Get all evaluated instances from the evaluation directory
+    evaluated_instances = set()
+    for instance_dir in os.listdir(evaluation_dir):
+        if os.path.isdir(os.path.join(evaluation_dir, instance_dir)):
+            evaluated_instances.add(instance_dir)
+    
+    # Return instances that haven't been evaluated
+    return [instance_id for instance_id in instance_ids if instance_id not in evaluated_instances]
+
+def add_new_instances(repository: EvaluationFileRepository, evaluation_name: str, instance_ids: list[str]):
+    """Create and save new instances for an existing evaluation."""
+    for instance_id in instance_ids:
+        eval_instance = EvaluationInstance(instance_id=instance_id)
+        repository.save_instance(evaluation_name, eval_instance)
+
 def main():
     parser = argparse.ArgumentParser(description="Run a model evaluation with progress monitoring")
-    parser.add_argument("--model", help="Model name (e.g., gemini/gemini-2.0-flash-exp)")
+    
+    # Model and basic settings
+    parser.add_argument("--model", required=True, help="Model name (e.g., gemini/gemini-2.0-flash-exp)")
     parser.add_argument("--api-key", help="API key for the model")
     parser.add_argument("--base-url", help="Base URL for the API")
     parser.add_argument("--max-iterations", type=int, default=20, help="Maximum iterations per instance")
     parser.add_argument("--max-expansions", type=int, default=1, help="Maximum expansions per state")
     parser.add_argument("--max-cost", type=float, default=1.0, help="Maximum cost in tokens")
-    parser.add_argument("--instance-ids", nargs="+", help="Specific instance IDs to evaluate")
-    parser.add_argument("--min-resolved", type=int, default=20, help="Minimum number of resolved instances")
     parser.add_argument("--num-workers", type=int, default=1, help="Number of parallel workers")
-    parser.add_argument("--split", default="lite", choices=["lite", "verified", "combo", "random"], 
-                       help="Dataset split to use")
-    parser.add_argument("--repos", nargs="+", help="Filter by specific repositories")
-    parser.add_argument("--ignore-repos", nargs="+", help="Ignore specific repositories")
-    parser.add_argument("--max-resolved", type=int, help="Maximum number of resolved instances")
-    parser.add_argument("--exclude-instance-ids", nargs="+", help="Instance IDs to exclude")
+    
+    # Model format settings
     parser.add_argument("--response-format", 
                        choices=[format.value for format in LLMResponseFormat],
                        help="Response format for the model")
     parser.add_argument("--message-history", 
                        choices=[history.value for history in MessageHistoryType],
                        help="Message history type")
+    
+    # Dataset selection
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        required=True,
+        choices=["easy", "lite_and_verified", "lite_and_verified_solvable"],
+        help="Dataset to use for evaluation"
+    )
+    
+    # Evaluation name
     parser.add_argument("--evaluation-name", help="Custom evaluation name. If not provided, will be auto-generated")
     
     args = parser.parse_args()
@@ -433,10 +498,23 @@ def main():
             message_history=MessageHistoryType(args.message_history) if args.message_history else None
         )
 
+    # Load dataset
+    dataset = load_dataset_split(args.dataset)
+    if dataset is None:
+        logger.error(f"Dataset '{args.dataset}' not found")
+        sys.exit(1)
+    instance_ids = dataset.instance_ids
+
     # Check if evaluation exists
     existing_evaluation = repository.load_evaluation(evaluation_name)
     if existing_evaluation:
         logger.info(f"Using existing evaluation: {evaluation_name}")
+        
+        eval_dir = os.path.join(repository.evaluations_dir, evaluation_name)
+        missing_instances = get_missing_instances(eval_dir, instance_ids)
+        logger.info(f"Adding {len(missing_instances)} new instances to evaluation")
+        
+        add_new_instances(repository, evaluation_name, missing_instances)
         evaluation = existing_evaluation
     else:
         logger.info(f"Creating new evaluation with name: {evaluation_name}")
@@ -444,13 +522,7 @@ def main():
             repository=repository,
             evaluation_name=evaluation_name,
             settings=tree_search_settings,
-            split=args.split,
-            instance_ids=args.instance_ids,
-            exclude_instance_ids=args.exclude_instance_ids,
-            repos=args.repos,
-            ignore_repos=args.ignore_repos,
-            min_resolved=args.min_resolved,
-            max_resolved=args.max_resolved
+            instance_ids=instance_ids
         )
 
     try:

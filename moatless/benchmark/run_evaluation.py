@@ -4,8 +4,9 @@ import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+import json
 
-from moatless.benchmark.evaluation import (
+from moatless.benchmark.evaluation_v2 import (
     create_evaluation_name,
     Evaluation,
     TreeSearchSettings,
@@ -14,9 +15,33 @@ from moatless.benchmark.evaluation import (
 from moatless.completion.completion import CompletionModel
 from moatless.completion.completion import LLMResponseFormat
 from moatless.schema import MessageHistoryType
+from moatless.benchmark.schema import EvaluationDatasetSplit
 
 logger = logging.getLogger(__name__)
 
+def load_dataset_split(dataset_name: str) -> Optional[EvaluationDatasetSplit]:
+    """Load a dataset split from the datasets directory."""
+    dataset_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "datasets", f"{dataset_name}_dataset.json")
+    if not os.path.exists(dataset_path):
+        return None
+    
+    with open(dataset_path) as f:
+        data = json.load(f)
+        return EvaluationDatasetSplit(**data)
+
+def get_missing_instances(evaluation_dir: str, instance_ids: list[str]) -> list[str]:
+    """Get instances that haven't been evaluated yet."""
+    if not os.path.exists(evaluation_dir):
+        return instance_ids
+    
+    # Get all evaluated instances from the evaluation directory
+    evaluated_instances = set()
+    for instance_dir in os.listdir(evaluation_dir):
+        if os.path.isdir(os.path.join(evaluation_dir, instance_dir)):
+            evaluated_instances.add(instance_dir)
+    
+    # Return instances that haven't been evaluated
+    return [instance_id for instance_id in instance_ids if instance_id not in evaluated_instances]
 
 def evaluate_search_and_code(
     instance_ids: Optional[list] = None,
@@ -27,21 +52,15 @@ def evaluate_search_and_code(
     evaluations_dir=None,
     date=None,
     tree_search_settings: TreeSearchSettings = None,
-    min_resolved: Optional[int] = None,
-    max_resolved: Optional[int] = None,
     repos: Optional[list[str]] = None,
-    split: str = "lite",
+    split: str = "lite_and_verified",
+    dataset_name: Optional[str] = None,
     overwrite: bool = False,
     high_value_threshold: float = 50.0,
     high_value_leaf_bonus_constant: float = 50.0,
     use_average_reward: bool = False,
     **kwargs,
 ):
-    # selector = BestFirstSelector(
-    #     high_value_threshold=high_value_threshold,
-    #     high_value_leaf_bonus_constant=high_value_leaf_bonus_constant,
-    #     use_average_reward=use_average_reward
-    # )
     selector = None
 
     temperature = tree_search_settings.model.temperature
@@ -56,6 +75,21 @@ def evaluate_search_and_code(
             temp_bias=temperature,
             use_testbed=use_testbed,
         )
+
+    # Load instances from dataset if specified
+    if dataset_name:
+        dataset = load_dataset_split(dataset_name)
+        if dataset is None:
+            raise ValueError(f"Dataset '{dataset_name}' not found")
+        instance_ids = dataset.instance_ids
+    
+    # If evaluation exists, only evaluate missing instances
+    if not overwrite and evaluations_dir and evaluation_name:
+        eval_dir = os.path.join(evaluations_dir, evaluation_name)
+        instance_ids = get_missing_instances(eval_dir, instance_ids)
+        if not instance_ids:
+            logger.info("All instances in the dataset have already been evaluated")
+            return eval_dir
 
     # Expect models with prefix openai/ to be custom
     if tree_search_settings.model.model.startswith("openai/"):
@@ -81,11 +115,12 @@ def evaluate_search_and_code(
         logger.info(
             f"  Value Function Model Temperature: {tree_search_settings.value_function_model.temperature}"
         )
-    logger.info(f"Max Cost: {tree_search_settings.max_cost}")  # TODO: Not used ATM
+    logger.info(f"Max Cost: {tree_search_settings.max_cost}")
     logger.info(f"Max iterations: {tree_search_settings.max_iterations}")
     logger.info(f"Number of Workers: {num_workers}")
     logger.info(f"Use Testbed: {use_testbed}")
-    logger.info(f"Instance IDs: {instance_ids}")
+    logger.info(f"Dataset: {dataset_name if dataset_name else 'None'}")
+    logger.info(f"Number of instances to evaluate: {len(instance_ids) if instance_ids else 0}")
 
     evaluation = Evaluation(
         settings=tree_search_settings,
@@ -102,8 +137,6 @@ def evaluate_search_and_code(
     evaluation.run_evaluation(
         instance_ids=instance_ids,
         repos=repos,
-        min_resolved=min_resolved,
-        max_resolved=max_resolved,
         split=split,
     )
 
@@ -244,6 +277,12 @@ def main():
         help="Specific instance IDs to evaluate",
     )
     instance_group.add_argument(
+        "--dataset",
+        type=str,
+        choices=["easy", "lite_and_verified", "lite_and_verified_solvable"],
+        help="Dataset to use for evaluation",
+    )
+    instance_group.add_argument(
         "--repos",
         type=str,
         nargs="+",
@@ -251,21 +290,10 @@ def main():
         help="Filter instances by repository names",
     )
     instance_group.add_argument(
-        "--min_resolved",
-        type=int,
-        help="Minimum number of people who resolved the issue",
-    )
-    instance_group.add_argument(
-        "--max_resolved",
-        type=int,
-        default=None,
-        help="Filter instances by maximum number of resolved solutions",
-    )
-    instance_group.add_argument(
         "--split",
         type=str,
         choices=["lite", "combo", "random", "sampled_50_instances"],
-        default="lite",
+        default="lite_and_verified",
         help="Dataset split to use (lite, combo, or random)",
     )
 
@@ -435,13 +463,12 @@ def main():
         repo_base_dir=args.repo_base_dir,
         tree_search_settings=tree_search_settings,
         instance_ids=args.instance_ids,
+        dataset_name=args.dataset,
         repos=args.repos,
         date=args.date,
         use_testbed=args.use_testbed,
         num_workers=args.num_workers,
         best_first=not args.sample_first,
-        min_resolved=args.min_resolved,
-        max_resolved=args.max_resolved,
         split=args.split,
         high_value_threshold=args.high_value_threshold,
         high_value_leaf_bonus_constant=args.high_value_leaf_bonus_constant,

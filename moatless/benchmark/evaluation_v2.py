@@ -211,16 +211,11 @@ class EvaluationRunner:
                     trajectory_path,
                 )
             else:
-                instance.start()
-                self.emit_event(evaluation.evaluation_name, "instance_started", {"instance_id": instance_id})
-                
-                # Save initial instance state
-                self.repository.save_instance(evaluation.evaluation_name, instance)
                 
                 search_tree = self.create_and_run_search_tree(
                     problem_statement=problem_statement,
                     evaluation_name=evaluation.evaluation_name,
-                    instance_id=instance_id,
+                    instance=instance,
                     moatless_instance=moatless_instance,
                     trajectory_path=trajectory_path,
                     evaluation_settings=evaluation.settings,
@@ -318,7 +313,7 @@ class EvaluationRunner:
             repository=repository,
             instance=instance,
             dataset_name=self.dataset_name,
-            run_id=run_id,
+            # run_id=run_id,
         )
 
         for i, leaf_node in enumerate(unevaluated_nodes):
@@ -371,11 +366,13 @@ class EvaluationRunner:
         self,
         problem_statement: str,
         evaluation_name: str,
-        instance_id: str,
+        instance: EvaluationInstance,
         moatless_instance: dict,
         trajectory_path: str,
         evaluation_settings: TreeSearchSettings,
     ) -> SearchTree:
+        instance_id = instance.instance_id
+
         """Create and run a search tree for the given problem instance."""
         metadata: dict[str, Any] = {
             "evaluation_name": evaluation_name,
@@ -406,7 +403,7 @@ class EvaluationRunner:
             message_history_type=evaluation_settings.agent_settings.message_history_type,
         )
 
-        tree = SearchTree.create(
+        search_tree = SearchTree.create(
             message=problem_statement,
             repository=repository,
             runtime=runtime,
@@ -421,20 +418,24 @@ class EvaluationRunner:
         )
 
         def tree_event_handler(event):
+
             if event["event_type"] == "tree_iteration":
+                instance.usage = search_tree.total_usage()
+                instance.iterations = len(search_tree.root.get_all_nodes())
+                self.repository.save_instance(evaluation_name, instance)
+
                 self.emit_event(evaluation_name, "tree_progress", {
                     "instance_id": instance_id,
-                    "iteration": event["data"]["iteration"],
-                    "total_cost": event["data"]["total_cost"],
-                    "best_reward": event["data"]["best_reward"],
-                    "finished_nodes": event["data"]["finished_nodes"],
-                    "total_nodes": event["data"]["total_nodes"],
-                    "best_node_id": event["data"]["best_node_id"]
                 })
+        instance.start()
+        self.emit_event(self.evaluation.evaluation_name, "instance_started", {"instance_id": instance_id})
+                
+        # Save initial instance state
+        self.repository.save_instance(self.evaluation.evaluation_name, instance)
 
-        tree.add_event_handler(tree_event_handler)
-        tree.run_search()
-        return tree
+        search_tree.add_event_handler(tree_event_handler)
+        search_tree.run_search()
+        return search_tree
 
 def create_evaluation_name(
     model: str,

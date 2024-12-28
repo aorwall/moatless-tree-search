@@ -8,6 +8,7 @@ import os
 
 from moatless.agent.settings import AgentSettings
 from moatless.completion.completion import CompletionModel
+from moatless.completion.model import Usage
 from moatless.discriminator import Discriminator
 from moatless.feedback.feedback import FeedbackGenerator
 from moatless.selector.selector import Selector
@@ -124,6 +125,9 @@ class EvaluationInstance(BaseModel):
     submission: Optional[str] = Field(default=None, description="The submitted patch")
     error: Optional[str] = Field(default=None, description="Error message if evaluation failed")
     resolved: Optional[bool] = Field(default=None, description="Whether the instance was resolved")
+    iterations: Optional[int] = Field(default=None, description="Number of iterations")
+    usage: Optional[Usage] = Field(default=None, description="Total cost of the instance")
+    
     duration: Optional[float] = Field(default=None, description="Time taken to evaluate in seconds")
     benchmark_result: Optional[BenchmarkResult] = Field(default=None, description="Benchmark result for this instance")
 
@@ -163,4 +167,17 @@ class Evaluation(BaseModel):
     start_time: Optional[datetime] = Field(default=None, description="When the evaluation started")
     finish_time: Optional[datetime] = Field(default=None, description="When the evaluation finished")
     status: EvaluationStatus = Field(default=EvaluationStatus.PENDING, description="Current status of the evaluation")
+
+
+class EvaluationDatasetSplit(BaseModel):
+    model_config = ConfigDict(
+        json_encoders={
+            datetime: lambda v: v.isoformat(),
+            Enum: lambda v: v.value,
+        }
+    )
+
+    name: str = Field(description="Name of the evaluation split (e.g., 'train', 'test', 'validation')")
+    description: str = Field(description="Description of what this split represents")
+    instance_ids: list[str] = Field(description="List of instance IDs that belong to this split")
 
