@@ -161,8 +161,10 @@ class ActionAgent(BaseModel):
 
         try:
             action_step.observation = action.execute(action_step.action, node.file_context, node.workspace)
-            if action_step.observation.execution_completion:
-                action_step.completion = node.observation.execution_completion
+            if not action_step.observation:
+                logger.warning(f"Node{node.node_id}: Action {action_step.action.name} returned no observation")
+            elif action_step.observation.execution_completion:
+                action_step.completion = action_step.observation.execution_completion
 
             logger.info(
                 f"Executed action: {action_step.action.name}. "

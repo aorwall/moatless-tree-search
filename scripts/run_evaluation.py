@@ -36,10 +36,21 @@ logger.setLevel(logging.INFO)
 
 # Set up file logging
 os.makedirs("logs", exist_ok=True)
-log_file = os.path.join("logs", f"evaluation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+log_file = os.path.join("logs", f"evaluation_{timestamp}.log")
+error_log_file = os.path.join("logs", f"evaluation_errors_{timestamp}.log")
+
+# Main log file handler
 file_handler = logging.FileHandler(log_file)
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+file_handler.setLevel(logging.INFO)
 logger.addHandler(file_handler)
+
+# Error log file handler - only logs ERROR and above
+error_file_handler = logging.FileHandler(error_log_file)
+error_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s\n%(pathname)s:%(lineno)d\n%(exc_info)s'))
+error_file_handler.setLevel(logging.ERROR)
+logger.addHandler(error_file_handler)
 
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
@@ -458,6 +469,9 @@ def main():
     # Evaluation name
     parser.add_argument("--evaluation-name", help="Custom evaluation name. If not provided, will be auto-generated")
     
+    # Add rerun_errors flag
+    parser.add_argument("--rerun-errors", action="store_true", help="Rerun instances that previously errored")
+    
     args = parser.parse_args()
     
     # Initialize repository
@@ -551,7 +565,7 @@ def main():
         logger.info("Running evaluation")
         # Run evaluation in executor and wait for both tasks
         loop.run_until_complete(asyncio.gather(
-            loop.run_in_executor(ThreadPoolExecutor(), runner.run_evaluation),
+            loop.run_in_executor(ThreadPoolExecutor(), lambda: runner.run_evaluation(rerun_errors=args.rerun_errors)),
             monitoring_task
         ))
     except Exception as e:
@@ -560,6 +574,8 @@ def main():
         console.print(f"[red]Error: {str(e)}")
         console.print("[red]Traceback:")
         console.print_exception()
+        # Log the error with full stack trace
+        logger.error("Fatal error in evaluation", exc_info=True)
         sys.exit(1)
     finally:
         if 'loop' in locals():

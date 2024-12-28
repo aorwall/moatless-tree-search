@@ -123,7 +123,7 @@ class EvaluationRunner:
         # If rerun_errors is True, reset error instances and remove their directories
         if rerun_errors:
             for instance in instances:
-                if instance.status == InstanceStatus.ERROR:
+                if instance.status == InstanceStatus.ERROR or instance.error:
                     # Reset instance status
                     instance.status = InstanceStatus.PENDING
                     instance.started_at = None
@@ -252,8 +252,8 @@ class EvaluationRunner:
 
     
         except Exception as e:
-            instance.error = str(e)
-            instance.complete(resolved=False)
+            stacktrace = traceback.format_exc()
+            instance.fail(error=stacktrace)
             self.repository.save_instance(evaluation.evaluation_name, instance)  # Save failed state
             self.emit_event(evaluation.evaluation_name, "instance_error", {
                 "instance_id": instance_id,
