@@ -118,31 +118,30 @@ class EvaluationRunner:
 
         results = []
         instances = self.repository.list_instances(evaluation.evaluation_name)
-        logger.info(f"Processing {len(instances)} instances with {self.num_workers} workers")
+        logger.info(f"Processing {len(instances)} instances with {self.num_workers} workers. Rerun error {rerun_errors}")
 
         # If rerun_errors is True, reset error instances and remove their directories
         if rerun_errors:
+            new_instances = []
             for instance in instances:
                 if instance.status == InstanceStatus.ERROR or instance.error:
-                    # Reset instance status
-                    instance.status = InstanceStatus.PENDING
-                    instance.started_at = None
-                    instance.completed_at = None
-                    instance.error = None
-                    instance.duration = None
-                    instance.benchmark_result = None
-                    
+                    logger.info(f"Rerun instance {instance.instance_id}")
                     # Remove instance directory
                     self.repository.delete_instance(evaluation.evaluation_name, instance.instance_id)
                     shutil.rmtree(self.repository.get_instance_dir(evaluation.evaluation_name, instance.instance_id))
                     
-                    # Save updated instance
-                    self.repository.save_instance(evaluation.evaluation_name, instance)
+                    new_instance = EvaluationInstance(instance_id=instance.instance_id)
+                    self.repository.save_instance(evaluation.evaluation_name, new_instance)
                     
                     # Emit event for instance that will be rerun
                     self.emit_event(evaluation.evaluation_name, "instance_rerun", {
-                        "instance_id": instance.instance_id
+                        "instance_id": new_instance.instance_id
                     })
+                    new_instances.append(new_instance)
+                else:
+                    new_instances.append(instance)
+                
+                instances = new_instances
 
             self.repository.save_evaluation(evaluation)
 
