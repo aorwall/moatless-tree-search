@@ -76,13 +76,13 @@ class EvaluationFileRepository(EvaluationRepository):
         with open(eval_file, "w") as f:
             json.dump(evaluation.model_dump(), f, cls=DateTimeEncoder, indent=2)
             
-    def load_evaluation(self, evaluation_name: str) -> Evaluation:
+    def load_evaluation(self, evaluation_name: str) -> Evaluation | None:
         """Load an evaluation from disk."""
         eval_path = os.path.join(self.get_evaluation_dir(evaluation_name), "evaluation.json")
         logger.debug(f"Attempting to load evaluation from: {eval_path}")
         if not os.path.exists(eval_path):
-            logger.error(f"Evaluation file not found: {eval_path}")
-            raise FileNotFoundError(f"Evaluation file not found: {eval_path}")
+            logger.info(f"Evaluation file not found: {eval_path}")
+            return None
             
         try:
             logger.debug(f"Reading evaluation file: {eval_path}")
