@@ -169,6 +169,9 @@ class EvaluationMonitor:
             elif event_type == "instance_error":
                 self.event_panel.add_event("ERROR", f"Error in {instance_id}: {instance.error}")
                 self.logger.error(f"Error in instance {instance_id}: {instance.error}")
+            elif event_type == "instance_rerun":
+                self.event_panel.add_event("RE-RUN", f"Rerun {instance_id}")
+                self.logger.info(f"Rerun {instance_id}")
 
     async def process_events(self):
         """Process events from the queue"""

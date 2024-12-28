@@ -134,8 +134,15 @@ class EvaluationRunner:
                     
                     # Remove instance directory
                     self.repository.delete_instance(evaluation.evaluation_name, instance.instance_id)
+                    shutil.rmtree(self.repository.get_instance_dir(evaluation.evaluation_name, instance.instance_id))
+                    
                     # Save updated instance
                     self.repository.save_instance(evaluation.evaluation_name, instance)
+                    
+                    # Emit event for instance that will be rerun
+                    self.emit_event(evaluation.evaluation_name, "instance_rerun", {
+                        "instance_id": instance.instance_id
+                    })
 
             self.repository.save_evaluation(evaluation)
 
