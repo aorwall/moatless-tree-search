@@ -404,32 +404,21 @@ def to_result(
 
         if not search_tree.is_finished():
             status = "running"
-        elif eval_report and eval_report.get("resolved", None) is not None:
-            resolved = eval_report.get("resolved")
         else:
+            status = "completed"
+
+        if external_result:
+            resolved = (
+                info.get("instance_id", "") in external_result["resolved_ids"]
+            )
+
+        elif eval_report:            
             best_node = search_tree.get_best_trajectory()
             if best_node:
-                best_stats = create_trajectory_stats(
-                    best_node,
-                    instance,
-                    eval_report.get("node_results", {}).get(str(best_node.node_id)),
-                )
-                status = best_stats.status
+                resolved = eval_report.get("node_results", {}).get(str(best_node.node_id), {}).get("resolved", None)
             else:
-                status = "unknown"
-
-            if external_result:
-                resolved = (
-                    info.get("instance_id", "") in external_result["resolved_ids"]
-                )
-                if best_stats:
-                    if resolved != best_stats.resolved:
-                        logger.warning(
-                            f"Resolved status mismatch for {info['instance_id']}: External {resolved} != Internal {best_stats.resolved}"
-                        )
-
-            elif best_stats:
-                resolved = best_stats.resolved
+                logger.warning(f"No best node found for {info['instance_id']}")
+                
 
         total_usage = search_tree.total_usage()
 

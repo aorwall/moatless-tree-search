@@ -47,6 +47,7 @@ from moatless.discriminator import Discriminator, AgentDiscriminator
 from moatless.feedback.feedback import FeedbackGenerator
 from moatless.feedback.feedback_agent import FeedbackAgent
 from moatless.feedback.reward_feedback import RewardFeedbackGenerator
+from moatless.runtime.testbed import TestbedEnvironment
 from moatless.schema import MessageHistoryType
 from moatless.search_tree import SearchTree
 from moatless.selector import BestFirstSelector, SoftmaxSelector, Selector, LLMSelector, FeedbackSelector
@@ -144,9 +145,7 @@ class EvaluationRunner:
                 for instance in instances
             ]
 
-            pbar = tqdm(concurrent.futures.as_completed(futures), total=len(futures))
-
-            for future in pbar:
+            for future in futures:
                 try:
                     result = future.result()
                     if result:
@@ -172,6 +171,10 @@ class EvaluationRunner:
 
     def evaluate_instance(self, evaluation: Evaluation, instance_id: str):
         """Evaluate a single instance."""
+        runtime = None
+        repository = None
+        search_tree = None
+        eval_result = None
         try:
             moatless_instance = get_moatless_instance(instance_id=instance_id)
             problem_statement = f"<task>\nSolve the following reported issue in the {moatless_instance['repo']} repository:\n\n{moatless_instance['problem_statement']}\n</task>"
@@ -180,20 +183,13 @@ class EvaluationRunner:
             if not instance:
                 instance = EvaluationInstance(instance_id=instance_id)
             
-            instance.start()
-            self.emit_event(evaluation.evaluation_name, "instance_started", {"instance_id": instance_id})
-            
-            # Create instance directory and evaluation result
             instance_dir = self.repository.get_instance_dir(evaluation.evaluation_name, instance_id)
             trajectory_path = os.path.join(instance_dir, "trajectory.json")
             eval_result_path = os.path.join(instance_dir, "eval_result.json")
-            
+                
             # Create directories if they don't exist
             os.makedirs(instance_dir, exist_ok=True)
 
-            # Save initial instance state
-            self.repository.save_instance(evaluation.evaluation_name, instance)
-            
             # Initialize or load eval_result
             eval_result = {
                 "node_results": {},
@@ -204,137 +200,62 @@ class EvaluationRunner:
             if os.path.exists(eval_result_path):
                 try:
                     with open(eval_result_path) as f:
+                        logger.info(f"Loading eval_result from {eval_result_path}")
                         eval_result = json.load(f)
                 except json.JSONDecodeError:
                     pass
-            
-            metadata: dict[str, Any] = {
-                    "evaluation_name": evaluation.evaluation_name,
-                    "instance_id": instance_id,
-                }
 
-            repository = create_repository(
-                moatless_instance, repo_base_dir=self.repo_base_dir
-            )
-            code_index = create_index(moatless_instance, repository=repository)
-
-            if self.use_testbed:
-                from moatless.runtime.testbed import TestbedEnvironment
-
-                run_id = hashlib.sha256(evaluation.evaluation_name.encode()).hexdigest()[:8]
-
-                runtime = TestbedEnvironment(
-                    repository=repository,
-                    instance=moatless_instance,
-                    dataset_name=self.dataset_name,
-                    run_id=run_id,
+            if instance.status == InstanceStatus.COMPLETED:
+                logger.info(f"Instance {instance_id} is already completed")
+                search_tree = SearchTree.from_file(
+                    trajectory_path,
                 )
             else:
-                runtime = None
-            
-            agent = CodingAgent.create(
-                completion_model=evaluation.settings.agent_settings.completion_model,
-                repository=repository,
-                code_index=code_index,
-                runtime=runtime,
-                message_history_type=evaluation.settings.agent_settings.message_history_type,
-            )
-
-            # Create search tree with trajectory file in instance directory
-            tree = SearchTree.create(
-                message=problem_statement,
-                repository=repository,
-                runtime=runtime,
-                selector=evaluation.settings.selector,
-                agent=agent,
-                value_function=evaluation.settings.value_function,
-                max_iterations=evaluation.settings.max_iterations,
-                max_expansions=evaluation.settings.max_expansions,
-                max_cost=evaluation.settings.max_cost,
-                persist_path=trajectory_path,
-                metadata=metadata
-            )
-
-            # Add event handler to forward tree events
-            def tree_event_handler(event):
-                if event["event_type"] == "tree_iteration":
-                    self.emit_event(evaluation.evaluation_name, "tree_progress", {
-                        "instance_id": instance_id,
-                        "iteration": event["data"]["iteration"],
-                        "total_cost": event["data"]["total_cost"],
-                        "best_reward": event["data"]["best_reward"],
-                        "finished_nodes": event["data"]["finished_nodes"],
-                        "total_nodes": event["data"]["total_nodes"],
-                        "best_node_id": event["data"]["best_node_id"]
-                    })
-
-            tree.add_event_handler(tree_event_handler)
-
-            # Run search
-            start_time = time.time()
-            try:
-                best_node = tree.run_search()
+                instance.start()
+                self.emit_event(evaluation.evaluation_name, "instance_started", {"instance_id": instance_id})
                 
+                # Save initial instance state
+                self.repository.save_instance(evaluation.evaluation_name, instance)
+                
+                search_tree = self.create_and_run_search_tree(
+                    problem_statement=problem_statement,
+                    evaluation_name=evaluation.evaluation_name,
+                    instance_id=instance_id,
+                    moatless_instance=moatless_instance,
+                    trajectory_path=trajectory_path,
+                    evaluation_settings=evaluation.settings,
+                )
+                
+
+            try:
                 # Evaluate all leaf nodes if using testbed
+                start_time = time.time()
                 if self.use_testbed:
+                    logger.info(f"Evaluating nodes for instance {instance_id}")
                     eval_result = self.evaluate_nodes(
-                        evaluation_name=evaluation.evaluation_name,
                         instance_id=instance_id,
                         instance=moatless_instance,
-                        tree=tree,
-                        eval_result=eval_result,
-                        eval_result_path=eval_result_path,
-                        runtime=runtime,
-                        repository=repository
+                        search_tree=search_tree,
+                        eval_result=eval_result
                     )
-
-                if best_node:
-                    logger.info(f"Pick selected node  {best_node.node_id}")
-                    eval_result["selected_node"] = best_node.node_id
-
-                    node_result = eval_result.get("node_results", {}).get(str(best_node.node_id), {})
-                    if not node_result:
-                        node_result = eval_result.get("node_results", {}).get(best_node.node_id, {})
-
-                    if not node_result:
-                        logger.warning(f"No node result found for {best_node.node_id}")
-                    else:
-
-                        eval_result["resolved"] = node_result.get("resolved", None)
-                        logger.info(node_result)
-
-                benchmark_result = to_result(tree, eval_report=eval_result)
-
-                # Complete instance with result
-                instance.complete(resolved=benchmark_result.resolved, benchmark_result=benchmark_result)
-                self.emit_event(evaluation.evaluation_name, "instance_completed", {
-                    "instance_id": instance_id,
-                    "resolved": instance.resolved,
-                    "benchmark_result": benchmark_result.dict() if benchmark_result else None
-                })
 
             except Exception as e:
                 eval_result["status"] = "error"
                 eval_result["error"] = traceback.format_exc()
                 eval_result["duration"] = time.time() - start_time
-                logger.exception(f"Error in search tree execution")
-                
-                raise
-            
-            finally:
-                # Save final instance state
-                self.repository.save_instance(evaluation.evaluation_name, instance)
-                
-                # Save evaluation result
-                with open(eval_result_path, "w") as f:
-                    json.dump(eval_result, f, indent=2)
-                
-                # Clean up
-                del runtime
-                del repository
-                del tree
-                gc.collect()
+                logger.exception(f"Error when evaluating nodes for instance {instance_id}")
 
+            benchmark_result = to_result(search_tree, eval_report=eval_result)
+
+            # Complete instance with result
+            instance.complete(resolved=benchmark_result.resolved, benchmark_result=benchmark_result)
+            self.emit_event(evaluation.evaluation_name, "instance_completed", {
+                "instance_id": instance_id,
+                "resolved": instance.resolved,
+                "benchmark_result": benchmark_result.dict() if benchmark_result else None
+            })
+
+    
         except Exception as e:
             instance.error = str(e)
             instance.complete(resolved=False)
@@ -344,20 +265,32 @@ class EvaluationRunner:
                 "error": str(e)
             })
             raise
+        finally:
+            # Save final instance state
+            self.repository.save_instance(evaluation.evaluation_name, instance)
+            
+            if eval_result:
+                # Save evaluation result
+                with open(eval_result_path, "w") as f:
+                    json.dump(eval_result, f, indent=2)
+            
+            # Clean up
+            del runtime
+            del repository
+            del search_tree
+            del eval_result
+            gc.collect()
+
 
     def evaluate_nodes(
         self,
-        evaluation_name: str,
         instance_id: str,
         instance: dict,
-        tree: SearchTree,
+        search_tree: SearchTree,
         eval_result: dict,
-        eval_result_path: str,
-        runtime: Any = None,
-        repository: Any = None,
     ):
         """Evaluate all leaf nodes using the testbed."""
-        leaf_nodes = tree.get_leaf_nodes()
+        leaf_nodes = search_tree.get_leaf_nodes()
         patch_results = {}
 
         # Filter out already evaluated nodes
@@ -371,22 +304,22 @@ class EvaluationRunner:
             logger.info(
                 f"All {len(leaf_nodes)} nodes for instance {instance_id} have already been evaluated"
             )
-            return
+            return eval_result
 
         logger.info(
             f"Found {len(leaf_nodes) - len(unevaluated_nodes)} already evaluated nodes, "
             f"will evaluate remaining {len(unevaluated_nodes)} nodes for instance {instance_id}"
         )
-
-        # Create runtime if not provided
-        if not runtime and repository:
-            from moatless.runtime.testbed import TestbedEnvironment
-            runtime = TestbedEnvironment(
-                repository=repository,
-                instance=instance,
-                dataset_name=self.dataset_name,
-                enable_cache=True,
-            )
+        repository = create_repository(
+            instance, repo_base_dir=self.repo_base_dir
+        )
+        run_id = hashlib.sha256(self.evaluation.evaluation_name.encode()).hexdigest()[:8]
+        runtime = TestbedEnvironment(
+            repository=repository,
+            instance=instance,
+            dataset_name=self.dataset_name,
+            run_id=run_id,
+        )
 
         for i, leaf_node in enumerate(unevaluated_nodes):
             logger.info(
@@ -407,7 +340,7 @@ class EvaluationRunner:
                     logger.info(
                         f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} as patch has already been evaluated."
                     )
-                    eval_result["node_results"][leaf_node.node_id] = patch_results[patch_hash]
+                    eval_result["node_results"][str(leaf_node.node_id)] = patch_results[patch_hash]
                 else:
                     start_time = time.time()
                     result = runtime.evaluate(patch=patch)
@@ -415,8 +348,8 @@ class EvaluationRunner:
                         logger.error(f"Error in evaluating patch for {instance_id}")
                         continue
 
-                    eval_result["node_results"][leaf_node.node_id] = result.model_dump()
-                    patch_results[patch_hash] = eval_result["node_results"][leaf_node.node_id]
+                    eval_result["node_results"][str(leaf_node.node_id)] = result.model_dump()
+                    patch_results[patch_hash] = eval_result["node_results"][str(leaf_node.node_id)]
                     logger.info(
                         f"Evaluated patch for node {leaf_node.node_id} in {time.time() - start_time} seconds (resolved: {result.resolved})"
                     )
@@ -434,6 +367,74 @@ class EvaluationRunner:
         else:
             return None
 
+    def create_and_run_search_tree(
+        self,
+        problem_statement: str,
+        evaluation_name: str,
+        instance_id: str,
+        moatless_instance: dict,
+        trajectory_path: str,
+        evaluation_settings: TreeSearchSettings,
+    ) -> SearchTree:
+        """Create and run a search tree for the given problem instance."""
+        metadata: dict[str, Any] = {
+            "evaluation_name": evaluation_name,
+            "instance_id": instance_id,
+        }
+
+        repository = create_repository(
+            moatless_instance, repo_base_dir=self.repo_base_dir
+        )
+        code_index = create_index(moatless_instance, repository=repository)
+
+        runtime = None
+        if self.use_testbed:
+            from moatless.runtime.testbed import TestbedEnvironment
+            run_id = hashlib.sha256(evaluation_name.encode()).hexdigest()[:8]
+            runtime = TestbedEnvironment(
+                repository=repository,
+                instance=moatless_instance,
+                dataset_name=self.dataset_name,
+                run_id=run_id,
+            )
+
+        agent = CodingAgent.create(
+            completion_model=evaluation_settings.agent_settings.completion_model,
+            repository=repository,
+            code_index=code_index,
+            runtime=runtime,
+            message_history_type=evaluation_settings.agent_settings.message_history_type,
+        )
+
+        tree = SearchTree.create(
+            message=problem_statement,
+            repository=repository,
+            runtime=runtime,
+            selector=evaluation_settings.selector,
+            agent=agent,
+            value_function=evaluation_settings.value_function,
+            max_iterations=evaluation_settings.max_iterations,
+            max_expansions=evaluation_settings.max_expansions,
+            max_cost=evaluation_settings.max_cost,
+            persist_path=trajectory_path,
+            metadata=metadata
+        )
+
+        def tree_event_handler(event):
+            if event["event_type"] == "tree_iteration":
+                self.emit_event(evaluation_name, "tree_progress", {
+                    "instance_id": instance_id,
+                    "iteration": event["data"]["iteration"],
+                    "total_cost": event["data"]["total_cost"],
+                    "best_reward": event["data"]["best_reward"],
+                    "finished_nodes": event["data"]["finished_nodes"],
+                    "total_nodes": event["data"]["total_nodes"],
+                    "best_node_id": event["data"]["best_node_id"]
+                })
+
+        tree.add_event_handler(tree_event_handler)
+        tree.run_search()
+        return tree
 
 def create_evaluation_name(
     model: str,

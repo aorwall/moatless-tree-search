@@ -90,12 +90,7 @@ class EvaluationMonitor:
         
         # Load initial instances
         for instance in self.repository.list_instances(self.evaluation.evaluation_name):
-            self.instances_data[instance.instance_id] = {
-                'status': instance.status,
-                'duration': instance.duration,
-                'resolved': instance.resolved,
-                'error': instance.error
-            }
+            self.instances_data[instance.instance_id] = instance
         
         self.logger.info(f"Starting evaluation monitor for {evaluation.evaluation_name}")
         self.logger.info(f"Found {len(self.instances_data)} instances to evaluate")
@@ -123,57 +118,19 @@ class EvaluationMonitor:
             self.logger.warning(f"Instance ID not found in event data: {data}")
             return
 
-        if event_type == "instance_started":
-            self.instances_data.setdefault(instance_id, {}).update({
-                'status': InstanceStatus.STARTED,
-                'duration': None,
-                'resolved': None,
-                'error': None,
-                'start_time': time.time()
-            })
-            self.logger.info(f"Started instance: {instance_id}")
-            
-        elif event_type == "instance_completed":
-            self.instances_data.setdefault(instance_id, {}).update({
-                'status': InstanceStatus.COMPLETED,
-                'resolved': data.get("resolved", False),
-                'duration': data.get("duration"),
-                'error': None,
-                'iteration': data.get("iteration", 0),
-                'total_cost': data.get("total_cost", 0),
-                'best_reward': data.get("best_reward", 0),
-                'prompt_tokens': data.get("prompt_tokens", 0),
-                'completion_tokens': data.get("completion_tokens", 0),
-                'cached_tokens': data.get("cached_tokens", 0)
-            })
+        # Load/reload instance from repository to get latest state
+        instance = self.repository.load_instance(self.evaluation.evaluation_name, instance_id)
+        if instance:
+            self.instances_data[instance_id] = instance
             self.needs_stats_update = True
-            self.logger.info(f"Completed instance: {instance_id} (resolved: {data.get('resolved', False)})")
             
-        elif event_type == "instance_error":
-            self.instances_data.setdefault(instance_id, {}).update({
-                'status': InstanceStatus.ERROR,
-                'resolved': False,
-                'duration': None,
-                'error': data.get("error"),
-                'iteration': data.get("iteration", 0),
-                'total_cost': data.get("total_cost", 0),
-                'best_reward': data.get("best_reward", 0),
-                'prompt_tokens': data.get("prompt_tokens", 0),
-                'completion_tokens': data.get("completion_tokens", 0),
-                'cached_tokens': data.get("cached_tokens", 0)
-            })
-            self.needs_stats_update = True
-            self.logger.error(f"Error in instance {instance_id}: {data.get('error')}")
+            if event_type == "instance_started":
+                self.logger.info(f"Started instance: {instance_id}")
+            elif event_type == "instance_completed":
+                self.logger.info(f"Completed instance: {instance_id} (resolved: {instance.resolved})")
+            elif event_type == "instance_error":
+                self.logger.error(f"Error in instance {instance_id}: {instance.error}")
             
-        elif event_type == "tree_progress":
-            if instance_id in self.instances_data:
-                self.instances_data[instance_id].update({
-                    'iteration': data["iteration"],
-                    'total_cost': data["total_cost"],
-                    'best_reward': data["best_reward"]
-                })
-                self.logger.info(f"Progress for {instance_id}: iter={data['iteration']}, cost={data['total_cost']:.2f}, reward={data['best_reward']:.2f}")
-
     async def process_events(self):
         """Process events from the queue"""
         while True:
@@ -213,37 +170,41 @@ class EvaluationMonitor:
         table.add_column("Duration", style="green")
         table.add_column("Resolved", style="yellow")
         table.add_column("Iterations", style="blue")
+        table.add_column("Cost", style="cyan")
         table.add_column("Tokens", style="blue")
-        table.add_column("Progress", style="blue")
         
         # Sort instances: running first (by start time desc), then others
         sorted_instances = []
         running_instances = []
         other_instances = []
         
-        for instance_id, data in self.instances_data.items():
-            if data.get('status') == InstanceStatus.STARTED:
-                running_instances.append((instance_id, data))
+        for instance in self.instances_data.values():
+            if instance.status == InstanceStatus.STARTED:
+                running_instances.append(instance)
             else:
-                other_instances.append((instance_id, data))
+                other_instances.append(instance)
         
         # Sort running instances by start time (most recent first)
-        running_instances.sort(key=lambda x: x[1].get('start_time', 0), reverse=True)
+        running_instances.sort(key=lambda x: x.started_at or datetime.min, reverse=True)
         sorted_instances = running_instances + other_instances
         
-        for instance_id, data in sorted_instances:
-            status = data.get('status', 'pending')
-            duration = f"{data.get('duration', 0):.1f}s" if data.get('duration') else "-"
-            resolved = "✓" if data.get('resolved') else "✗" if data.get('resolved') is False else "-"
+        for instance in sorted_instances:
+            status = instance.status
+            duration = f"{int(instance.duration)}s" if instance.duration else "-"
+            resolved = "✓" if instance.resolved else "✗" if instance.resolved is False else "-"
             
-            # Get iterations and tokens
-            iterations = data.get('iteration', 0)
-            tokens = int(data.get('total_cost', 0) * 1000) if data.get('total_cost') is not None else 0
-            
-            # Add progress info if available
-            progress = ""
-            if 'iteration' in data:
-                progress = f"Reward: {data['best_reward']:.2f}"
+            # Get iterations and tokens from benchmark result
+            iterations = 0
+            tokens = 0
+            cost = "-"
+            if instance.benchmark_result:
+                iterations = instance.benchmark_result.transitions
+                tokens = (
+                    instance.benchmark_result.prompt_tokens +
+                    instance.benchmark_result.completion_tokens +
+                    instance.benchmark_result.cached_tokens
+                )
+                cost = f"${instance.benchmark_result.total_cost:.2f}"
             
             status_style = {
                 'pending': 'white',
@@ -253,13 +214,13 @@ class EvaluationMonitor:
             }.get(status, 'white')
             
             table.add_row(
-                instance_id,
+                instance.instance_id,
                 Text(status, style=status_style),
                 duration,
                 resolved,
                 str(iterations),
-                f"{tokens:,}",
-                progress
+                cost,
+                f"{tokens:,}" if tokens > 0 else "-"
             )
         
         return table
@@ -267,10 +228,22 @@ class EvaluationMonitor:
     def create_stats_panel(self):
         """Create a panel showing evaluation statistics"""
         total = len(self.instances_data)
-        completed = sum(1 for i in self.instances_data.values() if i['status'] == InstanceStatus.COMPLETED)
-        errors = sum(1 for i in self.instances_data.values() if i['status'] == InstanceStatus.ERROR)
-        running = sum(1 for i in self.instances_data.values() if i['status'] == InstanceStatus.STARTED)
-        resolved = sum(1 for i in self.instances_data.values() if i.get('resolved', False))
+        completed = sum(1 for i in self.instances_data.values() if i.status == InstanceStatus.COMPLETED)
+        errors = sum(1 for i in self.instances_data.values() if i.status == InstanceStatus.ERROR)
+        running = sum(1 for i in self.instances_data.values() if i.status == InstanceStatus.STARTED)
+        resolved = sum(1 for i in self.instances_data.values() if i.resolved is True)
+        
+        # Calculate total cost and tokens
+        total_cost = 0
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+        total_cached_tokens = 0
+        for instance in self.instances_data.values():
+            if instance.benchmark_result:
+                total_cost += instance.benchmark_result.total_cost
+                total_prompt_tokens += instance.benchmark_result.prompt_tokens
+                total_completion_tokens += instance.benchmark_result.completion_tokens
+                total_cached_tokens += instance.benchmark_result.cached_tokens
         
         text = Text()
         text.append(f"Total Instances: {total}\n", style="cyan")
@@ -278,6 +251,8 @@ class EvaluationMonitor:
         text.append(f"Running: {running}\n", style="yellow")
         text.append(f"Errors: {errors}\n", style="red")
         text.append(f"Success Rate: {(resolved/total*100 if total > 0 else 0):.1f}%\n", style="magenta")
+        text.append(f"Total Cost: ${total_cost:.2f}\n", style="cyan")
+        text.append(f"Total Tokens: {total_prompt_tokens + total_completion_tokens + total_cached_tokens:,}\n", style="blue")
         text.append(f"Elapsed Time: {self._format_elapsed_time()}\n", style="blue")
         
         return Panel(text, title="Evaluation Statistics", border_style="bright_blue")
@@ -323,21 +298,21 @@ class EvaluationMonitor:
         """Create the layout for the display"""
         layout = Layout()
         
-        # Split into main content and right side
+        # Split into main content and right side with adjusted ratio (3:2 instead of 2:1)
         layout.split_row(
-            Layout(name="main", ratio=2),
-            Layout(name="right", ratio=1)
+            Layout(name="main", ratio=3),
+            Layout(name="right", ratio=2)
         )
         
-        # Split main content into progress and stats
+        # Split main content into progress and stats with adjusted size
         layout["main"].split_column(
             Layout(self.create_progress_table(), name="progress"),
-            Layout(self.create_stats_panel(), name="stats", size=8)
+            Layout(self.create_stats_panel(), name="stats", size=10)
         )
         
-        # Split right side into info and logs
+        # Split right side into info and logs with adjusted size for logs
         layout["right"].split_column(
-            Layout(self.create_info_panel(), name="info", size=15),
+            Layout(self.create_info_panel(), name="info", size=18),
             Layout(self.log_panel.get_panel(), name="logs")
         )
         
@@ -395,7 +370,7 @@ def validate_evaluation_setup(repository, evaluation, args):
 
 def main():
     parser = argparse.ArgumentParser(description="Run a model evaluation with progress monitoring")
-    parser.add_argument("--model", required=True, help="Model name (e.g., gemini/gemini-2.0-flash-exp)")
+    parser.add_argument("--model", help="Model name (e.g., gemini/gemini-2.0-flash-exp)")
     parser.add_argument("--api-key", help="API key for the model")
     parser.add_argument("--base-url", help="Base URL for the API")
     parser.add_argument("--max-iterations", type=int, default=20, help="Maximum iterations per instance")
@@ -416,60 +391,67 @@ def main():
     parser.add_argument("--message-history", 
                        choices=[history.value for history in MessageHistoryType],
                        help="Message history type")
+    parser.add_argument("--evaluation-name", help="Custom evaluation name. If not provided, will be auto-generated")
     
     args = parser.parse_args()
-    
-    # Create model settings
-    model_settings = CompletionModel(
-        model=args.model,
-        temperature=0.0,
-        max_tokens=3000,
-        api_key=args.api_key,
-        base_url=args.base_url,
-        response_format=LLMResponseFormat(args.response_format) if args.response_format else None
-    )
-    
-    # Create agent settings
-    agent_settings = AgentSettings(
-        completion_model=model_settings,
-        message_history_type=MessageHistoryType(args.message_history) if args.message_history else MessageHistoryType.MESSAGES,
-        system_prompt=None
-    )
-    
-    # Create tree search settings
-    tree_search_settings = TreeSearchSettings(
-        max_iterations=args.max_iterations,
-        max_expansions=args.max_expansions,
-        max_cost=args.max_cost,
-        model=model_settings,
-        agent_settings=agent_settings
-    )
     
     # Initialize repository
     repository = EvaluationFileRepository(os.getenv("MOATLESS_DIR", "./evals"))
     
-    # Create evaluation name
-    evaluation_name = create_evaluation_name(
-        model=args.model,
-        date=None,
-        max_expansions=args.max_expansions,
-        response_format=LLMResponseFormat(args.response_format) if args.response_format else None,
-        message_history=MessageHistoryType(args.message_history) if args.message_history else None
-    )
-    
-    # Create evaluation using factory
-    evaluation = create_evaluation(
-        repository=repository,
-        evaluation_name=evaluation_name,
-        settings=tree_search_settings,
-        split=args.split,
-        instance_ids=args.instance_ids,
-        exclude_instance_ids=args.exclude_instance_ids,
-        repos=args.repos,
-        ignore_repos=args.ignore_repos,
-        min_resolved=args.min_resolved,
-        max_resolved=args.max_resolved
-    )
+    # Create or get evaluation name
+    if args.evaluation_name:
+        evaluation_name = args.evaluation_name
+    else:
+        model_settings = CompletionModel(
+            model=args.model,
+            temperature=0.0,
+            max_tokens=3000,
+            api_key=args.api_key,
+            base_url=args.base_url,
+            response_format=LLMResponseFormat(args.response_format) if args.response_format else None
+        )
+        
+        agent_settings = AgentSettings(
+            completion_model=model_settings,
+            message_history_type=MessageHistoryType(args.message_history) if args.message_history else MessageHistoryType.MESSAGES,
+            system_prompt=None
+        )
+        
+        tree_search_settings = TreeSearchSettings(
+            max_iterations=args.max_iterations,
+            max_expansions=args.max_expansions,
+            max_cost=args.max_cost,
+            model=model_settings,
+            agent_settings=agent_settings
+        )
+        
+        evaluation_name = create_evaluation_name(
+            model=args.model,
+            date=datetime.now().strftime("%Y%m%d"),
+            max_expansions=args.max_expansions,
+            response_format=LLMResponseFormat(args.response_format) if args.response_format else None,
+            message_history=MessageHistoryType(args.message_history) if args.message_history else None
+        )
+
+    # Check if evaluation exists
+    existing_evaluation = repository.load_evaluation(evaluation_name)
+    if existing_evaluation:
+        logger.info(f"Using existing evaluation: {evaluation_name}")
+        evaluation = existing_evaluation
+    else:
+        logger.info(f"Creating new evaluation with name: {evaluation_name}")
+        evaluation = create_evaluation(
+            repository=repository,
+            evaluation_name=evaluation_name,
+            settings=tree_search_settings,
+            split=args.split,
+            instance_ids=args.instance_ids,
+            exclude_instance_ids=args.exclude_instance_ids,
+            repos=args.repos,
+            ignore_repos=args.ignore_repos,
+            min_resolved=args.min_resolved,
+            max_resolved=args.max_resolved
+        )
 
     try:
         # Create event loop
