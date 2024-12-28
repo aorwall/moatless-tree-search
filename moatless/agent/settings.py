@@ -22,6 +22,10 @@ class AgentSettings(BaseModel):
         default=MessageHistoryType.MESSAGES,
         description="Determines how message history is generated",
     )
+    thoughts_in_action: bool = Field(
+        default=False,
+        description="Whether to include thoughts in the action or in the message"
+    )
 
     def __eq__(self, other):
         if not isinstance(other, AgentSettings):

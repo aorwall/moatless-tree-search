@@ -459,6 +459,9 @@ def main():
     parser.add_argument("--message-history", 
                        choices=[history.value for history in MessageHistoryType],
                        help="Message history type")
+    parser.add_argument("--thoughts-in-action",
+                       action="store_true",
+                       help="Enable thoughts in action for the agent")
     
     # Dataset selection
     parser.add_argument(
@@ -467,6 +470,14 @@ def main():
         required=True,
         choices=["easy", "lite_and_verified", "lite_and_verified_solvable"],
         help="Dataset to use for evaluation"
+    )
+    
+    # Instance IDs override
+    parser.add_argument(
+        "--instance-ids",
+        type=str,
+        nargs="+",
+        help="List of specific instance IDs to evaluate (overrides dataset selection)"
     )
     
     # Evaluation name
@@ -496,7 +507,8 @@ def main():
         agent_settings = AgentSettings(
             completion_model=model_settings,
             message_history_type=MessageHistoryType(args.message_history) if args.message_history else MessageHistoryType.MESSAGES,
-            system_prompt=None
+            system_prompt=None,
+            thoughts_in_action=args.thoughts_in_action
         )
         
         tree_search_settings = TreeSearchSettings(
@@ -512,15 +524,21 @@ def main():
             date=datetime.now().strftime("%Y%m%d"),
             max_expansions=args.max_expansions,
             response_format=LLMResponseFormat(args.response_format) if args.response_format else None,
-            message_history=MessageHistoryType(args.message_history) if args.message_history else None
+            message_history=MessageHistoryType(args.message_history) if args.message_history else None,
+            thoughts_in_action=args.thoughts_in_action
         )
 
-    # Load dataset
-    dataset = load_dataset_split(args.dataset)
-    if dataset is None:
-        logger.error(f"Dataset '{args.dataset}' not found")
-        sys.exit(1)
-    instance_ids = dataset.instance_ids
+    # Load dataset and get instance IDs
+    if args.instance_ids:
+        logger.info(f"Using provided instance IDs: {args.instance_ids}")
+        instance_ids = args.instance_ids
+    else:
+        dataset = load_dataset_split(args.dataset)
+        if dataset is None:
+            logger.error(f"Dataset '{args.dataset}' not found")
+            sys.exit(1)
+        instance_ids = dataset.instance_ids
+        logger.info(f"Using instance IDs from dataset: {args.dataset}")
 
     # Check if evaluation exists
     existing_evaluation = repository.load_evaluation(evaluation_name)

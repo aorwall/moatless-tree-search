@@ -53,6 +53,7 @@ class CodingAgent(ActionAgent):
         runtime: RuntimeEnvironment | None = None,
         edit_completion_model: CompletionModel | None = None,
         message_history_type: MessageHistoryType | None = None,
+        thoughts_in_action: bool = False,
         **kwargs,
     ):
 
@@ -89,7 +90,8 @@ class CodingAgent(ActionAgent):
 
         message_generator = MessageHistoryGenerator(
             message_history_type=message_history_type,
-            include_file_context=True
+            include_file_context=True,
+            thoughts_in_action=thoughts_in_action
         )
 
         config = {
@@ -100,7 +102,8 @@ class CodingAgent(ActionAgent):
             "action_type": action_type,
             "actions": [a.__class__.__name__ for a in actions],
             "message_history_type": message_history_type.value,
-            "file_context_enabled": True
+            "thoughts_in_action": thoughts_in_action,
+            "file_context_enabled": True,
         }
         
         logger.info(f"Created CodingAgent with configuration: {json.dumps(config, indent=2)}")

@@ -407,6 +407,7 @@ class EvaluationRunner:
             code_index=code_index,
             runtime=runtime,
             message_history_type=evaluation_settings.agent_settings.message_history_type,
+            thoughts_in_action=evaluation_settings.agent_settings.thoughts_in_action,
         )
 
         search_tree = SearchTree.create(
@@ -449,6 +450,7 @@ def create_evaluation_name(
     max_expansions: int | None = None,
     response_format: LLMResponseFormat | None = None,
     message_history: MessageHistoryType | None = None,
+    thoughts_in_action: bool | None = None,
 ) -> str:
     """Create a unique name for an evaluation."""
     if not date:
@@ -468,5 +470,8 @@ def create_evaluation_name(
         
     if message_history:
         components.append(f"hist_{message_history.value}")
+    
+    if thoughts_in_action:
+        components.append("thoughts-in-action")
 
     return "_".join(components)
