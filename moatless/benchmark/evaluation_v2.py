@@ -128,7 +128,10 @@ class EvaluationRunner:
                     logger.info(f"Rerun instance {instance.instance_id}")
                     # Remove instance directory
                     self.repository.delete_instance(evaluation.evaluation_name, instance.instance_id)
-                    shutil.rmtree(self.repository.get_instance_dir(evaluation.evaluation_name, instance.instance_id))
+                    instance_dir = self.repository.get_instance_dir(evaluation.evaluation_name, instance.instance_id)
+                    
+                    if os.path.exists(instance_dir):
+                        shutil.rmtree(instance_dir)
                     
                     new_instance = EvaluationInstance(instance_id=instance.instance_id)
                     self.repository.save_instance(evaluation.evaluation_name, new_instance)
