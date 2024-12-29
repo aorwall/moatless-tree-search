@@ -19,9 +19,9 @@ from moatless.benchmark.schema import EvaluationDatasetSplit
 
 logger = logging.getLogger(__name__)
 
-def load_dataset_split(dataset_name: str) -> Optional[EvaluationDatasetSplit]:
+def load_dataset_split(split: str) -> Optional[EvaluationDatasetSplit]:
     """Load a dataset split from the datasets directory."""
-    dataset_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "datasets", f"{dataset_name}_dataset.json")
+    dataset_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "datasets", f"{split}_dataset.json")
     if not os.path.exists(dataset_path):
         return None
     
@@ -53,8 +53,7 @@ def evaluate_search_and_code(
     date=None,
     tree_search_settings: TreeSearchSettings = None,
     repos: Optional[list[str]] = None,
-    split: str = "lite_and_verified",
-    dataset_name: Optional[str] = None,
+    split: str = "lite_and_verified_solvable",
     overwrite: bool = False,
     high_value_threshold: float = 50.0,
     high_value_leaf_bonus_constant: float = 50.0,
@@ -77,10 +76,10 @@ def evaluate_search_and_code(
         )
 
     # Load instances from dataset if specified
-    if dataset_name:
-        dataset = load_dataset_split(dataset_name)
+    if split:
+        dataset = load_dataset_split(split)
         if dataset is None:
-            raise ValueError(f"Dataset '{dataset_name}' not found")
+            raise ValueError(f"Dataset split '{split}' not found")
         instance_ids = dataset.instance_ids
     
     # If evaluation exists, only evaluate missing instances
@@ -99,6 +98,7 @@ def evaluate_search_and_code(
     logger.info("Evaluation Parameters:")
     logger.info(f"Evalation dir: {evaluations_dir}")
     logger.info(f"Evaluation Name: {evaluation_name}")
+    logger.info(f"Dataset Split: {split}")
     logger.info(f"Model: {tree_search_settings.model.model}")
     logger.info(f"Model Base URL: {tree_search_settings.model.model_base_url}")
     logger.info(f"Temperature: {temperature}")
@@ -107,7 +107,6 @@ def evaluate_search_and_code(
     logger.info(f"  Max Iterations: {tree_search_settings.max_iterations}")
     logger.info(f"  Min Finished Nodes: {tree_search_settings.min_finished_nodes}")
     logger.info(f"  Provide Feedback: {tree_search_settings.provide_feedback}")
-    logger.info(f"  Debate: {tree_search_settings.debate}")
     if tree_search_settings.value_function_model:
         logger.info(
             f"  Value Function Model: {tree_search_settings.value_function_model.model}"
@@ -119,7 +118,6 @@ def evaluate_search_and_code(
     logger.info(f"Max iterations: {tree_search_settings.max_iterations}")
     logger.info(f"Number of Workers: {num_workers}")
     logger.info(f"Use Testbed: {use_testbed}")
-    logger.info(f"Dataset: {dataset_name if dataset_name else 'None'}")
     logger.info(f"Number of instances to evaluate: {len(instance_ids) if instance_ids else 0}")
 
     evaluation = Evaluation(
@@ -277,12 +275,6 @@ def main():
         help="Specific instance IDs to evaluate",
     )
     instance_group.add_argument(
-        "--dataset",
-        type=str,
-        choices=["easy", "lite_and_verified", "lite_and_verified_solvable"],
-        help="Dataset to use for evaluation",
-    )
-    instance_group.add_argument(
         "--repos",
         type=str,
         nargs="+",
@@ -292,9 +284,9 @@ def main():
     instance_group.add_argument(
         "--split",
         type=str,
-        choices=["lite", "combo", "random", "sampled_50_instances"],
-        default="lite_and_verified",
-        help="Dataset split to use (lite, combo, or random)",
+        choices=["verified", "lite", "easy", "lite_and_verified", "lite_and_verified_solvable"],
+        default="lite_and_verified_solvable",
+        help="Dataset split to use (verified, lite, easy, lite_and_verified, lite_and_verified_solvable)",
     )
 
     # Other settings
@@ -463,7 +455,6 @@ def main():
         repo_base_dir=args.repo_base_dir,
         tree_search_settings=tree_search_settings,
         instance_ids=args.instance_ids,
-        dataset_name=args.dataset,
         repos=args.repos,
         date=args.date,
         use_testbed=args.use_testbed,

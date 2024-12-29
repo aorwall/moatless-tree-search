@@ -463,13 +463,13 @@ def main():
                        action="store_true",
                        help="Enable thoughts in action for the agent")
     
-    # Dataset selection
+    # Dataset split selection
     parser.add_argument(
-        "--dataset",
+        "--split",
         type=str,
         required=True,
-        choices=["easy", "lite_and_verified", "lite_and_verified_solvable"],
-        help="Dataset to use for evaluation"
+        choices=["easy", "lite", "verified", "lite_and_verified", "lite_and_verified_solvable"],
+        help="Dataset split to use for evaluation"
     )
     
     # Instance IDs override
@@ -477,7 +477,7 @@ def main():
         "--instance-ids",
         type=str,
         nargs="+",
-        help="List of specific instance IDs to evaluate (overrides dataset selection)"
+        help="List of specific instance IDs to evaluate (overrides dataset split selection)"
     )
     
     # Evaluation name
@@ -533,9 +533,9 @@ def main():
         logger.info(f"Using provided instance IDs: {args.instance_ids}")
         instance_ids = args.instance_ids
     else:
-        dataset = load_dataset_split(args.dataset)
+        dataset = load_dataset_split(args.split)
         if dataset is None:
-            logger.error(f"Dataset '{args.dataset}' not found")
+            logger.error(f"Dataset split '{args.split}' not found")
             sys.exit(1)
         instance_ids = dataset.instance_ids
         logger.info(f"Using instance IDs from dataset: {args.dataset}")
@@ -572,7 +572,7 @@ def main():
         runner = EvaluationRunner(
             repository=repository,
             evaluation=evaluation,
-            dataset_name="princeton-nlp/SWE-bench_Lite",
+            dataset_name="princeton-nlp/SWE-bench_Verified",
             num_workers=args.num_workers,
             use_testbed=True
         )

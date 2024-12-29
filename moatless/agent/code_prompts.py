@@ -2,6 +2,23 @@ AGENT_ROLE = """You are an autonomous AI assistant with superior programming ski
 you cannot communicate with the user but must rely on information you can get from the available functions.
 """
 
+REACT_GUIDELINES = """# Action and ReAct Guidelines
+
+- ALWAYS write your reasoning in `<thoughts>` tags before any action  
+- **Action Patterns:**
+  * **Single Action Flow:** When you need an observation to inform your next step:
+      * Write your reasoning in `<thoughts>` tags
+      * Run one action
+      * Wait for and analyze the observation
+      * Document new thoughts before next action
+  * **Multiple Action Flow:** When actions are independent:
+      * Write your reasoning in `<thoughts>` tags
+      * Run multiple related actions together
+      * All observations will be available before your next decision
+- **Use Observations:** Always analyze observation results to inform your next steps
+- **Verify Changes:** Check results through observations after each change
+"""
+
 WORKFLOW_PROMPT = """
 # Workflow Overview
 
@@ -101,7 +118,7 @@ After each action, you will receive an Observation that contains the result of y
 
 SYSTEM_PROMPT = AGENT_ROLE + WORKFLOW_PROMPT + GUIDELINE_PROMPT + ADDITIONAL_NOTES
 
-SYSTEM_REACT_TOOL_PROMPT = AGENT_ROLE + REACT_TOOLS_PROMPT + WORKFLOW_PROMPT + GUIDELINE_PROMPT + ADDITIONAL_NOTES
+SYSTEM_REACT_TOOL_PROMPT = AGENT_ROLE + REACT_GUIDELINES + WORKFLOW_PROMPT + GUIDELINE_PROMPT + ADDITIONAL_NOTES
 
 REACT_SYSTEM_PROMPT = WORKFLOW_PROMPT + GUIDELINE_PROMPT + REACT_GUIDELINE_PROMPT + ADDITIONAL_NOTES
 

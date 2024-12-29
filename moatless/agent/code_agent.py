@@ -27,6 +27,7 @@ from moatless.agent.code_prompts import (
     REACT_SYSTEM_PROMPT,
     SYSTEM_PROMPT,
     SIMPLE_CODE_PROMPT,
+    SYSTEM_REACT_TOOL_PROMPT,
 )
 from moatless.completion.completion import (
     LLMResponseFormat,
@@ -83,7 +84,7 @@ class CodingAgent(ActionAgent):
             if completion_model.response_format == LLMResponseFormat.REACT:
                 system_prompt = REACT_SYSTEM_PROMPT
             else:
-                system_prompt = SYSTEM_PROMPT
+                system_prompt = SYSTEM_REACT_TOOL_PROMPT
 
             action_type = "standard edit code actions"
             use_few_shots = True
