@@ -538,7 +538,7 @@ def main():
             logger.error(f"Dataset split '{args.split}' not found")
             sys.exit(1)
         instance_ids = dataset.instance_ids
-        logger.info(f"Using instance IDs from dataset: {args.dataset}")
+        logger.info(f"Using instance IDs from dataset split: {args.split}")
 
     # Check if evaluation exists
     existing_evaluation = repository.load_evaluation(evaluation_name)
