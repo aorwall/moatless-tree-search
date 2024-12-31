@@ -109,7 +109,9 @@ class ActionAgent(BaseModel):
                 messages, system_prompt=system_prompt, response_model=action_args
             )
 
-            node.action_steps = [ActionStep(action=action) for action in completion_response.structured_outputs]
+            if completion_response.structured_outputs:
+                node.action_steps = [ActionStep(action=action) for action in completion_response.structured_outputs]
+
             node.assistant_message = completion_response.text_response
 
             node.completions["build_action"] = completion_response.completion
