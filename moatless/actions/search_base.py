@@ -105,8 +105,8 @@ class SearchBaseAction(Action):
         10,
         description="The maximum number of search hits to display.",
     )
-    completion_model: Optional[CompletionModel] = Field(
-        None,
+    completion_model: CompletionModel = Field(
+        ...,
         description="The completion model used to identify relevant code sections in search results.",
     )
 
@@ -117,7 +117,7 @@ class SearchBaseAction(Action):
         self,
         repository: Repository = None,
         code_index: CodeIndex | None = None,
-        completion_model: CompletionModel | None = None,
+        completion_model: CompletionModel = None,
         **data,
     ):
         super().__init__(completion_model=completion_model, **data)

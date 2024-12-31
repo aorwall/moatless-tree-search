@@ -166,6 +166,7 @@ class Completion(BaseModel):
     model: str
     input: list[dict] | None = None
     response: dict[str, Any] | None = None
+    retries: int = 0
     usage: Usage | None = None
 
     @classmethod

@@ -253,7 +253,7 @@ def create_linear_table(nodes: List[Node], max_node_id: int, eval_result: Option
                 cols[0].markdown("---")
         
         # Action column with tabs
-        if node.action:
+        if node.action_steps or node.assistant_message:
             tab_names = ["Action", "Completion"]
             
             action_tabs = cols[1].tabs(tab_names)

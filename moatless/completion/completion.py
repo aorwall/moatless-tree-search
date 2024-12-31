@@ -763,7 +763,7 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                 )
 
             except ValidationError as e:
-                logger.warning(f"Validation failed: {json.dumps(completion_response.model_dump() if completion_response else None, indent=2)}")
+                logger.warning(f"Validation failed with error {e}. Response: {json.dumps(completion_response.model_dump() if completion_response else None, indent=2)}")
                 messages.append({"role": "assistant", "content": [block.model_dump() for block in completion_response.content]})
                 messages.append(self._create_user_message(tool_call_id, f"The response was invalid. Fix the errors: {e}"))
                 
