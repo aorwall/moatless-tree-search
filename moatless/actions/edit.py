@@ -12,6 +12,7 @@ from moatless.actions.model import ActionArguments, Observation, RetryException
 from moatless.actions.run_tests import RunTestsArgs
 from moatless.actions.string_replace import StringReplace, StringReplaceArgs
 from moatless.actions.view_code import ViewCodeArgs, CodeSpan
+from moatless.completion import CompletionModel
 from moatless.completion.model import ToolCall
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
@@ -123,15 +124,15 @@ class ClaudeEditTool(Action, CodeModificationMixin):
 
     def __init__(
         self,
-        runtime: RuntimeEnvironment | None = None,
         code_index: CodeIndex | None = None,
         repository: Repository | None = None,
+        completion_model: CompletionModel | None = None,
         **data,
     ):
         super().__init__(**data)
-        object.__setattr__(self, "_runtime", runtime)
         object.__setattr__(self, "_code_index", code_index)
         object.__setattr__(self, "_repository", repository)
+        object.__setattr__(self, "_completion_model", completion_model)
 
         self._str_replace = StringReplace(
             runtime=self._runtime,
@@ -144,7 +145,8 @@ class ClaudeEditTool(Action, CodeModificationMixin):
             repository=self._repository,
         )
         self._view_code = ViewCode(
-            repository=self._repository
+            repository=self._repository,
+            completion_model=completion_model
         )
 
     def execute(
