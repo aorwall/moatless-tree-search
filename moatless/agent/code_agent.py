@@ -229,7 +229,7 @@ def create_claude_coding_actions(
 ) -> List[Action]:
     actions = create_base_actions(repository, code_index, completion_model)
     actions.append(
-        ClaudeEditTool(code_index=code_index, repository=repository),
+        ClaudeEditTool(code_index=code_index, repository=repository, completion_model=completion_model),
 
     )
     actions.append(ListFiles())
