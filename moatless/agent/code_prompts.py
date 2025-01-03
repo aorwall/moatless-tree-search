@@ -23,15 +23,10 @@ REACT_GUIDELINES_NO_TAG = """# Action and ReAct Guidelines
 
 - ALWAYS write your reasoning as thoughts before any action  
 - **Action Patterns:**
-  * **Single Action Flow:** When you need an observation to inform your next step:
-      * Write your reasoning in `<thoughts>` tags
-      * Run one action
-      * Wait for and analyze the observation
-      * Document new thoughts before next action
-  * **Multiple Action Flow:** When actions are independent:
-      * Write your reasoning in `<thoughts>` tags
-      * Run multiple related actions together
-      * All observations will be available before your next decision
+  * Write out your reasoning
+  * Run one action
+  * Wait for the response and analyze the observation
+  * Document new thoughts before next action
 - **Use Observations:** Always analyze observation results to inform your next steps
 - **Verify Changes:** Check results through observations after each change
 """
