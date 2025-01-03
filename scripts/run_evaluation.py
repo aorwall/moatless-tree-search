@@ -42,13 +42,13 @@ error_log_file = os.path.join("logs", f"evaluation_errors_{timestamp}.log")
 
 # Main log file handler
 file_handler = logging.FileHandler(log_file)
-file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 file_handler.setLevel(logging.INFO)
 logger.addHandler(file_handler)
 
 # Error log file handler - only logs ERROR and above
 error_file_handler = logging.FileHandler(error_log_file)
-error_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s\n%(pathname)s:%(lineno)d\n%(exc_info)s'))
+error_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s\n%(pathname)s:%(lineno)d\n%(exc_info)s'))
 error_file_handler.setLevel(logging.ERROR)
 logger.addHandler(error_file_handler)
 
