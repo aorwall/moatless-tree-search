@@ -554,7 +554,6 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
             response_text, completion_response = self._litellm_text_completion(messages)
             total_usage += Usage.from_completion_response(completion_response, self.model)
 
-            logger.info(f"Response text: {response_text}")
             try:
                 self._validate_react_format(response_text)
 
@@ -631,7 +630,7 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                     }
                 )
 
-                retries += 1
+                retry_count += 1
 
                 raise CompletionRejectError(
                     message=str(e),
