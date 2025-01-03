@@ -5,33 +5,9 @@ from enum import Enum
 from textwrap import dedent
 from typing import Optional, Union, List, Tuple, Any
 
-import anthropic
-import instructor
-import litellm
-import openai
-import tenacity
-from anthropic import Anthropic, AnthropicBedrock, NOT_GIVEN
-from anthropic.types import ToolUseBlock, TextBlock
-from anthropic.types.beta import (
-    BetaToolUseBlock,
-    BetaTextBlock,
-    BetaMessageParam,
-    BetaCacheControlEphemeralParam,
-)
-from litellm.exceptions import (
-    BadRequestError,
-    NotFoundError,
-    AuthenticationError,
-    APIError,
-)
-from litellm.litellm_core_utils.prompt_templates.factory import anthropic_messages_pt
-from litellm.types.llms.anthropic import AnthropicMessagesUserMessageParam, AnthopicMessagesAssistantMessageParam
-from litellm.types.utils import ModelResponse
-from openai import AzureOpenAI, OpenAI, LengthFinishReasonError
-from pyarrow import system_memory_pool
 from pydantic import BaseModel, Field, model_validator, ValidationError
 
-from moatless.completion.model import Message, Completion, StructuredOutput
+from moatless.completion.model import Message, Completion, StructuredOutput, Usage
 from moatless.exceptions import CompletionRejectError, CompletionRuntimeError, CompletionError
 
 logger = logging.getLogger(__name__)
@@ -148,6 +124,29 @@ class CompletionModel(BaseModel):
         system_prompt: str,
         response_model: List[type[StructuredOutput]] | type[StructuredOutput]
     ) -> CompletionResponse:
+        # Import anthropic and litellm here since they are only used in create_completion
+        import anthropic
+        import litellm
+        import tenacity
+        from anthropic import Anthropic, AnthropicBedrock, NOT_GIVEN
+        from anthropic.types import ToolUseBlock, TextBlock
+        from anthropic.types.beta import (
+            BetaToolUseBlock,
+            BetaTextBlock,
+            BetaMessageParam,
+            BetaCacheControlEphemeralParam,
+        )
+        from litellm.exceptions import (
+            BadRequestError,
+            NotFoundError,
+            AuthenticationError,
+            APIError,
+        )
+        from litellm.litellm_core_utils.prompt_templates.factory import anthropic_messages_pt
+        from litellm.types.llms.anthropic import AnthropicMessagesUserMessageParam, AnthopicMessagesAssistantMessageParam
+        from litellm.types.utils import ModelResponse
+        from openai import AzureOpenAI, OpenAI, LengthFinishReasonError
+
         if not system_prompt:
             raise ValueError("System prompt is required")
 
@@ -213,6 +212,17 @@ class CompletionModel(BaseModel):
             system_prompt: str,
             response_model: type[StructuredOutput] | List[type[StructuredOutput]] | None,
     ) -> CompletionResponse:
+        # Import litellm-related modules here
+        import litellm
+        import tenacity
+        from litellm.exceptions import (
+            BadRequestError,
+            NotFoundError,
+            AuthenticationError,
+            APIError,
+        )
+        from litellm.types.utils import ModelResponse
+
         litellm.drop_params = True
         messages.insert(0, {"role": "system", "content": system_prompt})
 
@@ -313,6 +323,17 @@ class CompletionModel(BaseModel):
         system_prompt: str,
         structured_output: type[StructuredOutput] | list[type[StructuredOutput]],
     ) -> CompletionResponse:
+        # Import litellm-related modules here
+        import litellm
+        import tenacity
+        from litellm.exceptions import (
+            BadRequestError,
+            NotFoundError,
+            AuthenticationError,
+            APIError,
+        )
+        from litellm.types.utils import ModelResponse
+
         if not structured_output:
             raise CompletionRuntimeError(f"Response model is required for completion")
 
@@ -486,7 +507,21 @@ Make sure to return an instance of the JSON, not the schema itself.""")
         system_prompt: str,
         actions: list[type[StructuredOutput]],
     ) -> CompletionResponse:
+        # Import litellm-related modules here
+        import litellm
+        import tenacity
+        from litellm.exceptions import (
+            BadRequestError,
+            NotFoundError,
+            AuthenticationError,
+            APIError,
+        )
+        from litellm.types.utils import ModelResponse
+
         action_input_schemas = []
+
+        total_usage = Usage()
+        retry_count = 0
 
         for action in actions:
             action_input_schemas.append(f" * {action.name} {action.format_schema_for_llm()}")
@@ -515,10 +550,11 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
         )
 
         def _do_completion():
+            nonlocal total_usage, retry_count
             response_text, completion_response = self._litellm_text_completion(messages)
+            total_usage += Usage.from_completion_response(completion_response, self.model)
 
-            logger.info(response_text)
-
+            logger.info(f"Response text: {response_text}")
             try:
                 self._validate_react_format(response_text)
 
@@ -575,6 +611,8 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                     input_messages=messages,
                     completion_response=completion_response,
                     model=self.model,
+                    retries=retry_count,
+                    usage=total_usage,
                 )
 
                 return CompletionResponse(
@@ -593,6 +631,8 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                     }
                 )
 
+                retries += 1
+
                 raise CompletionRejectError(
                     message=str(e),
                     last_completion=completion_response,
@@ -604,7 +644,11 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
         except tenacity.RetryError as e:
             raise e.reraise()
 
-    def _litellm_text_completion(self, messages: list[dict]) -> Tuple[str, ModelResponse]:
+    def _litellm_text_completion(self, messages: list[dict]) -> Tuple[str, 'ModelResponse']:
+        # Import litellm here
+        import litellm
+        from litellm.types.utils import ModelResponse
+
         litellm.drop_params = True
 
         completion_kwargs = {
@@ -631,12 +675,28 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
         system_prompt: str,
         response_model: type[StructuredOutput] | List[type[StructuredOutput]] | None = None,
     ) -> CompletionResponse:
+        # Import anthropic-related modules here
+        import anthropic
+        from anthropic import Anthropic, AnthropicBedrock, NOT_GIVEN
+        from anthropic.types import ToolUseBlock, TextBlock
+        from anthropic.types.beta import (
+            BetaToolUseBlock,
+            BetaTextBlock,
+            BetaMessageParam,
+            BetaCacheControlEphemeralParam,
+        )
+        from litellm.litellm_core_utils.prompt_templates.factory import anthropic_messages_pt
+        import tenacity
+
         # Convert Message objects to dictionaries if needed
         messages = [
             msg.model_dump() if hasattr(msg, 'model_dump') else msg 
             for msg in messages
         ]
-        
+
+        total_usage = Usage()
+        retries = 0
+
         tools = []
         tool_choice = {"type": "any"}
 
@@ -701,6 +761,8 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                     extra_headers=extra_headers
                 )
 
+                total_usage += Usage.from_completion_response(completion_response, self.model)
+
                 def get_response_format(name: str):
                     if len(actions) == 1:
                         return actions[0]
@@ -746,6 +808,7 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                     input_messages=messages,
                     completion_response=completion_response,
                     model=self.model,
+                    usage=total_usage,
                 )
 
                 # Log summary of the response
@@ -949,8 +1012,10 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
 
 
 def _inject_prompt_caching(
-    messages: list[Union[AnthropicMessagesUserMessageParam, AnthopicMessagesAssistantMessageParam]],
+    messages: list[Union['AnthropicMessagesUserMessageParam', 'AnthopicMessagesAssistantMessageParam']],
 ):
+    from anthropic.types.beta import BetaCacheControlEphemeralParam
+
     """
     Set cache breakpoints for the 3 most recent turns
     one cache breakpoint is left for tools/system prompt, to be shared across sessions

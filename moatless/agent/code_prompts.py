@@ -19,6 +19,23 @@ REACT_GUIDELINES = """# Action and ReAct Guidelines
 - **Verify Changes:** Check results through observations after each change
 """
 
+REACT_GUIDELINES_NO_TAG = """# Action and ReAct Guidelines
+
+- ALWAYS write your reasoning as thoughts before any action  
+- **Action Patterns:**
+  * **Single Action Flow:** When you need an observation to inform your next step:
+      * Write your reasoning in `<thoughts>` tags
+      * Run one action
+      * Wait for and analyze the observation
+      * Document new thoughts before next action
+  * **Multiple Action Flow:** When actions are independent:
+      * Write your reasoning in `<thoughts>` tags
+      * Run multiple related actions together
+      * All observations will be available before your next decision
+- **Use Observations:** Always analyze observation results to inform your next steps
+- **Verify Changes:** Check results through observations after each change
+"""
+
 WORKFLOW_PROMPT = """
 # Workflow Overview
 
@@ -44,8 +61,8 @@ WORKFLOW_PROMPT = """
     * Use CreateFile for new files (format: <path>, <file_text>)
   * **Tests Run Automatically:** Tests execute after code changes
 
-5. **Test Management**
- * **Ensure Test Coverage:** Update or add tests to verify changes
+5. **Update Tests**
+ * **Ensure Test Coverage:** You must update or add tests to verify changes
  * **Tests Run Automatically:** Tests execute after test modifications
 
 6. **Iterate as Needed**
@@ -120,9 +137,7 @@ SYSTEM_PROMPT = AGENT_ROLE + WORKFLOW_PROMPT + GUIDELINE_PROMPT + ADDITIONAL_NOT
 
 SYSTEM_REACT_TOOL_PROMPT = AGENT_ROLE + REACT_GUIDELINES + WORKFLOW_PROMPT + GUIDELINE_PROMPT + ADDITIONAL_NOTES
 
-REACT_SYSTEM_PROMPT = WORKFLOW_PROMPT + GUIDELINE_PROMPT + REACT_GUIDELINE_PROMPT + ADDITIONAL_NOTES
-
-
+REACT_SYSTEM_PROMPT = AGENT_ROLE + REACT_GUIDELINES_NO_TAG + WORKFLOW_PROMPT + GUIDELINE_PROMPT + ADDITIONAL_NOTES
 
 
 SIMPLE_CODE_PROMPT = (

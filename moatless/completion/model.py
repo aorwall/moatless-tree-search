@@ -166,12 +166,12 @@ class Completion(BaseModel):
     model: str
     input: list[dict] | None = None
     response: dict[str, Any] | None = None
-    retries: int = 0
+    retries: int | None = None
     usage: Usage | None = None
 
     @classmethod
     def from_llm_completion(
-        cls, input_messages: list[dict], completion_response: Any, model: str
+        cls, input_messages: list[dict], completion_response: Any, model: str, usage: Usage | None = None, retries: int | None = None
     ) -> Optional["Completion"]:
         if isinstance(completion_response, BaseModel):
             response = completion_response.model_dump()
@@ -183,12 +183,14 @@ class Completion(BaseModel):
             )
             return None
 
-        usage = Usage.from_completion_response(completion_response, model)
+        if not usage:
+            usage = Usage.from_completion_response(completion_response, model)
 
         return cls(
             model=model,
             input=input_messages,
             response=response,
+            retries=retries,
             usage=usage,
         )
 

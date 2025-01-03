@@ -95,4 +95,3 @@ class AssistantMessage(Message):
         default=None,
         description="List of actions performed by the assistant"
     )
-
