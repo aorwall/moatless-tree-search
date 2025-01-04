@@ -33,6 +33,9 @@ class ActionAgent(BaseModel):
     use_few_shots: bool = Field(
         True, description="Whether to use few-shot examples for generating completions"
     )
+    thoughts_in_action: bool = Field(
+        True, description=""
+    )
     actions: List[Action] = Field(default_factory=list)
     message_generator: MessageHistoryGenerator = Field(
         default_factory=lambda: MessageHistoryGenerator(),
@@ -242,9 +245,16 @@ class ActionAgent(BaseModel):
 
                 elif self.completion.response_format == LLMResponseFormat.TOOLS:
                     tools_json = {"tool": example.action.name}
-                    tools_json.update(example.action.model_dump())
+                    if self.thoughts_in_action:
+                        tools_json.update(example.action.model_dump())
+                    else:
+                        tools_json.update(example.action.model_dump(exclude={"thoughts"}))
 
-                    prompt += f"User: {example.user_input}\nAssistant:{json.dumps(tools_json)}\n\n"
+                    prompt += f"Task: {example.user_input}\n"
+                    if not self.thoughts_in_action:
+                        prompt += f"<thoughts>{example.action.thoughts}</thoughts>\n"
+                    prompt += json.dumps(tools_json)
+                    prompt += "\n\n"
 
         return prompt
 

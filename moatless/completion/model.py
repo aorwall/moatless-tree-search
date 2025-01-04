@@ -218,8 +218,11 @@ class StructuredOutput(BaseModel):
         schema = cls.model_json_schema()
         docstring = parse(cls.__doc__ or "")
         parameters = {
-            k: v for k, v in schema.items() if k not in ("title", "description")
+            k: v for k, v in schema.items() if k not in ("title", "description") and (thoughts_in_action or k != "thoughts")
         }
+
+        if not thoughts_in_action and parameters["properties"].get("thoughts"):
+            del parameters["properties"]["thoughts"]
 
         def remove_defaults(obj: dict) -> None:
             """Recursively remove default fields from a schema object"""

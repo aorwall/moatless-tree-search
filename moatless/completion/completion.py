@@ -72,6 +72,11 @@ class CompletionModel(BaseModel):
     metadata: Optional[dict] = Field(
         default=None, description="Additional metadata for the completion model"
     )
+    thoughts_in_action: bool = Field(
+        default=True,
+        description="Whether to include thoughts in the action or in the message"
+    )
+
 
     @model_validator(mode="after")
     def validate_response_format(self):
@@ -222,12 +227,12 @@ class CompletionModel(BaseModel):
             APIError,
         )
         from litellm.types.utils import ModelResponse
-
+        # logger.info(f"system_prompt: {system_prompt}")
         litellm.drop_params = True
         messages.insert(0, {"role": "system", "content": system_prompt})
 
         if isinstance(response_model, list):
-            tools = [r.openai_schema(thoughts_in_action=True) for r in response_model]
+            tools = [r.openai_schema(thoughts_in_action=self.thoughts_in_action) for r in response_model]
         elif response_model:
             tools = [response_model.openai_schema()]
         else:

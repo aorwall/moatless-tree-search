@@ -64,7 +64,6 @@ class MessageHistoryGenerator(BaseModel):
     def __init__(self, **data: Any):
         super().__init__(**data)
 
-
     @field_serializer('message_history_type')
     def serialize_message_history_type(self, message_history_type: MessageHistoryType) -> str:
         return message_history_type.value

@@ -115,6 +115,7 @@ class CodingAgent(ActionAgent):
             system_prompt=system_prompt,
             message_generator=message_generator,
             use_few_shots=use_few_shots,
+            thoughts_in_action=thoughts_in_action,
             **kwargs,
         )
 
