@@ -336,7 +336,7 @@ class SearchTree(BaseModel):
 
         child_node = self.expander.expand(node, self, force_expansion)
 
-        if not node.action_steps:
+        if not node.action_steps and node.assistant_message:
             child_node.user_message = "You're an autonomous AI agent that must respond with one of the provided functions"
 
         # Only add feedback if this is the second expansion from this node

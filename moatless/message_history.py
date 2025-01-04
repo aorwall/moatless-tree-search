@@ -75,7 +75,8 @@ class MessageHistoryGenerator(BaseModel):
         generators = {
             MessageHistoryType.SUMMARY: self._generate_summary_history,
             MessageHistoryType.REACT: self._generate_react_history,
-            MessageHistoryType.MESSAGES: self._generate_message_history
+            MessageHistoryType.MESSAGES: self._generate_message_history,
+            MessageHistoryType.MESSAGES_COMPACT: self._generate_compact_message_history
         }
         start_idx = 0 if self.include_root_node else 1
         previous_nodes = node.get_trajectory()[start_idx:]
@@ -151,6 +152,48 @@ class MessageHistoryGenerator(BaseModel):
 
             messages.append(assistant_message)
             messages.extend(tool_responses)
+
+        logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
+
+        return messages
+
+    def _generate_compact_message_history(self, node: Node, previous_nodes: List["Node"]) -> List[dict[str, Any]]:
+        messages = [ChatCompletionUserMessage(role="user", content=node.get_root().message)]
+
+        if len(previous_nodes) <= 1:
+            return messages
+
+        node_messages = self.get_node_messages(node)
+
+        tool_idx = 0
+        tokens = 0
+
+        for action, observation in node_messages:
+
+            tool_calls = []
+            tool_idx += 1
+            tool_call_id = f"tool_{tool_idx}"
+
+            exclude = None
+            if not self.thoughts_in_action:
+                exclude = {"thoughts"}
+                # TODO: Add content to assistant message
+
+            tool_calls.append({
+                "id": tool_call_id,
+                "type": "function",
+                "function": {
+                    "name": action.name,
+                    "arguments": action.model_dump_json(exclude=exclude),
+                },
+            })
+
+            tokens += count_tokens(action.model_dump_json(exclude=exclude))
+
+            messages.append(ChatCompletionAssistantMessage(role="assistant", tool_calls=tool_calls))
+            messages.append(ChatCompletionToolMessage(role="tool", tool_call_id=tool_call_id, content=f"Observation: {observation}"))
+
+            tokens += count_tokens(observation)
 
         logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
 

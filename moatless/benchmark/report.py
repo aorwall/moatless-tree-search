@@ -175,6 +175,8 @@ class BenchmarkResult(BaseModel):
     fail_to_pass_count: int = 0
     pass_to_pass_count: int = 0
 
+    retries: int = 0
+
     max_build_tokens: int = 0
 
     alternative_solutions: int = 0
@@ -219,7 +221,7 @@ def create_trajectory_stats(
     test_files = []
     last_action_dump = None
     action_dumps = []
-    
+
     for node in nodes:
         if node.action:
             action_name = node.action.name
@@ -315,6 +317,9 @@ def create_trajectory_stats(
                     + node.completions["build_action"].usage.completion_tokens
                     + node.completions["build_action"].usage.cached_tokens,
                 )
+
+                if node.completions["build_action"].retries > 0:
+                    result.retries += node.completions["build_action"].retries
 
             current_action_dump = node.action.model_dump(exclude={"thoughts"})
             action_dumps.append(current_action_dump)
@@ -456,6 +461,7 @@ def to_result(
                 eval_report.get("node_results", {}).get(str(leaf_node.node_id)),
             )
             result.trajectories.append(traj)
+            result.retries += traj.retries
 
             for action, count in traj.actions.items():
                 result.actions[action] = result.actions.get(action, 0) + count
@@ -526,6 +532,8 @@ def to_result(
             result.flags.append("no_test_edits")
         if result.failed_actions > 0 and "has_failed_actions" not in result.flags:
             result.flags.append("has_failed_actions")
+        if result.retries > 0:
+            result.flags.append("has_retries")
 
     except Exception as e:
         raise e

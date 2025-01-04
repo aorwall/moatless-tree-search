@@ -559,6 +559,8 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
             response_text, completion_response = self._litellm_text_completion(messages)
             total_usage += Usage.from_completion_response(completion_response, self.model)
 
+            logger.info(f"response_text: {response_text}")
+
             try:
                 self._validate_react_format(response_text)
 
