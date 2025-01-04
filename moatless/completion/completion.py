@@ -231,6 +231,9 @@ class CompletionModel(BaseModel):
         litellm.drop_params = True
         messages.insert(0, {"role": "system", "content": system_prompt})
 
+        total_usage = Usage()
+        retry_count = 0
+
         if isinstance(response_model, list):
             tools = [r.openai_schema(thoughts_in_action=self.thoughts_in_action) for r in response_model]
         elif response_model:
@@ -246,6 +249,7 @@ class CompletionModel(BaseModel):
         )
 
         def _do_completion():
+            nonlocal total_usage, retry_count
             llm_completion_response = None
             try:
                 llm_completion_response = litellm.completion(
@@ -263,6 +267,8 @@ class CompletionModel(BaseModel):
 
                 if not llm_completion_response or not llm_completion_response.choices:
                     raise CompletionRuntimeError("No completion response or choices returned")
+
+                total_usage += Usage.from_completion_response(llm_completion_response, self.model)
 
                 content = llm_completion_response.choices[0].message.content
 
@@ -297,6 +303,8 @@ class CompletionModel(BaseModel):
                     input_messages=messages,
                     completion_response=llm_completion_response,
                     model=self.model,
+                    retries=retry_count,
+                    usage=total_usage
                 )
 
                 return CompletionResponse.create(text=content, output=response_objects, completion=completion)

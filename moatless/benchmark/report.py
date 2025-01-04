@@ -318,7 +318,7 @@ def create_trajectory_stats(
                     + node.completions["build_action"].usage.cached_tokens,
                 )
 
-                if node.completions["build_action"].retries > 0:
+                if node.completions["build_action"].retries:
                     result.retries += node.completions["build_action"].retries
 
             current_action_dump = node.action.model_dump(exclude={"thoughts"})
