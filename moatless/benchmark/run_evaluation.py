@@ -284,9 +284,9 @@ def main():
     instance_group.add_argument(
         "--split",
         type=str,
-        choices=["verified", "lite", "easy", "lite_and_verified", "lite_and_verified_solvable"],
+        choices=["verified", "lite", "easy", "lite_and_verified", "lite_and_verified_solvable", "small"],
         default="lite_and_verified_solvable",
-        help="Dataset split to use (verified, lite, easy, lite_and_verified, lite_and_verified_solvable)",
+        help="Dataset split to use (verified, lite, easy, lite_and_verified, lite_and_verified_solvable, small)",
     )
 
     # Other settings
