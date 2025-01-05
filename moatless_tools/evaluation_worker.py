@@ -38,13 +38,13 @@ class EvaluationListItem(BaseModel):
     name: str
     status: EvaluationStatus
     model: str
-    max_expansions: int
-    started_at: Optional[datetime]
-    total_instances: int
-    completed_instances: int
-    error_instances: int
-    resolved_instances: int
-    is_active: bool
+    maxExpansions: int
+    startedAt: Optional[datetime]
+    totalInstances: int
+    completedInstances: int
+    errorInstances: int
+    resolvedInstances: int
+    isActive: bool
 
     @classmethod
     def from_evaluation(cls, name: str, evaluation: Evaluation, repository: EvaluationFileRepository, is_active: bool) -> 'EvaluationListItem':
@@ -60,13 +60,13 @@ class EvaluationListItem(BaseModel):
             name=name,
             status=status,
             model=evaluation.settings.model.model,
-            max_expansions=evaluation.settings.max_expansions,
-            started_at=evaluation.start_time if hasattr(evaluation, 'start_time') else None,
-            total_instances=len(instances),
-            completed_instances=sum(1 for inst in instances if inst.status == InstanceStatus.COMPLETED),
-            error_instances=sum(1 for inst in instances if inst.status == InstanceStatus.ERROR),
-            resolved_instances=sum(1 for inst in instances if inst.resolved),
-            is_active=is_active
+            maxExpansions=evaluation.settings.max_expansions,
+            startedAt=evaluation.start_time if hasattr(evaluation, 'start_time') else None,
+            totalInstances=len(instances),
+            completedInstances=sum(1 for inst in instances if inst.status == InstanceStatus.COMPLETED),
+            errorInstances=sum(1 for inst in instances if inst.status == InstanceStatus.ERROR),
+            resolvedInstances=sum(1 for inst in instances if inst.resolved),
+            isActive=is_active
         )
 
 class EvaluationListResponse(BaseModel):
@@ -376,10 +376,10 @@ async def get_evaluation_events(evaluation_name: str, since: Optional[str] = Non
         events = [e for e in events if e["timestamp"] > since]
     return {"events": events}
 
-if __name__ == "__main__":
-    uvicorn.run(
-        "evaluation_worker:app",
-        host="0.0.0.0",
-        port=8000,
-    ) 
+#if __name__ == "__main__":
+#    uvicorn.run(
+#        "evaluation_worker:app",
+#        host="0.0.0.0",
+#        port=8000,
+#    ) 
     
