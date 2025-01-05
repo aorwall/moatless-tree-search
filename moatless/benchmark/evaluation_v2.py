@@ -56,6 +56,12 @@ from moatless.value_function.coding import CodingValueFunction
 from moatless.benchmark.instance_collections import sampled_50_instances
 from moatless.agent.settings import AgentSettings
 from moatless.benchmark.repository import EvaluationRepository, EvaluationFileRepository
+from moatless_tools.utils import (
+    create_evaluation_response,
+    create_instance_dto,
+    create_instance_response,
+    load_resolution_rates
+)
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +123,8 @@ class EvaluationRunner:
         error = 0
 
         results = []
+        instance_items = []  # Keep track of instance items for evaluation response
+        resolution_rates = load_resolution_rates()  # Load resolution rates once
         instances = self.repository.list_instances(evaluation.evaluation_name)
         logger.info(f"Processing {len(instances)} instances with {self.num_workers} workers. Rerun error {rerun_errors}")
 
@@ -159,6 +167,51 @@ class EvaluationRunner:
                     result = future.result()
                     if result:
                         results.append(result)
+                        
+                        # Create instance DTO and add to list
+                        instance_item = create_instance_dto(
+                            result=result,
+                            resolution_rates=resolution_rates,
+                            splits=[]  # You can add splits if needed
+                        )
+                        instance_items.append(instance_item)
+                        
+                        # Generate and save instance response
+                        instance_dir = self.repository.get_instance_dir(evaluation.evaluation_name, result.instance_id)
+                        trajectory_path = os.path.join(instance_dir, "trajectory.json")
+                        eval_result_path = os.path.join(instance_dir, "eval_result.json")
+                        
+                        # Load trajectory and eval result
+                        search_tree = SearchTree.from_file(trajectory_path)
+                        eval_result = None
+                        if os.path.exists(eval_result_path):
+                            with open(eval_result_path) as f:
+                                eval_result = json.load(f)
+                        
+                        # Create instance response
+                        instance_response = create_instance_response(
+                            search_tree=search_tree,
+                            instance=get_moatless_instance(instance_id=result.instance_id),
+                            eval_result=eval_result,
+                            resolution_rates=resolution_rates,
+                            splits=[],  # You can add splits if needed
+                            result=result
+                        )
+                        
+                        # Save instance response
+                        instance_response_path = os.path.join(instance_dir, "instance_response.json")
+                        with open(instance_response_path, "w") as f:
+                            json.dump(instance_response.model_dump(), f, indent=2)
+                        
+                        # Create and save evaluation response
+                        evaluation_response = create_evaluation_response(evaluation, instance_items)
+                        evaluation_response_path = os.path.join(
+                            self.repository.get_evaluation_dir(evaluation.evaluation_name),
+                            "evaluation_response.json"
+                        )
+                        with open(evaluation_response_path, "w") as f:
+                            json.dump(evaluation_response.model_dump(), f, indent=2)
+                        
                         self.emit_event(evaluation.evaluation_name, "instance_completed", result)
                         # Save evaluation state after each instance
                         self.repository.save_evaluation(evaluation)
