@@ -118,7 +118,6 @@ class EvaluationRunner:
 
         results = []
         instance_items = []  # Keep track of instance items for evaluation response
-        resolution_rates = load_resolution_rates()  # Load resolution rates once
         instances = self.repository.list_instances(evaluation.evaluation_name)
         logger.info(f"Processing {len(instances)} instances with {self.num_workers} workers. Rerun error {rerun_errors}")
 
@@ -161,14 +160,6 @@ class EvaluationRunner:
                     result = future.result()
                     if result:
                         results.append(result)
-                        
-                        # Create instance DTO and add to list
-                        instance_item = create_instance_dto(
-                            result=result,
-                            resolution_rates=resolution_rates,
-                            splits=[]  # You can add splits if needed
-                        )
-                        instance_items.append(instance_item)
                         
                         self.emit_event(evaluation.evaluation_name, "instance_completed", result)
                         # Save evaluation state after each instance
