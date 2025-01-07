@@ -138,7 +138,7 @@ def generate_report(dir: str):
     repository = get_repository()
     evaluation = repository.load_evaluation(os.path.basename(dir))
     if not evaluation:
-        logger.error(f"Failed to load evaluation from {dir}")
+        logger.exception(f"Failed to load evaluation from {dir}")
         return
 
     # Load resolution rates once
