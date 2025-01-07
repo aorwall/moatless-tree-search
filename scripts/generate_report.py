@@ -11,7 +11,7 @@ from datetime import datetime
 from moatless.benchmark.report import BenchmarkResult, to_result, to_dataframe, to_trajectory_dataframe, read_reports
 from moatless.benchmark.utils import get_moatless_instances
 from moatless.search_tree import SearchTree
-from moatless_tools.utils import create_evaluation_response, create_instance_dto, create_instance_response, load_resolution_rates
+from moatless.benchmark.report_utils import create_evaluation_response, create_instance_dto, create_instance_response, load_resolution_rates
 from moatless.benchmark.repository import EvaluationFileRepository
 
 logging.basicConfig(
@@ -188,6 +188,7 @@ def generate_report(dir: str):
             result=result  # Pass the result to get metrics
         )
         instance_response_path = os.path.join(dir, instance_id, "instance_response.json")
+        print(f"Save {instance_response_path}")
         with open(instance_response_path, "w") as f:
             json.dump(instance_response.model_dump(), f, indent=2, cls=DateTimeEncoder)
 
