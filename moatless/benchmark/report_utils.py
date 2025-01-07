@@ -6,7 +6,7 @@ from moatless.file_context import FileContext
 from moatless.search_tree import SearchTree
 from moatless_tools.schema import (
     EvaluationResponseDTO, EvaluationSettingsDTO, InstanceItemDTO, UsageDTO,
-    InstanceResponseDTO, NodeDTO, ActionDTO, ObservationDTO, CompletionDTO, ActionStepDTO, FileContextDTO, FileContextSpanDTO, FileContextFileDTO
+    InstanceResponseDTO, NodeDTO, ActionDTO, ObservationDTO, CompletionDTO, ActionStepDTO, FileContextDTO, FileContextSpanDTO, FileContextFileDTO, UpdatedFileDTO
 )
 from moatless.node import Node as MoatlessNode
 from testbeds.schema import TestStatus
@@ -187,8 +187,10 @@ def convert_moatless_node_to_api_node(node: MoatlessNode) -> NodeDTO:
     # Convert file context if exists
     file_context = None
     if node.file_context:
-
-        file_context = file_context_to_dto(node.file_context)
+        previous_context = None
+        if node.parent:
+            previous_context = node.parent.file_context
+        file_context = file_context_to_dto(node.file_context, previous_context)
 
     
     return NodeDTO(
@@ -198,7 +200,7 @@ def convert_moatless_node_to_api_node(node: MoatlessNode) -> NodeDTO:
         userMessage=node.user_message,
         actionCompletion=action_completion,
         fileContext=file_context,
-        
+        terminal=node.is_terminal()
     )
 
 def create_instance_response(
@@ -212,7 +214,8 @@ def create_instance_response(
     """Create InstanceResponseDTO from a SearchTree and instance data."""
     nodes = []
     for moatless_node in search_tree.root.get_all_nodes():
-        nodes.append(convert_moatless_node_to_api_node(moatless_node))
+        node_dto = convert_moatless_node_to_api_node(moatless_node)
+        nodes.append(node_dto)
 
     instance_id = search_tree.metadata.get("instance_id")
     
@@ -235,9 +238,64 @@ def create_instance_response(
         splits=splits or [],
         flags=result.flags if result else None
     )
-    
 
-def file_context_to_dto(file_context: FileContext) -> FileContextDTO:
+def get_updated_files(
+    old_context: FileContext, new_context: FileContext
+) -> List[UpdatedFileDTO]:
+    """
+    Compare two FileContexts and return information about files that have been updated.
+    Updates include content changes, span additions/removals, and file additions.
+
+    Args:
+        old_context: The previous FileContext to compare against
+        new_context: The new FileContext
+
+    Returns:
+        List[UpdatedFileDTO]: List of updated files with their changes and status:
+            - added_to_context: File is newly added to context
+            - updated_context: File's spans have changed
+            - modified: File's content has been modified (patch changed)
+    """
+    updated_files = []
+
+    # Check files in current context
+    for file_path, current_file in new_context._files.items():
+        old_file = old_context._files.get(file_path)
+
+        if old_file is None:
+            # New file added
+            updated_files.append(UpdatedFileDTO(
+                file_path=file_path,
+                status="added_to_context",
+                patch=current_file.patch,
+                tokens=current_file.context_size()
+            ))
+        else:
+            # Check for content changes
+            if current_file.patch != old_file.patch:
+                updated_files.append(UpdatedFileDTO(
+                    file_path=file_path,
+                    status="modified",
+                    patch=current_file.patch,
+                    tokens=current_file.context_size()
+                ))
+                continue
+
+            # Check for span changes
+            current_spans = current_file.span_ids
+            old_spans = old_file.span_ids
+            if current_spans != old_spans:
+                updated_files.append(UpdatedFileDTO(
+                    file_path=file_path,
+                    status="updated_context",
+                    patch=current_file.patch,
+                    tokens=current_file.context_size()
+                ))
+
+    return updated_files
+
+
+def file_context_to_dto(file_context: FileContext, previous_context: FileContext | None = None) -> FileContextDTO:
     if not file_context:
         return None
     error_tests = 0
@@ -270,12 +328,18 @@ def file_context_to_dto(file_context: FileContext) -> FileContextDTO:
             was_edited=context_file.was_edited,
         ))
 
+    # Get updated files by comparing with previous context
+    updated_files = []
+    if previous_context:
+        updated_files = get_updated_files(previous_context, file_context)
+
     return FileContextDTO(
         summary=file_context.create_summary(),
         testResults=[result.model_dump() for test_file in file_context.test_files
                     for result in test_file.test_results] if file_context.test_files else None,
         patch=file_context.generate_git_patch(),
         files=files,
-        warnings=warnings
+        warnings=warnings,
+        updatedFiles=updated_files
     )
     

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from enum import Enum
 from typing import Literal, Optional, List, Dict, Any
 from datetime import datetime
@@ -6,7 +6,7 @@ from datetime import datetime
 
 class InstanceItemDTO(BaseModel):
     instanceId: str
-    status: Literal["pending", "running", "completed", "failed", "resolved", "error"]
+    status: Literal["pending", "running", "no_patch", "completed", "failed", "resolved", "error"]
     duration: Optional[float] = None
     resolved: Optional[bool] = None
     error: Optional[str] = None
@@ -77,6 +77,8 @@ class CompletionDTO(BaseModel):
     type: str
     usage: Optional[UsageDTO] = None
     tokens: str
+    input: Optional[str] = None
+    response: Optional[str] = None
 
 class ObservationDTO(BaseModel):
     """Observation information."""
@@ -97,6 +99,8 @@ class ActionStepDTO(BaseModel):
     action: ActionDTO
     observation: Optional[ObservationDTO] = None
     completion: Optional[CompletionDTO] = None
+    warnings: List[str] = []
+    errors: List[str] = []
 
 class FileContextSpanDTO(BaseModel):
     """Represents a span in a file context."""
@@ -109,6 +113,7 @@ class FileContextSpanDTO(BaseModel):
 class FileContextFileDTO(BaseModel):
     """Represents a file in the file context."""
     file_path: str
+    content: Optional[str] = None
     patch: Optional[str] = None
     spans: List[FileContextSpanDTO] = []
     show_all_spans: bool = False
@@ -116,25 +121,40 @@ class FileContextFileDTO(BaseModel):
     is_new: bool = False
     was_edited: bool = False
 
+class UpdatedFileDTO(BaseModel):
+    """Represents an updated file with its changes."""
+    file_path: str
+    status: Literal["added_to_context", "updated_context", "modified"]
+    tokens: Optional[int] = None
+    patch: Optional[str] = None
+
 class FileContextDTO(BaseModel):
     """File context information."""
     summary: str
-    testSummary: Optional[str] = None
     testResults: Optional[List[Dict[str, Any]]] = None
     patch: Optional[str] = None
     files: List[FileContextFileDTO] = []
+    warnings: List[str] = []
+    errors: List[str] = []
+    updatedFiles: List[UpdatedFileDTO] = Field(
+        default_factory=list,
+        description="List of files that have been updated since the last context"
+    )
 
 class NodeDTO(BaseModel):
     """Node information in the tree."""
     nodeId: int
-    actionSteps: List[ActionStepDTO] = []
-    assistantMessage: Optional[str] = None
     userMessage: Optional[str] = None
-    completionUsage: Optional[UsageDTO] = None
-    completions: Dict[str, CompletionDTO] = {}
+    assistantMessage: Optional[str] = None
+    actionCompletion: Optional[CompletionDTO] = None
+    actionSteps: List[ActionStepDTO] = []
     fileContext: Optional[FileContextDTO] = None
     warnings: List[str] = []
     errors: List[str] = []
+    terminal: bool = Field(
+        default=False,
+        description="Whether this node is in a terminal state (determined by last action step's observation)"
+    )
 
 class InstanceResponseDTO(BaseModel):
     """Response model for tree visualization endpoint."""
