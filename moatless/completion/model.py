@@ -168,10 +168,11 @@ class Completion(BaseModel):
     response: dict[str, Any] | None = None
     retries: int | None = None
     usage: Usage | None = None
+    flags: list[str] = Field(default_factory=list, description="List of flags indicating special conditions or states during completion")
 
     @classmethod
     def from_llm_completion(
-        cls, input_messages: list[dict], completion_response: Any, model: str, usage: Usage | None = None, retries: int | None = None
+        cls, input_messages: list[dict], completion_response: Any, model: str, usage: Usage | None = None, retries: int | None = None, flags: list[str] | None = None
     ) -> Optional["Completion"]:
         if isinstance(completion_response, BaseModel):
             response = completion_response.model_dump()
@@ -192,6 +193,7 @@ class Completion(BaseModel):
             response=response,
             retries=retries,
             usage=usage,
+            flags=flags or []
         )
 
 class NameDescriptor:

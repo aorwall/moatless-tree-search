@@ -56,6 +56,19 @@ from moatless.value_function.coding import CodingValueFunction
 from moatless.benchmark.instance_collections import sampled_50_instances
 from moatless.agent.settings import AgentSettings
 from moatless.benchmark.repository import EvaluationRepository, EvaluationFileRepository
+from moatless.benchmark.report_utils import (
+    create_evaluation_response,
+    create_instance_dto,
+    create_instance_response,
+    load_resolution_rates,
+)
+
+# Custom JSON encoder for datetime objects
+class DateTimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +134,9 @@ class EvaluationRunner:
         instances = self.repository.list_instances(evaluation.evaluation_name)
         logger.info(f"Processing {len(instances)} instances with {self.num_workers} workers. Rerun error {rerun_errors}")
 
+        # Load resolution rates once for all instances
+        resolution_rates = load_resolution_rates()
+
         # If rerun_errors is True, reset error instances and remove their directories
         if rerun_errors:
             new_instances = []
@@ -161,6 +177,28 @@ class EvaluationRunner:
                     if result:
                         results.append(result)
                         
+                        # Update instance_items list with completed instance
+                        completed_instances = self.repository.list_instances(evaluation.evaluation_name)
+                        instance_items = []
+                        for inst in completed_instances:
+                            if inst.benchmark_result:
+                                # Create instance item for evaluation response
+                                inst_item = create_instance_dto(
+                                    result=inst.benchmark_result,
+                                    resolution_rates=resolution_rates,
+                                    splits=[]  # Add splits if needed
+                                )
+                                instance_items.append(inst_item)
+                        
+                        # Create and save evaluation response after each instance
+                        evaluation_response = create_evaluation_response(evaluation, instance_items)
+                        evaluation_response_path = os.path.join(
+                            self.repository.get_evaluation_dir(evaluation.evaluation_name),
+                            "evaluation_response.json"
+                        )
+                        with open(evaluation_response_path, "w") as f:
+                            json.dump(evaluation_response.model_dump(), f, indent=2, cls=DateTimeEncoder)
+                        
                         self.emit_event(evaluation.evaluation_name, "instance_completed", result)
                         # Save evaluation state after each instance
                         self.repository.save_evaluation(evaluation)
@@ -175,6 +213,16 @@ class EvaluationRunner:
         evaluation.status = EvaluationStatus.COMPLETED if error == 0 else EvaluationStatus.ERROR
         evaluation.finish_time = datetime.now(timezone.utc)
         self.repository.save_evaluation(evaluation)
+        
+        # Create final evaluation response
+        evaluation_response = create_evaluation_response(evaluation, instance_items)
+        evaluation_response_path = os.path.join(
+            self.repository.get_evaluation_dir(evaluation.evaluation_name),
+            "evaluation_response.json"
+        )
+        with open(evaluation_response_path, "w") as f:
+            json.dump(evaluation_response.model_dump(), f, indent=2, cls=DateTimeEncoder)
+            
         self.emit_event(evaluation.evaluation_name, "evaluation_completed", {
             "total_instances": len(instances),
             "errors": error
@@ -261,6 +309,28 @@ class EvaluationRunner:
                 "benchmark_result": benchmark_result.dict() if benchmark_result else None
             })
 
+            # Load resolution rates for instance response
+            resolution_rates = load_resolution_rates()
+            
+            # Get instance splits
+            splits = []  # You'll need to implement logic to get splits if needed
+            
+            # Create and save full instance response DTO
+            instance_response = create_instance_response(
+                search_tree=search_tree,
+                instance=moatless_instance,
+                eval_result=eval_result,
+                resolution_rates=resolution_rates,
+                splits=splits,
+                result=benchmark_result
+            )
+            
+            # Save instance response
+            instance_response_path = os.path.join(instance_dir, "instance_response.json")
+            with open(instance_response_path, "w") as f:
+                json.dump(instance_response.model_dump(), f, indent=2, cls=DateTimeEncoder)
+
+            return benchmark_result
     
         except Exception as e:
             stacktrace = traceback.format_exc()

@@ -73,7 +73,7 @@ class CompletionModel(BaseModel):
         default=None, description="Additional metadata for the completion model"
     )
     thoughts_in_action: bool = Field(
-        default=True,
+        default=False,
         description="Whether to include thoughts in the action or in the message"
     )
 
@@ -86,6 +86,7 @@ class CompletionModel(BaseModel):
                 self.response_format = LLMResponseFormat.JSON
             else:
                 try:
+                    import litellm
                     support_function_calling = litellm.supports_function_calling(
                         model=self.model
                     )
@@ -130,28 +131,10 @@ class CompletionModel(BaseModel):
         response_model: List[type[StructuredOutput]] | type[StructuredOutput]
     ) -> CompletionResponse:
         # Import anthropic and litellm here since they are only used in create_completion
-        import anthropic
-        import litellm
-        import tenacity
-        from anthropic import Anthropic, AnthropicBedrock, NOT_GIVEN
-        from anthropic.types import ToolUseBlock, TextBlock
-        from anthropic.types.beta import (
-            BetaToolUseBlock,
-            BetaTextBlock,
-            BetaMessageParam,
-            BetaCacheControlEphemeralParam,
-        )
         from litellm.exceptions import (
-            BadRequestError,
-            NotFoundError,
-            AuthenticationError,
             APIError,
         )
-        from litellm.litellm_core_utils.prompt_templates.factory import anthropic_messages_pt
-        from litellm.types.llms.anthropic import AnthropicMessagesUserMessageParam, AnthopicMessagesAssistantMessageParam
-        from litellm.types.utils import ModelResponse
-        from openai import AzureOpenAI, OpenAI, LengthFinishReasonError
-
+        
         if not system_prompt:
             raise ValueError("System prompt is required")
 
@@ -281,8 +264,10 @@ class CompletionModel(BaseModel):
                         return response_model
 
                 response_objects = []
-
                 invalid_function_names = []
+                seen_arguments = set()
+                flags = set()
+
                 if llm_completion_response.choices[0].message.tool_calls:
                     for tool_call in llm_completion_response.choices[0].message.tool_calls:
                         action = get_response_model(tool_call.function.name)
@@ -292,6 +277,13 @@ class CompletionModel(BaseModel):
                             invalid_function_names.append(tool_call.function.name)
                             continue
 
+                        # Check for duplicate arguments
+                        if tool_call.function.arguments in seen_arguments:
+                            logger.warning(f"Duplicate tool call arguments found for {tool_call.function.name}")
+                            flags.add("duplicate_tool_call")
+                            continue
+
+                        seen_arguments.add(tool_call.function.arguments)
                         response_object = action.model_validate_json(tool_call.function.arguments)
                         response_objects.append(response_object)
 
@@ -304,7 +296,8 @@ class CompletionModel(BaseModel):
                     completion_response=llm_completion_response,
                     model=self.model,
                     retries=retry_count,
-                    usage=total_usage
+                    usage=total_usage,
+                    flags=list(flags)
                 )
 
                 return CompletionResponse.create(text=content, output=response_objects, completion=completion)
@@ -709,7 +702,7 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
         ]
 
         total_usage = Usage()
-        retries = 0
+        retry_count = 0
 
         tools = []
         tool_choice = {"type": "any"}
@@ -762,6 +755,8 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
         )
 
         def _do_completion():
+            nonlocal retry_count, total_usage
+            
             completion_response = None
             try:
                 completion_response = anthropic_client.beta.messages.create(
@@ -823,6 +818,7 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                     completion_response=completion_response,
                     model=self.model,
                     usage=total_usage,
+                    retries=retry_count
                 )
 
                 # Log summary of the response
@@ -843,6 +839,7 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                 logger.warning(f"Validation failed with error {e}. Response: {json.dumps(completion_response.model_dump() if completion_response else None, indent=2)}")
                 messages.append({"role": "assistant", "content": [block.model_dump() for block in completion_response.content]})
                 messages.append(self._create_user_message(tool_call_id, f"The response was invalid. Fix the errors: {e}"))
+                retry_count += 1
                 raise CompletionRejectError(
                     message=str(e),
                     last_completion=completion_response,

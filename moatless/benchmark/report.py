@@ -410,7 +410,15 @@ def to_result(
         if not search_tree.is_finished():
             status = "running"
         else:
-            status = "completed"
+            best_node = search_tree.get_best_trajectory()
+            if not best_node:
+                status = "pending"
+            elif best_node.action and best_node.action.name == "Error":
+                status = "error"
+            elif not best_node.file_context.generate_git_patch():
+                status = "no_patch"
+            else:
+                status = "completed"
 
         if external_result:
             resolved = (
@@ -520,14 +528,12 @@ def to_result(
 
         if eval_report.get("error"):
             result.error = eval_report["error"]
-            result.status = "error"
+            result.status = "eval_error"
         else:
             result.error = ""
 
         if result.duplicated_actions > 0 and "has_duplicated_actions" not in result.flags:
             result.flags.append("has_duplicated_actions")
-        if result.edits == 0 and "no_edits" not in result.flags:
-            result.flags.append("no_edits")
         if result.test_edits == 0 and "no_test_edits" not in result.flags:
             result.flags.append("no_test_edits")
         if result.failed_actions > 0 and "has_failed_actions" not in result.flags:
