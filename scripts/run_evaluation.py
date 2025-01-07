@@ -34,23 +34,27 @@ from typing import Optional
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Set up file logging
-os.makedirs("logs", exist_ok=True)
-timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-log_file = os.path.join("logs", f"evaluation_{timestamp}.log")
-error_log_file = os.path.join("logs", f"evaluation_errors_{timestamp}.log")
+# Set up file logging in evaluation directory
+def setup_logging(evaluation_dir: str):
+    # Create logs directory within evaluation directory
+    logs_dir = os.path.join(evaluation_dir, "logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_file = os.path.join(logs_dir, f"evaluation_{timestamp}.log")
+    error_log_file = os.path.join(logs_dir, f"evaluation_errors_{timestamp}.log")
 
-# Main log file handler
-file_handler = logging.FileHandler(log_file)
-file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-file_handler.setLevel(logging.INFO)
-logger.addHandler(file_handler)
+    # Main log file handler
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    file_handler.setLevel(logging.INFO)
+    logger.addHandler(file_handler)
 
-# Error log file handler - only logs ERROR and above
-error_file_handler = logging.FileHandler(error_log_file)
-error_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s\n%(pathname)s:%(lineno)d\n%(exc_info)s'))
-error_file_handler.setLevel(logging.ERROR)
-logger.addHandler(error_file_handler)
+    # Error log file handler - only logs ERROR and above
+    error_file_handler = logging.FileHandler(error_log_file)
+    error_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s\n%(pathname)s:%(lineno)d\n%(exc_info)s'))
+    error_file_handler.setLevel(logging.ERROR)
+    logger.addHandler(error_file_handler)
 
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
@@ -302,10 +306,16 @@ class EvaluationMonitor:
     def create_info_panel(self):
         """Create a panel showing evaluation configuration"""
         evaluation = self.evaluation
+        eval_dir = os.path.join(self.repository.evaluations_dir, evaluation.evaluation_name)
 
         text = Text()
+        # Evaluation info
+        text.append("Evaluation Info:\n", style="bold magenta")
+        text.append(f"  Directory: ", style="cyan")
+        text.append(f"{eval_dir}\n", style="white")
+        
         # Model info
-        text.append("Model Settings:\n", style="bold magenta")
+        text.append("\nModel Settings:\n", style="bold magenta")
         text.append(f"  Model: ", style="cyan")
         text.append(f"{evaluation.settings.model.model}\n", style="white")
         text.append(f"  Temperature: ", style="cyan")
@@ -468,7 +478,7 @@ def main():
         "--split",
         type=str,
         required=True,
-        choices=["easy", "lite", "verified", "lite_and_verified", "lite_and_verified_solvable"],
+        choices=["easy", "lite", "verified", "lite_and_verified", "lite_and_verified_solvable", "small"],
         help="Dataset split to use for evaluation"
     )
     
@@ -501,7 +511,8 @@ def main():
             max_tokens=3000,
             api_key=args.api_key,
             base_url=args.base_url,
-            response_format=LLMResponseFormat(args.response_format) if args.response_format else None
+            response_format=LLMResponseFormat(args.response_format) if args.response_format else None,
+            thoughts_in_action=args.thoughts_in_action
         )
         
         agent_settings = AgentSettings(
@@ -528,6 +539,13 @@ def main():
             thoughts_in_action=args.thoughts_in_action
         )
 
+        # Check for existing evaluation directory and modify name if needed
+        base_evaluation_name = evaluation_name
+        counter = 1
+        while os.path.exists(os.path.join(repository.evaluations_dir, evaluation_name)):
+            evaluation_name = f"{base_evaluation_name}_{counter}"
+            counter += 1
+
     # Load dataset and get instance IDs
     if args.instance_ids:
         logger.info(f"Using provided instance IDs: {args.instance_ids}")
@@ -546,6 +564,8 @@ def main():
         logger.info(f"Using existing evaluation: {evaluation_name}")
         
         eval_dir = os.path.join(repository.evaluations_dir, evaluation_name)
+        setup_logging(eval_dir)
+        
         missing_instances = get_missing_instances(eval_dir, instance_ids)
         logger.info(f"Adding {len(missing_instances)} new instances to evaluation")
         
@@ -553,6 +573,9 @@ def main():
         evaluation = existing_evaluation
     else:
         logger.info(f"Creating new evaluation with name: {evaluation_name}")
+        eval_dir = os.path.join(repository.evaluations_dir, evaluation_name)
+        setup_logging(eval_dir)
+        
         evaluation = create_evaluation(
             repository=repository,
             evaluation_name=evaluation_name,
@@ -572,7 +595,7 @@ def main():
         runner = EvaluationRunner(
             repository=repository,
             evaluation=evaluation,
-            dataset_name="princeton-nlp/SWE-bench_Verified",
+            dataset_name="princeton-nlp/SWE-bench_Lite",
             num_workers=args.num_workers,
             use_testbed=True
         )
