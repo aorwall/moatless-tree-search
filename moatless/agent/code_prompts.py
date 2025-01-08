@@ -71,6 +71,7 @@ WORKFLOW_PROMPT = """
     * Use StringReplace for editing files (format: <path>, <old_str>, <new_str>)
     * Use CreateFile for new files (format: <path>, <file_text>)
     * Use InsertLines for inserting lines into files (format: <path>, <insert_line>, <new_str>)
+    * Use AppendString for appending text to the end of a file (format: <path>, <new_str>)
   * **Tests Run Automatically:** Tests execute after code changes
 
 5. **Update Tests**
@@ -78,10 +79,10 @@ WORKFLOW_PROMPT = """
  * **Tests Run Automatically:** Tests execute after test modifications
 
 6. **Iterate as Needed**
-  * Continue the process until all changes are complete and verified
+  * Continue the process until all changes are complete and verified with tests
 
 7. **Complete Task**
-  * Use Finish when confident all changes are correct and verified
+  * Use Finish when confident all changes are correct and verified with tests
 """
 
 GUIDELINE_PROMPT = """

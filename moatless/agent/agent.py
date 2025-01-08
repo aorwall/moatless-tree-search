@@ -212,7 +212,7 @@ class ActionAgent(BaseModel):
                     thoughts = action_data.pop("thoughts", "")
 
                     # Special handling for StringReplace and CreateFile action
-                    if example.action.__class__.__name__ in ["StringReplaceArgs", "CreateFileArgs", "AppendStringArgs"]:
+                    if example.action.__class__.__name__ in ["StringReplaceArgs", "CreateFileArgs", "AppendStringArgs", "InsertLinesArgs"]:
                         prompt += f"\nTask: {example.user_input}"
                         prompt += f"\nThought: {thoughts}\n"
                         prompt += f"Action: {str(example.action.name)}\n"
@@ -227,6 +227,10 @@ class ActionAgent(BaseModel):
                         elif example.action.__class__.__name__ == "CreateFileArgs":
                             prompt += f"<path>{action_data['path']}</path>\n"
                             prompt += f"<file_text>\n{action_data['file_text']}\n</file_text>\n"
+                        elif example.action.__class__.__name__ == "InsertLinesArgs":
+                            prompt += f"<path>{action_data['path']}</path>\n"
+                            prompt += f"<insert_line>{action_data['insert_line']}</insert_line>\n"
+                            prompt += f"<new_str>\n{action_data['new_str']}\n</new_str>\n"
                     else:
                         # Original JSON format for other actions
                         prompt += (
