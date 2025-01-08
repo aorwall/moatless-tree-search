@@ -15,12 +15,12 @@ from moatless.workspace import Workspace
 
 
 class FinishArgs(ActionArguments):
-    """Indicate that the task is fully completed and verified with tests."""
+    """Indicate that the task is fully completed and verified with new tests."""
 
     thoughts: str = Field(
-        ..., description="Your reasoning about why the task is complete and verified with tests."
+        ..., description="Your reasoning about why the task is complete and verified with new tests."
     )
-    finish_reason: str = Field(..., description="Explanation of completion.")
+    finish_reason: str = Field(..., description="Explanation of completion and new tests.")
 
     class Config:
         title = "Finish"

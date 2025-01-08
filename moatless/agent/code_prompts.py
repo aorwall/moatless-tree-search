@@ -79,10 +79,10 @@ WORKFLOW_PROMPT = """
  * **Tests Run Automatically:** Tests execute after test modifications
 
 6. **Iterate as Needed**
-  * Continue the process until all changes are complete and verified with tests
+  * Continue the process until all changes are complete and verified with new tests
 
 7. **Complete Task**
-  * Use Finish when confident all changes are correct and verified with tests
+  * Use Finish when confident all changes are correct and verified with new tests
 """
 
 GUIDELINE_PROMPT = """
