@@ -164,7 +164,7 @@ class CompletionModel(BaseModel):
         except Exception as e:
             if isinstance(e, APIError):
                 logger.exception(
-                    f"Request failed.{e.litellm_debug_info}. Response Model: {response_model}. Input messages: {json.dumps(messages, indent=2)}"
+                    f"Request failed.{e.litellm_debug_info}. Response Model: {response_model}."
                 )
                 if e.status_code >= 500:
                     raise CompletionRejectError(
@@ -174,7 +174,7 @@ class CompletionModel(BaseModel):
                     ) from e
 
             else:
-                logger.exception(f"Failed to create completion. Response Model: {response_model}. Input messages: {json.dumps(messages, indent=2)}")
+                logger.exception(f"Failed to create completion. Response Model: {response_model}")
 
             raise CompletionRuntimeError(
                 f"Failed to get completion response: {e}",

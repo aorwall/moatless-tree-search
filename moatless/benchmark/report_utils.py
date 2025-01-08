@@ -1,3 +1,4 @@
+import os
 from typing import List, Dict, Optional
 from datetime import datetime
 from moatless.benchmark.report import BenchmarkResult
@@ -11,27 +12,23 @@ from moatless_tools.schema import (
 from moatless.node import Node as MoatlessNode
 from testbeds.schema import TestStatus
 import json
+import logging
 
+logger = logging.getLogger(__name__)
+    
 
 def load_resolution_rates() -> Dict[str, float]:
     """Load resolution rates from the resolved submissions data."""
-    import os
-    import json
-    import logging
-    
-    logger = logging.getLogger(__name__)
-    dataset_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "datasets", "resolved_submissions.json")
-    try:
-        with open(dataset_path) as f:
-            resolved_data = json.load(f)
-            return {
-                instance_id: len(data["resolved_submissions"]) / data["no_of_submissions"] 
-                if data["no_of_submissions"] > 0 else 0.0
-                for instance_id, data in resolved_data.items()
-            }
-    except (FileNotFoundError, json.JSONDecodeError):
-        logger.warning("Could not load resolution rates data")
-        return {}
+    dir = os.getcwd()
+    dataset_path = os.path.join(dir, "datasets", "resolved_submissions.json")
+    with open(dataset_path) as f:
+        resolved_data = json.load(f)
+        return {
+            instance_id: len(data["resolved_submissions"]) / data["no_of_submissions"] 
+            if data["no_of_submissions"] > 0 else 0.0
+            for instance_id, data in resolved_data.items()
+        }
+
 
 def create_evaluation_response(evaluation: "Evaluation", instance_items: List[InstanceItemDTO]) -> EvaluationResponseDTO:
     """Create EvaluationResponseDTO from evaluation and instance items."""
@@ -75,6 +72,10 @@ def create_instance_dto(result: BenchmarkResult, resolution_rates: Dict[str, flo
     """Create InstanceItemDTO from a BenchmarkResult."""
     status = derive_instance_status(result)
 
+    resolution_rate = resolution_rates.get(result.instance_id, None)
+    if not resolution_rate:
+        logger.warning(f"Resolution rate not found for instance {result.instance_id}")
+
     return InstanceItemDTO(
         instanceId=result.instance_id,
         status=status,
@@ -85,7 +86,7 @@ def create_instance_dto(result: BenchmarkResult, resolution_rates: Dict[str, flo
         completionCost=result.total_cost,
         promptTokens=result.prompt_tokens,
         completionTokens=result.completion_tokens,
-        resolutionRate=resolution_rates.get(result.instance_id, None),
+        resolutionRate=resolution_rate,
         splits=splits or [],
         flags=result.flags
     ) 
