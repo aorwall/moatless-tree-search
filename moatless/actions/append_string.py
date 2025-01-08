@@ -54,6 +54,28 @@ def format_timestamp(dt: datetime) -> str:
     return dt.isoformat()""",
                 ),
             ),
+            FewShotExample.create(
+                user_input="Add tests for the new format_timestamp function",
+                action=AppendStringArgs(
+                    thoughts="Adding comprehensive test cases for timestamp formatting including timezone handling",
+                    path="tests/test_formatters.py",
+                    new_str="""
+
+def test_format_timestamp():
+    # Test with timezone-aware datetime
+    dt = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+    assert format_timestamp(dt) == "2024-01-01T12:00:00+00:00"
+    
+    # Test with timezone-naive datetime (should convert to UTC)
+    naive_dt = datetime(2024, 1, 1, 12, 0)
+    assert format_timestamp(naive_dt) == "2024-01-01T12:00:00+00:00"
+    
+    # Test with microseconds
+    dt_with_micro = datetime(2024, 1, 1, 12, 0, 0, 123456, tzinfo=timezone.utc)
+    assert format_timestamp(dt_with_micro) == "2024-01-01T12:00:00.123456+00:00"
+""",
+                ),
+            ),
         ]
 
 class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):

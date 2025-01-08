@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 from typing import List
+from datetime import datetime, timedelta
 
 from pydantic import Field
 
@@ -192,6 +193,32 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
     'db': 0,
     'password': None
 }""",
+                ),
+            ),
+            FewShotExample.create(
+                user_input="Add test method for password expiration in UserAuthTest class",
+                action=InsertLineArgs(
+                    thoughts="Adding test cases to verify password expiration functionality",
+                    path="tests/test_auth.py",
+                    insert_line=45,
+                    new_str="""    def test_password_expiration(self):
+        # Setup test user with expired password
+        user = self.create_test_user()
+        user.password_updated_at = datetime.now(timezone.utc) - timedelta(days=91)
+        
+        # Test password expired
+        self.assertTrue(user.is_password_expired())
+        self.assertFalse(user.can_login())
+        
+        # Test password reset resets expiration
+        user.update_password("NewSecurePass123!")
+        self.assertFalse(user.is_password_expired())
+        self.assertTrue(user.can_login())
+        
+        # Test password not expired
+        user.password_updated_at = datetime.now(timezone.utc) - timedelta(days=89)
+        self.assertFalse(user.is_password_expired())
+        self.assertTrue(user.can_login())""",
                 ),
             ),
         ]

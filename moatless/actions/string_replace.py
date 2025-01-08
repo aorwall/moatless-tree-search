@@ -437,6 +437,29 @@ def validate_user(username, password):
                     new_str="",
                 ),
             ),
+            FewShotExample.create(
+                user_input="Update test_validate_user to cover new password complexity requirements",
+                action=StringReplaceArgs(
+                    thoughts="Adding test cases to verify the new password complexity validation",
+                    path="tests/test_validator.py",
+                    old_str="""def test_validate_user():
+    assert validate_user("bob", "password123") is True
+    assert validate_user("a", "short") is False
+    assert validate_user("alice", "pass") is False""",
+                    new_str="""def test_validate_user():
+    # Test valid credentials with complex password
+    assert validate_user("bob@example.com", "Password123!@#") is True
+    
+    # Test invalid email format
+    assert validate_user("bob", "Password123!@#") is False
+    
+    # Test password complexity requirements
+    assert validate_user("alice@example.com", "password123") is False  # No uppercase or special chars
+    assert validate_user("alice@example.com", "Password123") is False  # No special chars
+    assert validate_user("alice@example.com", "Password!@#") is False  # No numbers
+    assert validate_user("alice@example.com", "pass") is False  # Too short""",
+                ),
+            ),
         ]
 
 
