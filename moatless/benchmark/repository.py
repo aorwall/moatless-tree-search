@@ -81,7 +81,7 @@ class EvaluationFileRepository(EvaluationRepository):
         eval_path = os.path.join(self.get_evaluation_dir(evaluation_name), "evaluation.json")
         logger.debug(f"Attempting to load evaluation from: {eval_path}")
         if not os.path.exists(eval_path):
-            logger.info(f"Evaluation file not found: {eval_path}")
+            logger.warning(f"Evaluation file not found: {eval_path}")
             return None
             
         try:
