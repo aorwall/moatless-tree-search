@@ -1,0 +1,10 @@
+{
+  "name": "small",
+  "description": "",
+  "instance_ids": [
+    "django__django-14999",
+    "django__django-14787",
+    "scikit-learn__scikit-learn-25747",
+    "sympy__sympy-24066"
+  ]
+}
