@@ -64,7 +64,7 @@ def derive_instance_status(result: BenchmarkResult) -> str:
     """Derive instance status from a BenchmarkResult."""
     return (
         "resolved" if result.resolved is True else
-        "failed" if result.resolved is False else 
+        "failed" if result.resolved is False and result.status == "completed" else 
         result.status
     )
 
@@ -88,6 +88,8 @@ def create_instance_dto(result: BenchmarkResult, resolution_rates: Dict[str, flo
         completionTokens=result.completion_tokens,
         resolutionRate=resolution_rate,
         splits=splits or [],
+        failedActions=result.failed_actions,
+        duplicatedActions=result.duplicated_actions,
         flags=result.flags
     ) 
 
@@ -100,9 +102,11 @@ def convert_moatless_node_to_api_node(node: MoatlessNode) -> NodeDTO:
         warnings = []
         errors = []
 
+        logger.info(step.action.short_summary())
         # Convert action
         action = ActionDTO(
             name=step.action.name,
+            shortSummary=step.action.short_summary(),
             thoughts=getattr(step.action, "thoughts", None),
             properties=step.action.model_dump(exclude={"thoughts", "name"})
         )
@@ -123,6 +127,12 @@ def convert_moatless_node_to_api_node(node: MoatlessNode) -> NodeDTO:
                 properties=step.observation.properties if hasattr(step.observation, "properties") else {},
                 expectCorrection=step.observation.expect_correction if hasattr(step.observation, "expect_correction") else False
             )
+
+        if step.action.name == "Finish":
+            if not node.file_context.has_patch():
+                errors.append("finish_without_patch")
+            elif not node.file_context.has_test_patch():
+                warnings.append("finish_without_test_patch")    
 
         # Convert completion
         completion = None
@@ -201,6 +211,7 @@ def convert_moatless_node_to_api_node(node: MoatlessNode) -> NodeDTO:
         userMessage=node.user_message,
         actionCompletion=action_completion,
         fileContext=file_context,
+        error=node.error,
         terminal=node.is_terminal()
     )
 

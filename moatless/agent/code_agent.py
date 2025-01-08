@@ -193,7 +193,7 @@ def create_edit_code_actions(
 
     edit_actions = [
         StringReplace(repository=repository, code_index=code_index),
-        # InsertLine(repository=repository,  code_index=code_index),
+        InsertLine(repository=repository,  code_index=code_index),
         CreateFile(repository=repository, code_index=code_index),
         AppendString(repository=repository, code_index=code_index),
         RunTests(repository=repository, code_index=code_index),

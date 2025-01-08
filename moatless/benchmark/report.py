@@ -17,7 +17,7 @@ from moatless.benchmark.utils import (
     read_search_trees,
 )
 from moatless.file_context import FileContext
-from moatless.index.code_index import is_test
+from moatless.utils.file import is_test
 from moatless.node import Node
 from moatless.search_tree import SearchTree
 
@@ -249,51 +249,38 @@ def create_trajectory_stats(
             if node.observation and node.observation.expect_correction:
                 result.expect_corrections += 1
 
-            if node.observation and node.observation.properties:
-                if "test_results" in node.observation.properties:
-                    test_results = node.observation.properties["test_results"]
-                    failed_tests = [
-                        test
-                        for test in test_results
-                        if test["status"] in ["FAILED", "ERROR"]
-                    ]
+            if node.file_context and node.file_context.test_files:
+                
+                passed, failed, errored = node.file_context.get_test_counts()
+                failed_test_count = failed + errored
 
-                    for failed_test in failed_tests:
-                        file_paths_in_context = [
-                            file.file_path for file in node.file_context.files
-                        ]
-                        if (
-                            failed_test["file_path"]
-                            and not failed_test["file_path"] in file_paths_in_context
-                        ):
-                            if not "test_not_in_context" in result.flags:
-                                result.flags.append("test_not_in_context")
-
-                    failed_test_count = len(failed_tests)
-
+                if result.initial_failed_tests is None:
                     result.initial_failed_tests = failed_test_count
+                
+                if passed + failed + errored > result.max_tests_run:
+                    result.max_tests_run = passed + failed + errored
 
-                    if len(test_results) > result.max_tests_run:
-                        result.max_tests_run = len(test_results)
+                if failed_test_count > result.max_failed_tests:
+                    result.max_failed_tests = failed_test_count
 
-                    if failed_test_count > result.max_failed_tests:
-                        result.max_failed_tests = failed_test_count
+                if node.is_terminal():
+                    result.final_failed_tests = failed_test_count
+                    if failed_test_count > 0:
+                        result.flags.append("has_failed_tests")
 
-                    if result.final_failed_tests is None:
-                        result.final_failed_tests = failed_test_count
-
-                    for test_result in test_results:
-                        if test_result["file_path"] not in test_files:
-                            test_files.append(test_result["file_path"])
-
+                
+            if node.observation and node.observation.properties:
                 if "flags" in node.observation.properties:
                     for flag in node.observation.properties["flags"]:
                         if flag not in result.flags:
                             result.flags.append(flag)
 
                 if "fail_reason" in node.observation.properties:
-                    result.failed_actions += 1
                     fail_reason = node.observation.properties["fail_reason"]
+                    
+                    if fail_reason not in ["no_spans_added"]:
+                        result.failed_actions += 1
+
                     if fail_reason not in result.flags:
                         result.flags.append(fail_reason)
 
@@ -368,7 +355,9 @@ def create_trajectory_stats(
     if trajectory_state.is_terminal():
         if trajectory_state.action and trajectory_state.action.name == "Finish":
             result.status = "finished"
-        elif trajectory_state.action and trajectory_state.action.name in ["Reject", "Error"]:
+        if trajectory_state.action and trajectory_state.action.name == "Error" or trajectory_state.error:
+            result.status = "error"
+        elif trajectory_state.action and trajectory_state.action.name in ["Reject"]:
             result.status = "rejected"
             result.message = trajectory_state.observation.message
         else:

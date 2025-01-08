@@ -87,6 +87,12 @@ class Node(BaseModel):
     is_duplicate: Optional[bool] = Field(
         None, description="Flag to indicate if the node is a duplicate"
     )
+    terminal: bool = Field(
+        False, description="Flag to indicate if the node is a terminal node"
+    )
+    error: Optional[str] = Field(
+        None, description="Error when running node"
+    )
     reward: Optional[Reward] = Field(None, description="The reward of the node")
     visits: int = Field(0, description="The number of times the node has been visited")
     value: Optional[float] = Field(None, description="The total value (reward) of the node")
@@ -168,10 +174,8 @@ class Node(BaseModel):
 
     def is_terminal(self) -> bool:
         """Determine if the current state is a terminal state."""
-        if not self.action_steps:
-            return False
-        last_step = self.action_steps[-1]
-        return last_step.observation.terminal if last_step.observation else False
+        
+        return self.terminal
 
     def is_finished(self) -> bool:
         """Determine if the node is succesfully finished"""
@@ -434,6 +438,14 @@ class Node(BaseModel):
             node_data["action_steps"] = [
                 ActionStep.model_validate(step_data) for step_data in node_data["action_steps"]
             ]
+
+            # To keep backward compatiblity
+            for step in node_data["action_steps"]:
+                if step.observation and step.observation.terminal:
+                    node_data["terminal"] = True
+        
+        if not "terminal" in node_data:
+            node_data["terminal"] = False
 
         if node_data.get("file_context"):
             node_data["file_context"] = FileContext.from_dict(

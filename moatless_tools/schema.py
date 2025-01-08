@@ -16,6 +16,8 @@ class InstanceItemDTO(BaseModel):
     completionTokens: Optional[int] = None
     resolutionRate: Optional[float] = None
     flags: List[str] = []
+    failedActions: int = 0
+    duplicatedActions: int = 0
     splits: List[str] = []
 
 class EvaluationSettingsDTO(BaseModel):
@@ -90,6 +92,7 @@ class ObservationDTO(BaseModel):
 class ActionDTO(BaseModel):
     """Action information."""
     name: str
+    shortSummary: str
     thoughts: Optional[str] = None
     properties: Dict[str, Any] = {}
 
@@ -149,6 +152,7 @@ class NodeDTO(BaseModel):
     actionCompletion: Optional[CompletionDTO] = None
     actionSteps: List[ActionStepDTO] = []
     fileContext: Optional[FileContextDTO] = None
+    error: Optional[str] = None
     warnings: List[str] = []
     errors: List[str] = []
     terminal: bool = Field(

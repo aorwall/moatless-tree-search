@@ -27,6 +27,10 @@ class ListFilesArgs(ActionArguments):
     def to_prompt(self):
         return f"List contents of directory: {self.directory or '(root)'}"
 
+    def short_summary(self) -> str:
+        param_str = f"directory={self.directory}"
+        return f"{self.name}({param_str})"
+
 
 class ListFiles(Action):
     args_schema = ListFilesArgs

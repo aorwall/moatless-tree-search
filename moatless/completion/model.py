@@ -4,10 +4,8 @@ import logging
 from typing import Optional, Any, Union, Self, ClassVar
 from docstring_parser import parse
 
-import litellm
 from instructor import OpenAISchema
 from instructor.utils import classproperty
-from litellm import cost_per_token, NotFoundError
 from pydantic import BaseModel, model_validator, Field, ValidationError
 from pydantic_core.core_schema import ValidationInfo
 
@@ -99,12 +97,14 @@ class Usage(BaseModel):
             cached_tokens = 0
 
         try:
+            import litellm
             cost = litellm.completion_cost(
                 completion_response=completion_response, model=model
             )
         except Exception:
             # If cost calculation fails, fall back to calculating it manually
             try:
+                from litellm import cost_per_token, NotFoundError
                 prompt_cost, completion_cost = cost_per_token(
                     model=model,
                     prompt_tokens=prompt_tokens,
@@ -434,12 +434,20 @@ class StructuredOutput(BaseModel):
         return json.dumps(self.model_dump(exclude={"thoughts"} if hasattr(self, "thoughts") else None), indent=2)
 
     @classmethod
-    def format_schema_for_llm(cls) -> str:
+    def format_schema_for_llm(cls, thoughts_in_action: bool = False) -> str:
         """
         Format the schema description for LLM completion calls.
         Default implementation returns JSON schema.
         """
-        return f"Requires a JSON response with the following schema: {json.dumps(cls.model_json_schema(), ensure_ascii=False)}"
+        schema = cls.model_json_schema()
+
+        if not thoughts_in_action and schema["properties"].get("thoughts"):
+            del schema["properties"]["thoughts"]
+            schema["required"] = sorted(
+                k for k, v in schema["properties"].items() if "default" not in v and (thoughts_in_action or k != "thoughts")
+            )
+
+        return f"Requires a JSON response with the following schema: {json.dumps(schema, ensure_ascii=False)}"
 
     @classmethod
     def format_xml_schema(cls, xml_fields: dict[str, str]) -> str:

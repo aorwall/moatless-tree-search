@@ -1,5 +1,7 @@
+import fnmatch
 import logging
 import os
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -24,3 +26,4 @@ def save_to_json(files, filename):
     except Exception as e:
         logger.error(f"Error saving interactions to JSON: {e}")
         logger.error(f"Attempted to save to: {full_path}")
+

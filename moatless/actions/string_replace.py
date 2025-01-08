@@ -101,6 +101,15 @@ class StringReplaceArgs(ActionArguments):
             "old_str": "\nexact code to replace\n",
             "new_str": "\nreplacement code\n"
         })
+    
+    def _short_str(self, str: str):
+        str_split = str.split("\n")
+        return str_split[0][:20]
+
+    def short_summary(self) -> str:
+        param_str = f"path=\"{self.path}\""
+        return f"{self.name}({param_str})"
+
 
 
 class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):

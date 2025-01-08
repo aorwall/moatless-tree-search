@@ -316,7 +316,7 @@ class CompletionModel(BaseModel):
                     message=str(e),
                     last_completion=llm_completion_response,
                     messages=messages,
-                )
+                ) from e
 
         try:
             return retries(_do_completion)
@@ -467,7 +467,7 @@ Make sure to return an instance of the JSON, not the schema itself.""")
                     message=str(e),
                     last_completion=completion_response,
                     messages=messages,
-                )
+                ) from e
             except Exception as e:
                 logger.exception(f"Completion attempt failed with error: {e}. Will retry.")
                 raise CompletionRuntimeError(
@@ -644,7 +644,7 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                     message=str(e),
                     last_completion=completion_response,
                     messages=messages,
-                )
+                ) from e
 
         try:
             return retries(_do_completion)
@@ -844,7 +844,7 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                     message=str(e),
                     last_completion=completion_response,
                     messages=messages,
-                )
+                ) from e
             except Exception as e:
                 raise CompletionRuntimeError(
                     f"Failed to get completion response: {e}",

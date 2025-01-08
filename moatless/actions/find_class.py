@@ -39,6 +39,12 @@ class FindClassArgs(SearchBaseArgs):
     class Config:
         title = "FindClass"
 
+    def short_summary(self) -> str:
+        param_str = f"class_name={self.class_name}"
+        if self.file_pattern:
+            param_str += f", file_pattern={self.file_pattern}"
+        return f"{self.name}({param_str})"
+
 
 class FindClass(SearchBaseAction):
     args_schema: ClassVar[Type[ActionArguments]] = FindClassArgs

@@ -2,6 +2,7 @@ import importlib
 import json
 import logging
 from platform import node
+import traceback
 from typing import List, Type, Dict, Any, Optional
 
 from pydantic import BaseModel, Field, PrivateAttr, model_validator, ValidationError
@@ -118,26 +119,23 @@ class ActionAgent(BaseModel):
             node.assistant_message = completion_response.text_response
 
             node.completions["build_action"] = completion_response.completion
-        except CompletionRejectError as e:
-            node.action = ActionError(
-                error=f"Failed to generate action. Error: {e}"
-            )
+        except Exception as e:
+            node.terminal = True
+            node.error = traceback.format_exc()
 
-            if e.last_completion:
-                # TODO: Move mapping to completion.py
-                node.completions["build_action"] = Completion.from_llm_completion(
-                    input_messages=e.messages,
-                    completion_response=e.last_completion,
-                    model=self.completion.model,
-                )
+            if isinstance(e, CompletionRejectError):    
+                if e.last_completion:
+                    # TODO: Move mapping to completion.py
+                    node.completions["build_action"] = Completion.from_llm_completion(
+                        input_messages=e.messages,
+                        completion_response=e.last_completion,
+                        model=self.completion.model,
+                    )
+            
+                return
+            else:
+                raise e
 
-            node.observation = Observation(
-                message=e.message,
-                terminal=True,
-                properties={"error": str(e)},
-            )
-
-            return
 
         if node.action is None:
             return
@@ -168,8 +166,10 @@ class ActionAgent(BaseModel):
             action_step.observation = action.execute(action_step.action, node.file_context, node.workspace)
             if not action_step.observation:
                 logger.warning(f"Node{node.node_id}: Action {action_step.action.name} returned no observation")
-            elif action_step.observation.execution_completion:
-                action_step.completion = action_step.observation.execution_completion
+            else:
+                node.terminal = action_step.observation.terminal
+                if action_step.observation.execution_completion:
+                    action_step.completion = action_step.observation.execution_completion
 
             logger.info(
                 f"Executed action: {action_step.action.name}. "

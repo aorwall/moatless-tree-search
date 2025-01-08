@@ -46,6 +46,11 @@ class FindCodeSnippetArgs(SearchBaseArgs):
             prompt += f" in files matching the pattern: {self.file_pattern}"
         return prompt
 
+    def short_summary(self) -> str:
+        param_str = f"code_snippet={self.code_snippet}"
+        if self.file_pattern:
+            param_str += f", file_pattern={self.file_pattern}"
+        return f"{self.name}({param_str})"
 
 class FindCodeSnippet(SearchBaseAction):
     args_schema: ClassVar[Type[ActionArguments]] = FindCodeSnippetArgs

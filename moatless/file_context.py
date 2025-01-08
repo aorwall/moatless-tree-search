@@ -18,7 +18,7 @@ from moatless.codeblocks.codeblocks import (
     SpanType,
 )
 from moatless.codeblocks.module import Module
-from moatless.index.code_index import is_test
+from moatless.utils.file import is_test
 from moatless.repository import FileRepository
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment, TestResult
@@ -1223,6 +1223,9 @@ class FileContext(BaseModel):
 
     def has_patch(self):
         return any(file.patch for file in self._files.values())
+
+    def has_test_patch(self):
+        return any(file.patch for file in self._files.values() if is_test(file.file_path))
 
     def generate_git_patch(self, ignore_tests: bool = False) -> str:
         """

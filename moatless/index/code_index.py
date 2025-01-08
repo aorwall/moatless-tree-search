@@ -13,9 +13,7 @@ from rapidfuzz import fuzz
 
 from moatless.codeblocks import CodeBlock, CodeBlockType
 
-from moatless.index.epic_split import EpicSplitter
 from moatless.index.settings import IndexSettings
-from moatless.index.simple_faiss import SimpleFaissVectorStore
 from moatless.index.types import (
     CodeSnippet,
     SearchCodeHit,
@@ -24,7 +22,10 @@ from moatless.index.types import (
 from moatless.repository import FileRepository
 from moatless.repository.repository import Repository
 from moatless.schema import FileWithSpans
+from moatless.utils.file import is_test
 from moatless.utils.tokenizer import count_tokens
+from llama_index.core.storage.docstore import SimpleDocumentStore
+from moatless.index.simple_faiss import SimpleFaissVectorStore
 
 if TYPE_CHECKING:
     from llama_index.core import SimpleDirectoryReader
@@ -63,6 +64,8 @@ class CodeIndex:
         max_hits_without_exact_match: int = 100,
         max_exact_results: int = 5,
     ):
+        from moatless.index.simple_faiss import SimpleFaissVectorStore
+
         self._index_name = index_name
         self._settings = settings or IndexSettings()
 
@@ -90,9 +93,8 @@ class CodeIndex:
 
     @classmethod
     def from_persist_dir(cls, persist_dir: str, file_repo: Repository, **kwargs):
+        
         vector_store = SimpleFaissVectorStore.from_persist_dir(persist_dir)
-
-        from llama_index.core.storage.docstore import SimpleDocumentStore
         docstore = SimpleDocumentStore.from_persist_dir(persist_dir)
 
         settings = IndexSettings.from_persist_dir(persist_dir)
@@ -877,6 +879,7 @@ class CodeIndex:
                     (codeblock.module.file_path, codeblock.full_path())
                 )
 
+        from moatless.index.epic_split import EpicSplitter
         splitter = EpicSplitter(
             language=self._settings.language,
             min_chunk_size=self._settings.min_chunk_size,
@@ -930,23 +933,6 @@ class CodeIndex:
         with open(os.path.join(persist_dir, "blocks_by_function_name.json"), "w") as f:
             f.write(json.dumps(self._blocks_by_function_name, indent=2))
 
-
-def is_test(file_path: str) -> bool:
-    path = Path(file_path)
-
-    # All files in test directories are considered test files
-    if any(part in ["testing"] for part in path.parts):
-        return True
-
-    test_file_patterns = [
-        "unittest_*.py",
-        "test_*.py",
-        "tests_*.py",
-        "*_test.py",
-        "test.py",
-        "tests.py",
-    ]
-    return any(fnmatch.fnmatch(path.name, pattern) for pattern in test_file_patterns)
 
 
 def _rerank_files(file_paths: list[str], file_pattern: str):

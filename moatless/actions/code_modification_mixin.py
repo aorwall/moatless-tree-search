@@ -8,7 +8,7 @@ from moatless.actions.model import Observation
 from moatless.actions.run_tests import RunTests, RunTestsArgs
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
-from moatless.index.code_index import is_test
+from moatless.utils.file import is_test
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 

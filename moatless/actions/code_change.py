@@ -2,7 +2,6 @@ import logging
 from enum import Enum
 from typing import Optional, List, Union, Tuple, Any, Type, ClassVar
 
-from litellm.types.llms.openai import ChatCompletionUserMessage
 from pydantic import Field, PrivateAttr, model_validator
 
 from moatless.actions.action import Action
@@ -339,6 +338,7 @@ class RequestCodeChange(Action):
             args.pseudo_code,
         )
 
+        from litellm.types.llms.openai import ChatCompletionUserMessage
         messages.append(ChatCompletionUserMessage(role="user", content=user_message))
         response, completion = self._completion_model.create_text_completion(
             messages=messages,

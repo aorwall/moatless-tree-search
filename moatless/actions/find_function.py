@@ -45,6 +45,14 @@ class FindFunctionArgs(SearchBaseArgs):
         if self.file_pattern:
             prompt += f" in files matching the pattern: {self.file_pattern}"
         return prompt
+    
+    def short_summary(self) -> str:
+        param_str = f"function_name={self.function_name}"
+        if self.file_pattern:
+            param_str += f", file_pattern={self.file_pattern}"
+        if self.class_name:
+            param_str += f", class_name={self.class_name}"
+        return f"{self.name}({param_str})"
 
 
 class FindFunction(SearchBaseAction):

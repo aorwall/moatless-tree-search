@@ -31,6 +31,22 @@ REACT_GUIDELINES_NO_TAG = """# Action and ReAct Guidelines
 - **Verify Changes:** Check results through observations after each change
 """
 
+REACT_CORE_OPERATION_RULES = """
+# Core Operation Rules
+
+1. EVERY response must follow EXACTLY this format:
+   Thought: Your reasoning and analysis
+   Action: ONE specific action to take
+
+2. After each Action you will receive an Observation to inform your next step.
+
+3. Your Thought section MUST include:
+   - What you learned from previous Observations
+   - Why you're choosing this specific action
+   - What you expect to learn/achieve
+   - Any risks to watch for
+  """
+
 WORKFLOW_PROMPT = """
 # Workflow Overview
 
@@ -132,7 +148,7 @@ SYSTEM_PROMPT = AGENT_ROLE + WORKFLOW_PROMPT + GUIDELINE_PROMPT + ADDITIONAL_NOT
 
 SYSTEM_REACT_TOOL_PROMPT = AGENT_ROLE + REACT_GUIDELINES + WORKFLOW_PROMPT + GUIDELINE_PROMPT + ADDITIONAL_NOTES
 
-REACT_SYSTEM_PROMPT = AGENT_ROLE + REACT_GUIDELINES_NO_TAG + WORKFLOW_PROMPT + GUIDELINE_PROMPT + ADDITIONAL_NOTES
+REACT_SYSTEM_PROMPT = AGENT_ROLE + REACT_CORE_OPERATION_RULES + WORKFLOW_PROMPT + GUIDELINE_PROMPT + ADDITIONAL_NOTES
 
 
 SIMPLE_CODE_PROMPT = (

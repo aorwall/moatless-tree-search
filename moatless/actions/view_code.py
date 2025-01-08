@@ -88,6 +88,15 @@ class ViewCodeArgs(ActionArguments):
             if file.span_ids:
                 prompt += f"  Spans: {', '.join(file.span_ids)}\n"
         return prompt
+    
+
+    def short_summary(self) -> str:
+        param_strs = []
+        for file in self.files:
+            param_strs.append(f"path={file.file_path}")
+        param_str = ", ".join(param_strs)
+        return f"{self.name}({param_str})"
+
 
 
 class ViewCode(Action, IdentifyMixin):
@@ -245,7 +254,7 @@ class ViewCode(Action, IdentifyMixin):
                 summary = "The specified code spans has already been viewed in a previous action."
 
         if not added_new_spans:
-            properties["fail_reason"] = "no_spans_added"
+            properties["flags"] = ["no_spans_added"]
 
         return Observation(
             message=message,

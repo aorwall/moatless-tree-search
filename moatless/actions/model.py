@@ -57,6 +57,9 @@ class ActionArguments(StructuredOutput, ABC):
             [f"  {k}: {v}" for k, v in self.model_dump(exclude={"thoughts"}).items()]
         )
         return prompt
+    
+    def short_summary(self) -> str:
+        return f"{self.name}()"
 
     @model_validator(mode="before")
     @classmethod

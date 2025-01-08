@@ -196,6 +196,8 @@ class EvaluationRunner:
                             self.repository.get_evaluation_dir(evaluation.evaluation_name),
                             "evaluation_response.json"
                         )
+                        
+                        logger.info(f"Saving evaluation response to {evaluation_response_path}")
                         with open(evaluation_response_path, "w") as f:
                             json.dump(evaluation_response.model_dump(), f, indent=2, cls=DateTimeEncoder)
                         
