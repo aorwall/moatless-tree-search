@@ -136,7 +136,7 @@ def generate_report(dir: str):
 
     # Initialize repository early
     repository = get_repository()
-    evaluation = repository.load_evaluation(os.path.basename(dir))
+    evaluation = repository.load_evaluation(dir)
     if not evaluation:
         logger.error(f"Failed to load evaluation from {dir}")
         return
