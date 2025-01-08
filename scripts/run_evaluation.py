@@ -56,7 +56,7 @@ def setup_logging(evaluation_dir: str):
     error_file_handler.setLevel(logging.ERROR)
     logger.addHandler(error_file_handler)
 
-logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+logging.getLogger("LiteLLM").setLevel(logging.INFO)
 
 load_dotenv()
 
@@ -452,7 +452,7 @@ def add_new_instances(repository: EvaluationFileRepository, evaluation_name: str
 
 def main():
     parser = argparse.ArgumentParser(description="Run a model evaluation with progress monitoring")
-    
+
     # Model and basic settings
     parser.add_argument("--model", required=True, help="Model name (e.g., gemini/gemini-2.0-flash-exp)")
     parser.add_argument("--api-key", help="API key for the model")
