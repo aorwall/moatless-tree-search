@@ -20,7 +20,7 @@ class FinishArgs(ActionArguments):
     thoughts: str = Field(
         ..., description="Your reasoning about why the task is complete and verified with new tests."
     )
-    finish_reason: str = Field(..., description="Explanation of completion and new tests.")
+    finish_reason: str = Field(..., description="Explain why the task is complete and how it's verified with new tests.")
 
     class Config:
         title = "Finish"

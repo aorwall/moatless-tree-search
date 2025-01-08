@@ -75,7 +75,7 @@ WORKFLOW_PROMPT = """
   * **Tests Run Automatically:** Tests execute after code changes
 
 5. **Update Tests**
- * **Ensure Test Coverage:** You must update or add tests to verify changes
+ * **Ensure Test Coverage:** You must update or add tests to verify changes by using the code modification actions
  * **Tests Run Automatically:** Tests execute after test modifications
 
 6. **Iterate as Needed**
