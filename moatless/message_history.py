@@ -440,8 +440,13 @@ class MessageHistoryGenerator(BaseModel):
 
                         current_test_status = node.file_context.get_test_status()
                         if last_test_status is None or current_test_status != last_test_status:
+                            if node.file_context.has_test_patch():
+                                thoughts = "Run the updated tests to verify the changes."
+                            else:
+                                thoughts = "Before adding new test cases I run the existing tests to verify regressions."
+
                             run_tests_args = RunTestsArgs(
-                                thoughts=f"Run the tests to verify the changes.",
+                                thoughts=thoughts,
                                 test_files=list(node.file_context._test_files.keys())
                             )
 
