@@ -66,15 +66,29 @@ WORKFLOW_PROMPT = """
       * Specific line ranges you discovered from search results
       * Code referenced in error messages or test failures
   
-4. **Modify Code**
-  * **Apply Changes:**
+4. **Implement Changes**
+  * **Apply Implementation Changes:**
     * Use StringReplace for editing files (format: <path>, <old_str>, <new_str>)
+    * Use InsertLines for inserting lines into files (format: <path>, <insert_line>, <new_str>)
     * Use CreateFile for new files (format: <path>, <file_text>)
   * **Tests Run Automatically:** Tests execute after code changes
 
-5. **Update Tests**
- * **Ensure Test Coverage:** You must update or add tests to verify changes
- * **Tests Run Automatically:** Tests execute after test modifications
+5. **Write/Update Tests**
+ * **Test Coverage Requirements:**
+   * MUST write tests for all new functionality
+   * MUST update existing tests affected by changes
+   * Tests should cover:
+     - Happy path scenarios
+     - Edge cases
+     - Error conditions
+ * **Test Implementation:**
+   * Use StringReplace for modifying test files
+   * Use InsertLines for inserting lines into test files 
+   * Use CreateFile for new test files
+   * Follow project's testing patterns/frameworks
+ * **Test Verification:**
+   * Tests execute automatically after changes
+   * ALL tests must pass before proceeding
 
 6. **Iterate as Needed**
   * Continue the process until all changes are complete and verified
