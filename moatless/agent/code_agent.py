@@ -21,6 +21,7 @@ from moatless.actions.list_files import ListFiles
 from moatless.actions.reject import Reject
 from moatless.actions.run_tests import RunTests
 from moatless.actions.string_replace import StringReplace
+from moatless.actions.verified_finish import VerifiedFinish
 from moatless.agent.agent import ActionAgent
 from moatless.agent.code_prompts import (
     CLAUDE_REACT_PROMPT,
@@ -200,7 +201,7 @@ def create_edit_code_actions(
     ]
 
     actions.extend(edit_actions)
-    actions.extend([Finish(), Reject()])
+    actions.extend([VerifiedFinish(), Reject()])
     return actions
 
 def create_claude_coding_actions(
