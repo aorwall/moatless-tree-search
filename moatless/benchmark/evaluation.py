@@ -387,7 +387,7 @@ class Evaluation:
                 f"Running evaluation for {len(instances)} instances filtered by repos"
             )
 
-        if ignore_repos:
+        if ignore_reposc:
             instances = [
                 instance
                 for instance in instances

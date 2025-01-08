@@ -2,6 +2,8 @@ import json
 import logging
 from typing import List, Type
 
+from openai import base_url
+
 from moatless.actions import (
     FindClass,
     FindFunction,
@@ -65,11 +67,25 @@ class CodingAgent(ActionAgent):
             else:
                 message_history_type = MessageHistoryType.REACT
 
+        action_completion_format = completion_model.response_format
+        if action_completion_format != LLMResponseFormat.TOOLS:
+            logger.info("Default to JSON as Response format for action completion model")
+            action_completion_format = LLMResponseFormat.JSON
+
+        action_completion_model = CompletionModel(
+            model=completion_model.model,
+            temperature=completion_model.temperature,
+            model_base_url=completion_model.model_base_url,
+            model_api_key=completion_model.model_api_key,
+            max_tokens=completion_model.max_tokens,
+            response_format=action_completion_format
+        )
+
         if completion_model.supports_anthropic_computer_use:
             actions = create_claude_coding_actions(
                 repository=repository,
                 code_index=code_index,
-                completion_model=completion_model,
+                completion_model=action_completion_model,
                 run_tests=bool(runtime)
             )
             system_prompt = CLAUDE_REACT_PROMPT
@@ -79,7 +95,7 @@ class CodingAgent(ActionAgent):
             actions = create_edit_code_actions(
                 repository=repository,
                 code_index=code_index,
-                completion_model=completion_model,
+                completion_model=action_completion_model,
             )
 
             if completion_model.response_format == LLMResponseFormat.REACT:
