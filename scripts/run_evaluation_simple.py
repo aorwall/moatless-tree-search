@@ -237,6 +237,12 @@ def print_config(config: dict, console_logger: logging.Logger):
         "Evaluation Settings": [
             ("Evaluation Name", "evaluation_name"),
             ("Rerun Errors", "rerun_errors"),
+        ],
+        "Environment Settings": [
+            ("Repository Dir", "REPO_DIR"),
+            ("Index Store Dir", "INDEX_STORE_DIR"),
+            ("Index Store URL", "INDEX_STORE_URL"),
+            ("Moatless Dir", "MOATLESS_DIR"),
         ]
     }
     
@@ -247,7 +253,11 @@ def print_config(config: dict, console_logger: logging.Logger):
         console_logger.info(f"\n{section}:")
         console_logger.info("-" * 50)
         for label, key in settings:
-            value = config.get(key)
+            if section == "Environment Settings":
+                value = os.getenv(key)
+            else:
+                value = config.get(key)
+            
             if value is not None:
                 if isinstance(value, list) and len(value) > 3:
                     value = f"{value[:3]} ... ({len(value)} items)"
