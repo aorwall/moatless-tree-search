@@ -57,6 +57,9 @@ class CompletionModel(BaseModel):
     max_tokens: int = Field(
         2000, description="The maximum number of tokens to generate"
     )
+    timeout: float = Field(
+        60.0, description="The timeout in seconds for completion requests"
+    )
     model_base_url: Optional[str] = Field(
         default=None, description="The base URL for the model API"
     )
@@ -259,6 +262,7 @@ class CompletionModel(BaseModel):
                     tool_choice="required",
                     messages=messages,
                     metadata=self.metadata or {},
+                    timeout=self.timeout
                 )
 
                 if not llm_completion_response or not llm_completion_response.choices:
@@ -435,6 +439,7 @@ Make sure to return an instance of the JSON, not the schema itself.""")
                     messages=messages,
                     response_format={"type": "json_object"},
                     metadata=self.metadata or {},
+                    timeout=self.timeout
                 )
 
                 if not completion_response or not completion_response.choices:
@@ -670,6 +675,7 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
             "temperature": self.temperature,
             "messages": messages,
             "metadata": self.metadata or {},  # Always pass at least an empty dict
+            "timeout": self.timeout
         }
 
         if self.model_base_url:
@@ -769,6 +775,7 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                     model=self.model,
                     max_tokens=self.max_tokens,
                     temperature=self.temperature,
+                    timeout=Timeout(self.timeout),
                     system=[system_message],
                     tools=tools,
                     messages=anthropic_messages,
