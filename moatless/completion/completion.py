@@ -1,9 +1,11 @@
 import json
 import logging
+import litellm
 import os
 from enum import Enum
 from textwrap import dedent
 from typing import Optional, Union, List, Tuple, Any
+import tenacity
 
 from pydantic import BaseModel, Field, model_validator, ValidationError
 
@@ -202,7 +204,6 @@ class CompletionModel(BaseModel):
     ) -> CompletionResponse:
         # Import litellm-related modules here
         import litellm
-        import tenacity
         from litellm.exceptions import (
             BadRequestError,
             NotFoundError,
@@ -514,15 +515,12 @@ Make sure to return an instance of the JSON, not the schema itself.""")
         actions: list[type[StructuredOutput]],
     ) -> CompletionResponse:
         # Import litellm-related modules here
-        import litellm
-        import tenacity
         from litellm.exceptions import (
             BadRequestError,
             NotFoundError,
             AuthenticationError,
             APIError,
         )
-        from litellm.types.utils import ModelResponse
 
         action_input_schemas = []
 
@@ -652,10 +650,6 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
             raise e.reraise()
 
     def _litellm_text_completion(self, messages: list[dict]) -> Tuple[str, 'ModelResponse']:
-        # Import litellm here
-        import litellm
-        from litellm.types.utils import ModelResponse
-
         litellm.drop_params = True
 
         completion_kwargs = {

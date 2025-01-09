@@ -26,11 +26,12 @@ from moatless.actions.string_replace import StringReplace
 from moatless.actions.verified_finish import VerifiedFinish
 from moatless.agent.agent import ActionAgent
 from moatless.agent.code_prompts import (
-    CLAUDE_REACT_PROMPT,
-    REACT_SYSTEM_PROMPT,
-    SYSTEM_PROMPT,
-    SIMPLE_CODE_PROMPT,
-    SYSTEM_REACT_TOOL_PROMPT,
+    AGENT_ROLE,
+    REACT_GUIDELINES,
+    REACT_CORE_OPERATION_RULES,
+    GUIDELINE_PROMPT,
+    ADDITIONAL_NOTES,
+    generate_workflow_prompt,
 )
 from moatless.completion.completion import (
     LLMResponseFormat,
@@ -88,7 +89,6 @@ class CodingAgent(ActionAgent):
                 completion_model=action_completion_model,
                 run_tests=bool(runtime)
             )
-            system_prompt = CLAUDE_REACT_PROMPT
             action_type = "Claude actions with computer use capability"
             use_few_shots = False
         else:
@@ -97,14 +97,21 @@ class CodingAgent(ActionAgent):
                 code_index=code_index,
                 completion_model=action_completion_model,
             )
-
-            if completion_model.response_format == LLMResponseFormat.REACT:
-                system_prompt = REACT_SYSTEM_PROMPT
-            else:
-                system_prompt = SYSTEM_REACT_TOOL_PROMPT
-
             action_type = "standard edit code actions"
             use_few_shots = True
+
+        # Generate workflow prompt based on available actions
+        workflow_prompt = generate_workflow_prompt(actions)
+
+        # Compose system prompt based on model type and format
+        system_prompt = AGENT_ROLE
+        if completion_model.response_format == LLMResponseFormat.REACT:
+            system_prompt += REACT_CORE_OPERATION_RULES
+        elif completion_model.response_format == LLMResponseFormat.TOOLS:
+            system_prompt += REACT_GUIDELINES
+
+        # Add workflow and guidelines
+        system_prompt += workflow_prompt + GUIDELINE_PROMPT + ADDITIONAL_NOTES
 
         message_generator = MessageHistoryGenerator(
             message_history_type=message_history_type,
@@ -210,7 +217,7 @@ def create_edit_code_actions(
 
     edit_actions = [
         StringReplace(repository=repository, code_index=code_index),
-        InsertLine(repository=repository,  code_index=code_index),
+        # InsertLine(repository=repository,  code_index=code_index),
         CreateFile(repository=repository, code_index=code_index),
         AppendString(repository=repository, code_index=code_index),
         RunTests(repository=repository, code_index=code_index),

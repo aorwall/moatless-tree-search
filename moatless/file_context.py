@@ -1107,7 +1107,7 @@ class FileContext(BaseModel):
             self._files[file_path].show_all_spans = context_file.show_all_spans
 
     def has_file(self, file_path: str):
-        return file_path in self._files and self._files[file_path].spans
+        return file_path in self._files and (self._files[file_path].spans or self._files[file_path].show_all_spans)
 
     def get_file(self, file_path: str) -> Optional[ContextFile]:
         return self.get_context_file(file_path)

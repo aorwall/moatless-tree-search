@@ -201,7 +201,7 @@ class EvaluationRunner:
                         with open(evaluation_response_path, "w") as f:
                             json.dump(evaluation_response.model_dump(), f, indent=2, cls=DateTimeEncoder)
                         
-                        self.emit_event(evaluation.evaluation_name, "instance_completed", result)
+                        self.emit_event(evaluation.evaluation_name, "instance_completed", result.model_dump())
                         # Save evaluation state after each instance
                         self.repository.save_evaluation(evaluation)
                 except Exception:
@@ -502,12 +502,13 @@ class EvaluationRunner:
         )
 
         def tree_event_handler(event):
-
+            logger.info(f"Got event {event['event_type']}")
             if event["event_type"] == "tree_iteration":
                 instance.usage = search_tree.total_usage()
                 instance.iterations = len(search_tree.root.get_all_nodes())
                 self.repository.save_instance(evaluation_name, instance)
 
+                logger.info("Emit event tree_progress")
                 self.emit_event(evaluation_name, "tree_progress", {
                     "instance_id": instance_id,
                 })

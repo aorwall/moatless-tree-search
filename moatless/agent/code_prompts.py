@@ -47,7 +47,39 @@ REACT_CORE_OPERATION_RULES = """
    - Any risks to watch for
   """
 
-WORKFLOW_PROMPT = """
+def generate_workflow_prompt(actions) -> str:
+    """Generate the workflow prompt based on available actions."""
+    search_actions = []
+    modify_actions = []
+    other_actions = []
+
+    # Define search action descriptions
+    search_descriptions = {
+        'FindClass': 'Search for class definitions by class name',
+        'FindFunction': 'Search for function definitions by function name',
+        'FindCodeSnippet': 'Search for specific code patterns or text',
+        'SemanticSearch': 'Search code by semantic meaning and natural language description'
+    }
+
+    # Define modify action descriptions
+    modify_descriptions = {
+        'StringReplace': 'Replace exact text strings in files with new content',
+        'CreateFile': 'Create new files with specified content',
+        'InsertLine': 'Insert new lines at specific positions in files',
+        'AppendString': 'Add content to the end of files',
+        'ClaudeEditTool': 'Make complex code edits using natural language instructions'
+    }
+
+    for action in actions:
+        action_name = action.__class__.__name__
+        if action_name in search_descriptions:
+            search_actions.append((action_name, search_descriptions[action_name]))
+        elif action_name in modify_descriptions:
+            modify_actions.append((action_name, modify_descriptions[action_name]))
+        elif action_name not in ['Finish', 'Reject', 'RunTests', 'ListFiles']:
+            other_actions.append(action_name)
+
+    prompt = """
 # Workflow Overview
 
 1. **Understand the Task**
@@ -55,35 +87,56 @@ WORKFLOW_PROMPT = """
   * **Identify Code to Change:** Analyze the task to determine which parts of the codebase need to be changed.
   * **Identify Necessary Context:** Determine what additional parts of the codebase are needed to understand how to implement the changes. Consider dependencies, related components, and any code that interacts with the affected areas.
 
-2. **Locate Code**
-  * **Primary Method - Search Functions:** Use these to find relevant code:
-      * FindClass - Returns class definitions
-      * FindFunction - Returns function definitions
-      * FindCodeSnippet - Returns code matching search terms
-      * SemanticSearch - Returns semantically relevant code
+2. **Locate Code**"""
+
+    if search_actions:
+        prompt += """
+  * **Primary Method - Search Functions:** Use these to find relevant code:"""
+        for action_name, description in search_actions:
+            prompt += f"\n      * {action_name} - {description}"
+
+    if 'ViewCode' in [a.__class__.__name__ for a in actions]:
+        prompt += """
   * **Secondary Method - ViewCode:** Only use when you need to see:
       * Additional context not returned by searches
       * Specific line ranges you discovered from search results
-      * Code referenced in error messages or test failures
+      * Code referenced in error messages or test failures"""
+
+    if modify_actions:
+        prompt += """
   
 4. **Modify Code**
-  * **Apply Changes:**
-    * Use StringReplace for editing files (format: <path>, <old_str>, <new_str>)
-    * Use CreateFile for new files (format: <path>, <file_text>)
-    * Use InsertLines for inserting lines into files (format: <path>, <insert_line>, <new_str>)
-    * Use AppendString for appending text to the end of a file (format: <path>, <new_str>)
+  * **Apply Changes:**"""
+        for action_name, description in modify_actions:
+            prompt += f"\n    * {action_name} - {description}"
+
+    prompt += """
   * **Tests Run Automatically:** Tests execute after code changes
 
-5. **Update Tests**
- * **Ensure Test Coverage:** You must update or add tests to verify changes by using the code modification actions
+5. **Locate Test Code**
+ * **Find Tests:** Use the same search and view code actions as step 2 to find:
+     * Existing test files and test functions
+     * Related test cases for modified components
+     * Test utilities and helper functions
+
+6. **Modify Tests**
+ * **Update Tests:** Use the code modification actions from step 4 to:
+     * Update existing tests to match code changes
+     * Add new test cases for added functionality
+     * Test edge cases, error conditions, and boundary values
+     * Verify error handling and invalid inputs
  * **Tests Run Automatically:** Tests execute after test modifications
 
-6. **Iterate as Needed**
+7. **Iterate as Needed**
   * Continue the process until all changes are complete and verified with new tests
 
-7. **Complete Task**
-  * Use Finish when confident all changes are correct and verified with new tests
+8. **Complete Task**
+  * Use Finish when confident all changes are correct and verified with new tests. Explain why the task is complete and how it's verified with new tests.
 """
+
+    return prompt
+
+WORKFLOW_PROMPT = None  # This will be set dynamically when creating the agent
 
 GUIDELINE_PROMPT = """
 # Important Guidelines
@@ -146,11 +199,11 @@ After each action, you will receive an Observation that contains the result of y
 """
 
 
-SYSTEM_PROMPT = AGENT_ROLE + WORKFLOW_PROMPT + GUIDELINE_PROMPT + ADDITIONAL_NOTES
+SYSTEM_PROMPT = AGENT_ROLE + "WORKFLOW_PROMPT" + GUIDELINE_PROMPT + ADDITIONAL_NOTES
 
-SYSTEM_REACT_TOOL_PROMPT = AGENT_ROLE + REACT_GUIDELINES + WORKFLOW_PROMPT + GUIDELINE_PROMPT + ADDITIONAL_NOTES
+SYSTEM_REACT_TOOL_PROMPT = AGENT_ROLE + REACT_GUIDELINES + "WORKFLOW_PROMPT" + GUIDELINE_PROMPT + ADDITIONAL_NOTES
 
-REACT_SYSTEM_PROMPT = AGENT_ROLE + REACT_CORE_OPERATION_RULES + WORKFLOW_PROMPT + GUIDELINE_PROMPT + ADDITIONAL_NOTES
+REACT_SYSTEM_PROMPT = AGENT_ROLE + REACT_CORE_OPERATION_RULES + "WORKFLOW_PROMPT" + GUIDELINE_PROMPT + ADDITIONAL_NOTES
 
 
 SIMPLE_CODE_PROMPT = (
@@ -240,14 +293,25 @@ You will interact with an AI agent with limited programming capabilities, so it'
  * **Provide Instructions and Pseudo Code:** Use the str_replace_editor tool to update the code. 
  * **Tests Run Automatically:** Tests will run automatically after each code change.
 
-5. **Modify or Add Tests**
- * **Ensure Test Coverage:** After code changes, use the str_replace_editor tool to update or add tests to verify the changes.
+5. **Locate Test Code**
+ * **Find Tests:** Use the same search and view code actions as step 2 to find:
+     * Existing test files and test functions
+     * Related test cases for modified components
+     * Test utilities and helper functions
 
-6. **Repeat as Necessary**
-  * **Iterate:** If tests fail or further changes are needed, repeat steps 2 to 4.
+6. **Modify Tests**
+ * **Update Tests:** Use the code modification actions from step 4 to:
+     * Update existing tests to match code changes
+     * Add new test cases for added functionality
+     * Test edge cases, error conditions, and boundary values
+     * Verify error handling and invalid inputs
+ * **Tests Run Automatically:** Tests execute after test modifications
 
-7: **Finish the Task**
-* **Completion:** When confident that all changes are correct and the task is resolved, use Finish.
+7. **Iterate as Needed**
+  * Continue the process until all changes are complete and verified with new tests
+
+8. **Complete Task**
+  * Use Finish when confident all changes are correct and verified with new tests. Explain why the task is complete and how it's verified with new tests.
 
 # Important Guidelines
 
@@ -329,10 +393,24 @@ You are expected to actively fix issues by making code changes. Do not just make
  * **Ensure Test Coverage:** Update or add tests to verify changes
  * **Tests Run Automatically:** Tests execute after test modifications
 
-5. **Iterate as Needed**
+5. **Locate Test Code**
+ * **Find Tests:** Use the same search and view code actions as step 2 to find:
+     * Existing test files and test functions
+     * Related test cases for modified components
+     * Test utilities and helper functions
+
+6. **Modify Tests**
+ * **Update Tests:** Use the code modification actions from step 4 to:
+     * Update existing tests to match code changes
+     * Add new test cases for added functionality
+     * Test edge cases, error conditions, and boundary values
+     * Verify error handling and invalid inputs
+ * **Tests Run Automatically:** Tests execute after test modifications
+
+7. **Iterate as Needed**
   * Continue the process until all changes are complete and verified
 
-6. **Complete Task**
+8. **Complete Task**
   * Use Finish when confident all changes are correct and verified
 
 # Important Guidelines

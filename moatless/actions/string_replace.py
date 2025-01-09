@@ -438,26 +438,32 @@ def validate_user(username, password):
                 ),
             ),
             FewShotExample.create(
-                user_input="Update test_validate_user to cover new password complexity requirements",
+                user_input="Add a new test case for password validation with special characters",
                 action=StringReplaceArgs(
-                    thoughts="Adding test cases to verify the new password complexity validation",
+                    thoughts="Adding a new test method for special character validation.",
                     path="tests/test_validator.py",
                     old_str="""def test_validate_user():
-    assert validate_user("bob", "password123") is True
-    assert validate_user("a", "short") is False
-    assert validate_user("alice", "pass") is False""",
+    # Test basic validation
+    assert validate_user("bob@example.com", "password123") is True
+    assert validate_user("alice@example.com", "short") is False
+    
+    # Test email format
+    assert validate_user("invalid-email", "password123") is False
+
+""",
                     new_str="""def test_validate_user():
-    # Test valid credentials with complex password
-    assert validate_user("bob@example.com", "Password123!@#") is True
+    # Test basic validation
+    assert validate_user("bob@example.com", "password123") is True
+    assert validate_user("alice@example.com", "short") is False
     
-    # Test invalid email format
-    assert validate_user("bob", "Password123!@#") is False
-    
-    # Test password complexity requirements
-    assert validate_user("alice@example.com", "password123") is False  # No uppercase or special chars
-    assert validate_user("alice@example.com", "Password123") is False  # No special chars
-    assert validate_user("alice@example.com", "Password!@#") is False  # No numbers
-    assert validate_user("alice@example.com", "pass") is False  # Too short""",
+    # Test email format
+    assert validate_user("invalid-email", "password123") is False
+
+def test_validate_password_special_chars():
+    # Test passwords with special characters
+    assert validate_user("bob@example.com", "Pass!@#123") is True
+    assert validate_user("alice@example.com", "NoSpecialChars123") is False
+    assert validate_user("carol@example.com", "!@#$%^&*(") is False  # No alphanumeric chars""",
                 ),
             ),
         ]

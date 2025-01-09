@@ -784,6 +784,7 @@ class SearchTree(BaseModel):
 
     def emit_event(self, event_type: str, data: dict):
         """Emit an event to all registered handlers."""
+        logger.info(f"Emit event {event_type}")
         for handler in self.event_handlers:
             handler({
                 "event_type": event_type,

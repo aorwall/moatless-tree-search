@@ -32,7 +32,7 @@ class CodeModificationMixin:
         return file_path
 
     def validate_file_access(
-        self, file_path: str, file_context: FileContext, allow_missing: bool = False
+        self, file_path: str, file_context: FileContext
     ) -> Tuple[Optional[Path], Optional[Observation]]:
         """
         Validate file access and return either a valid Path object or an error Observation.
@@ -40,31 +40,22 @@ class CodeModificationMixin:
         Args:
             file_path: The path to validate
             file_context: The file context
-            allow_missing: Whether to allow missing files (for file creation)
         Returns:
             Tuple of (Path object if valid, Error observation if invalid)
         """
         path = Path(file_path)
 
-        if not allow_missing and not file_context.file_exists(str(path)):
+        if not file_context.file_exists(str(path)):
             return None, Observation(
                 message=f"File {path} not found.",
                 properties={"fail_reason": "file_not_found"},
             )
-
-        if allow_missing and file_context.file_exists(str(path)):
+        
+        if not file_context.has_file(str(path)):
             return None, Observation(
-                message=f"File already exists at: {path}. Cannot overwrite existing file.",
-                properties={"fail_reason": "file_exists"},
+                message=f"You have not yet viewed the file {path}. Use ViewCode to view the parts of the file that you want to modify.",
+                properties={"fail_reason": "file_not_in_context"},
             )
-
-        if not allow_missing:
-            context_file = file_context.get_context_file(str(path))
-            if not context_file:
-                return None, Observation(
-                    message=f"Could not get context for file: {path}",
-                    properties={"fail_reason": "context_error"},
-                )
 
         return path, None
 
