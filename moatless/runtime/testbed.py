@@ -268,11 +268,11 @@ class TestbedEnvironment(RuntimeEnvironment):
             return None
 
         return block
-
     def _relevant_files_from_trace(
         self, trace_items: List[TraceItem]
     ) -> List[RankedFileSpan]:
         ranked_file_spans = []
+        seen_spans = set()
 
         for i, trace_item in enumerate(trace_items):
             block = self._get_code_block(trace_item.file_path, trace_item.line_number)
@@ -280,6 +280,11 @@ class TestbedEnvironment(RuntimeEnvironment):
             if not block:
                 continue
 
+            span_key = (trace_item.file_path, block.belongs_to_span.span_id)
+            if span_key in seen_spans:
+                continue
+
+            seen_spans.add(span_key)
             ranked_file_spans.append(
                 RankedFileSpan(
                     file_path=trace_item.file_path,

@@ -123,15 +123,18 @@ class ActionAgent(BaseModel):
             node.terminal = True
             node.error = traceback.format_exc()
 
-            if isinstance(e, CompletionRejectError):    
-                if e.last_completion:
-                    # TODO: Move mapping to completion.py
-                    node.completions["build_action"] = Completion.from_llm_completion(
-                        input_messages=e.messages,
-                        completion_response=e.last_completion,
-                        model=self.completion.model,
-                    )
-            
+            if hasattr(e, "messages") and e.messages:
+                last_completion = None
+                if hasattr(e, "last_completion") and e.last_completion:
+                    last_completion = e.last_completion
+
+                # TODO: Move mapping to completion.py
+                node.completions["build_action"] = Completion.from_llm_completion(
+                    input_messages=e.messages,
+                    completion_response=last_completion,
+                    model=self.completion.model,
+                )
+                logger.error(f"Node{node.node_id}: Build action failed with error: {e}")
                 return
             else:
                 raise e

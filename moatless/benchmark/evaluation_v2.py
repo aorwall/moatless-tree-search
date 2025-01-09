@@ -477,9 +477,11 @@ class EvaluationRunner:
                 dataset_name=self.dataset_name,
                 run_id=run_id,
             )
+        completion_model = evaluation_settings.agent_settings.completion_model.clone()
+        completion_model.metadata = { "instance_id": instance_id }
 
         agent = CodingAgent.create(
-            completion_model=evaluation_settings.agent_settings.completion_model,
+            completion_model=completion_model,
             repository=repository,
             code_index=code_index,
             runtime=runtime,

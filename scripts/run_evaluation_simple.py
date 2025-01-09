@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 import argparse
 from dotenv import load_dotenv
+import litellm
 
 from moatless.benchmark.evaluation_v2 import (
     EvaluationStatus, InstanceStatus, TreeSearchSettings, EvaluationRunner,
@@ -15,6 +16,7 @@ from moatless.benchmark.evaluation_v2 import (
 )
 from moatless.benchmark.repository import EvaluationFileRepository
 from moatless.completion.completion import CompletionModel, LLMResponseFormat
+from moatless.completion.log_handler import LogHandler
 from moatless.schema import MessageHistoryType
 from moatless.agent.settings import AgentSettings
 from moatless.benchmark.evaluation_factory import create_evaluation
@@ -25,11 +27,8 @@ from scripts.evaluation_config import get_config
 # Load environment variables
 load_dotenv()
 
-def setup_loggers(evaluation_name: str):
+def setup_loggers(logs_dir: str):
     """Setup console and file loggers"""
-    # Create logs directory
-    logs_dir = os.path.join("./evals", evaluation_name, "logs")
-    os.makedirs(logs_dir, exist_ok=True)
     
     # Setup console logger (only for this script)
     console_logger = logging.getLogger('scripts.run_evaluation_simple')
@@ -62,7 +61,8 @@ def setup_loggers(evaluation_name: str):
             logger = logging.getLogger(logger_name)
             logger.propagate = True  # Allow propagation to root logger for file logging
             logger.addHandler(logging.NullHandler())  # Prevent output to console
-    
+
+
     return console_logger, file_logger
 
 def load_dataset_split(dataset_name: str) -> Optional[EvaluationDatasetSplit]:
@@ -289,8 +289,18 @@ async def run_evaluation(config: dict):
             evaluation_name = f"{base_evaluation_name}_{counter}"
             counter += 1
     
+
+    evaluation_dir = os.path.join(os.getenv("MOATLESS_DIR", "./evals"), evaluation_name)
+    logs_dir = os.path.join(evaluation_dir, "logs")
+    os.makedirs(logs_dir, exist_ok=True)
+
     # Setup loggers
-    console_logger, file_logger = setup_loggers(evaluation_name)
+    console_logger, file_logger = setup_loggers(logs_dir)
+
+    prompt_log_dir = os.path.join(evaluation_dir, "prompt_logs")
+    os.makedirs(prompt_log_dir, exist_ok=True)
+    prompt_log_callback = LogHandler(log_dir=prompt_log_dir)
+    litellm.callbacks = [prompt_log_callback]
     
     # Print configuration
     print_config(config, console_logger)

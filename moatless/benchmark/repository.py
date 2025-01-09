@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, List, Dict
 from pathlib import Path
 
-from moatless.benchmark.schema import Evaluation, EvaluationInstance, DateTimeEncoder
+from moatless.benchmark.schema import Evaluation, EvaluationInstance, DateTimeEncoder, InstanceStatus
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +117,37 @@ class EvaluationFileRepository(EvaluationRepository):
         try:
             with open(instance_file) as f:
                 data = json.load(f)
-                return EvaluationInstance.model_validate(data)
+
+            instance = EvaluationInstance.model_validate(data)
+            
+            # Check instance_response.json for status
+            instance_response_file = os.path.join(self.get_instance_dir(evaluation_name, instance_id), "instance_response.json")
+            if os.path.exists(instance_response_file):
+                try:
+                    with open(instance_response_file) as f:
+                        response_data = json.load(f)
+                        from moatless_tools.schema import InstanceResponseDTO
+                        instance_response = InstanceResponseDTO.model_validate(response_data)
+                        if instance_response.status:
+                            try:
+                                # Map common status values to InstanceStatus enum
+                                status_map = {
+                                    "completed": InstanceStatus.COMPLETED,
+                                    "error": InstanceStatus.ERROR,
+                                    "failed": InstanceStatus.ERROR,
+                                    "pending": InstanceStatus.PENDING
+                                }
+                                new_status = status_map.get(instance_response.status.lower())
+                                if new_status != instance.status:
+                                    instance.status = new_status
+                                    logger.debug(f"Updated instance {instance_id} status to {new_status} from response")
+                                else:
+                                    logger.warning(f"Unknown status value in instance_response: {instance_response.status}")
+                            except Exception as e:
+                                logger.warning(f"Failed to map instance response status: {e}")
+                except Exception as e:
+                    logger.warning(f"Failed to load instance response for status update: {e}")
+            return instance
         except (json.JSONDecodeError, ValueError) as e:
             logger.error(f"Error loading instance state from {instance_file}: {e}")
             return None
