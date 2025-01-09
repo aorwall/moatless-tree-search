@@ -62,6 +62,9 @@ class CodingAgent(ActionAgent):
         **kwargs,
     ):
 
+        # Clone the completion model to ensure we have our own instance
+        completion_model = completion_model.clone()
+
         if message_history_type is None:
             if completion_model.response_format == LLMResponseFormat.TOOLS:
                 message_history_type = MessageHistoryType.MESSAGES
@@ -73,12 +76,8 @@ class CodingAgent(ActionAgent):
             logger.info("Default to JSON as Response format for action completion model")
             action_completion_format = LLMResponseFormat.JSON
 
-        action_completion_model = CompletionModel(
-            model=completion_model.model,
-            temperature=completion_model.temperature,
-            model_base_url=completion_model.model_base_url,
-            model_api_key=completion_model.model_api_key,
-            max_tokens=completion_model.max_tokens,
+        # Create action completion model by cloning the input model with JSON response format
+        action_completion_model = completion_model.clone(
             response_format=action_completion_format
         )
 

@@ -79,6 +79,18 @@ class CompletionModel(BaseModel):
         description="Whether to include thoughts in the action or in the message"
     )
 
+    def clone(self, **kwargs) -> 'CompletionModel':
+        """Create a copy of the completion model with optional parameter overrides.
+        
+        Args:
+            **kwargs: Parameters to override in the cloned model
+            
+        Returns:
+            A new CompletionModel instance with the specified overrides
+        """
+        model_data = self.model_dump()
+        model_data.update(kwargs)
+        return CompletionModel.model_validate(model_data)
 
     @model_validator(mode="after")
     def validate_response_format(self):
