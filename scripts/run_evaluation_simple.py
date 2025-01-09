@@ -21,11 +21,17 @@ from moatless.schema import MessageHistoryType
 from moatless.agent.settings import AgentSettings
 from moatless.benchmark.evaluation_factory import create_evaluation
 from moatless.benchmark.schema import EvaluationDatasetSplit, EvaluationInstance
-
-from scripts.evaluation_config import get_config
+import scripts.evaluation_config as eval_config
 
 # Load environment variables
 load_dotenv()
+
+# Automatically get all uppercase configs from evaluation_config
+CONFIG_MAP = {
+    name.lower().replace('_config', ''): getattr(eval_config, name)
+    for name in dir(eval_config)
+    if name.isupper() and name.endswith('_CONFIG') and isinstance(getattr(eval_config, name), dict)
+}
 
 def setup_loggers(logs_dir: str):
     """Setup console and file loggers"""
@@ -382,7 +388,7 @@ async def run_evaluation(config: dict):
 def parse_args():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(description='Run evaluation with specified configuration')
-    parser.add_argument('--config', choices=['default', 'deepseek_tool_call', 'deepseek_react', 'gpt4_tool_call'],
+    parser.add_argument('--config', choices=list(CONFIG_MAP.keys()),
                        default='default', help='Configuration preset to use')
     parser.add_argument('--split', help='Dataset split to use (overrides config)')
     parser.add_argument('--instance-ids', nargs='+', help='Specific instance IDs to evaluate (overrides split)')
@@ -397,21 +403,7 @@ def parse_args():
 
 def get_config_from_args(args):
     """Get configuration based on command line arguments"""
-    from scripts.evaluation_config import (
-        DEFAULT_CONFIG,
-        DEEPSEEK_TOOL_CALL_CONFIG,
-        DEEPSEEK_REACT_CONFIG,
-        GPT4_TOOL_CALL_CONFIG
-    )
-    
-    # Select base configuration
-    config_map = {
-        'default': DEFAULT_CONFIG,
-        'deepseek_tool_call': DEEPSEEK_TOOL_CALL_CONFIG,
-        'deepseek_react': DEEPSEEK_REACT_CONFIG,
-        'gpt4_tool_call': GPT4_TOOL_CALL_CONFIG
-    }
-    config = config_map[args.config].copy()
+    config = CONFIG_MAP[args.config].copy()
     
     # Override with command line arguments if provided
     if args.split:

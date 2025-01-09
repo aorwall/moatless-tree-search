@@ -211,6 +211,74 @@ class CompletionModel(BaseModel):
 
         raise RuntimeError("Shouldnt reach this point")
 
+    def _litellm_base_completion(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        tool_choice: str | None = None,
+        response_format: dict | None = None,
+    ) -> Any:
+        """Base method for making litellm completion calls with common parameters.
+        
+        Args:
+            messages: List of message dictionaries
+            tools: Optional list of tool definitions for function calling
+            tool_choice: Optional tool choice configuration
+            response_format: Optional response format configuration
+            
+        Returns:
+            The completion response from litellm
+        """
+        litellm.drop_params = True
+
+        @tenacity.retry(
+            stop=tenacity.stop_after_attempt(2),
+            wait=tenacity.wait_exponential(multiplier=3),
+            retry=tenacity.retry_if_exception_type(Exception),
+            reraise=True,
+            before_sleep=lambda retry_state: logger.warning(
+                f"Retrying litellm completion after error: {retry_state.outcome.exception()}"
+            )
+        )
+        def _do_completion():
+            return litellm.completion(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                messages=messages,
+                metadata=self.metadata or {},
+                timeout=self.timeout,
+                api_base=self.model_base_url,
+                api_key=self.model_api_key,
+                stop=self.stop_words,
+                tools=tools,
+                tool_choice=tool_choice,
+                response_format=response_format,
+            )
+            
+        try:
+            return _do_completion()
+        except tenacity.RetryError as e:
+            last_exception = e.last_attempt.exception()
+            if isinstance(last_exception, litellm.APIError):
+                logger.error(
+                    "LiteLLM API Error: %s\nProvider: %s\nModel: %s\nStatus: %d\nDebug Info: %s\nRetries: %d/%d",
+                    last_exception.message,
+                    last_exception.llm_provider,
+                    last_exception.model,
+                    last_exception.status_code,
+                    last_exception.litellm_debug_info,
+                    last_exception.num_retries or 0,
+                    last_exception.max_retries or 0,
+                )
+            else:
+                logger.warning(
+                    "LiteLLM completion failed after retries with error: %s",
+                    str(last_exception),
+                    exc_info=last_exception,
+                )
+            raise last_exception
+
     def _litellm_tool_completion(
             self,
             messages: list[dict],
@@ -226,12 +294,6 @@ class CompletionModel(BaseModel):
             APIError,
         )
         from litellm.types.utils import ModelResponse
-        # logger.info(f"system_prompt: {system_prompt}")
-        litellm.drop_params = True
-        messages.insert(0, {"role": "system", "content": system_prompt})
-
-        total_usage = Usage()
-        retry_count = 0
 
         if isinstance(response_model, list):
             tools = [r.openai_schema(thoughts_in_action=self.thoughts_in_action) for r in response_model]
@@ -239,6 +301,11 @@ class CompletionModel(BaseModel):
             tools = [response_model.openai_schema()]
         else:
             tools = None
+
+        total_usage = Usage()
+        retry_count = 0
+
+        messages.insert(0, {"role": "system", "content": system_prompt})
 
         retries = tenacity.Retrying(
             retry=tenacity.retry_if_not_exception_type(
@@ -251,18 +318,10 @@ class CompletionModel(BaseModel):
             nonlocal total_usage, retry_count
             llm_completion_response = None
             try:
-                llm_completion_response = litellm.completion(
-                    model=self.model,
-                    max_tokens=self.max_tokens,
-                    temperature=self.temperature,
-                    api_base=self.model_base_url,
-                    api_key=self.model_api_key,
-                    stop=self.stop_words,
-                    tools=tools,
-                    tool_choice="required",
+                llm_completion_response = self._litellm_base_completion(
                     messages=messages,
-                    metadata=self.metadata or {},
-                    timeout=self.timeout
+                    tools=tools,
+                    tool_choice="required"
                 )
 
                 if not llm_completion_response or not llm_completion_response.choices:
@@ -429,17 +488,9 @@ Make sure to return an instance of the JSON, not the schema itself.""")
             completion_response = None
 
             try:
-                completion_response = litellm.completion(
-                    model=self.model,
-                    max_tokens=self.max_tokens,
-                    temperature=self.temperature,
-                    api_base=self.model_base_url,
-                    api_key=self.model_api_key,
-                    stop=self.stop_words,
+                completion_response = self._litellm_base_completion(
                     messages=messages,
-                    response_format={"type": "json_object"},
-                    metadata=self.metadata or {},
-                    timeout=self.timeout
+                    response_format={"type": "json_object"}
                 )
 
                 if not completion_response or not completion_response.choices:
@@ -575,8 +626,6 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
             response_text, completion_response = self._litellm_text_completion(messages)
             total_usage += Usage.from_completion_response(completion_response, self.model)
 
-            logger.info(f"response_text: {response_text}")
-
             try:
                 self._validate_react_format(response_text)
 
@@ -667,25 +716,7 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
             raise e.reraise()
 
     def _litellm_text_completion(self, messages: list[dict]) -> Tuple[str, 'ModelResponse']:
-        litellm.drop_params = True
-
-        completion_kwargs = {
-            "model": self.model,
-            "max_tokens": self.max_tokens,
-            "temperature": self.temperature,
-            "messages": messages,
-            "metadata": self.metadata or {},  # Always pass at least an empty dict
-            "timeout": self.timeout
-        }
-
-        if self.model_base_url:
-            completion_kwargs["api_base"] = self.model_base_url
-        if self.model_api_key:
-            completion_kwargs["api_key"] = self.model_api_key
-        if self.stop_words:
-            completion_kwargs["stop"] = self.stop_words
-
-        completion_response = litellm.completion(**completion_kwargs)
+        completion_response = self._litellm_base_completion(messages=messages)
         return completion_response.choices[0].message.content, completion_response
 
     def _anthropic_completion(
@@ -775,7 +806,6 @@ Important: Do not include multiple Thought-Action blocks. Do not include code bl
                     model=self.model,
                     max_tokens=self.max_tokens,
                     temperature=self.temperature,
-                    timeout=Timeout(self.timeout),
                     system=[system_message],
                     tools=tools,
                     messages=anthropic_messages,

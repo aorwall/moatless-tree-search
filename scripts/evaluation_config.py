@@ -7,12 +7,8 @@ from moatless.schema import MessageHistoryType
 # Default evaluation settings
 DEFAULT_CONFIG = {
     # Model settings
-    "model": "deepseek/deepseek-chat",
-    "response_format": "react",
     "api_key": None,
     "base_url": None,
-    "thoughts_in_action": False,
-    "message_history": "react",
 
     # Dataset settings
     "split": "lite",  # choices: easy, lite, verified, lite_and_verified, lite_and_verified_solvable, small
@@ -52,10 +48,21 @@ DEEPSEEK_REACT_CONFIG = {
     "num_workers": 10
 }
 
-# Configuration for GPT-4 with tool_call format
-GPT4_TOOL_CALL_CONFIG = {
+# Configuration for GPT-4o-mini with tool_call format
+GPT4O_MINI_CONFIG = {
     **DEFAULT_CONFIG,
     "model": "azure/gpt-4o-mini",
+    "response_format": "tool_call",
+    "message_history": "messages",
+    "thoughts_in_action": True,
+    "split": "lite_and_verified_solvable",
+    "num_workers": 10
+}
+
+# Configuration for GPT-4o with tool_call format
+GPT4O_CONFIG = {
+    **DEFAULT_CONFIG,
+    "model": "azure/gpt-4o",
     "response_format": "tool_call",
     "message_history": "messages",
     "thoughts_in_action": True,
@@ -75,7 +82,7 @@ def get_single_instance_config(instance_id: str, base_config: dict = DEEPSEEK_TO
 
 # Example single instance configurations
 DJANGO_17051_DEEPSEEK = get_single_instance_config("django__django-17051", DEEPSEEK_REACT_CONFIG)
-DJANGO_17051_GPT4 = get_single_instance_config("django__django-17051", GPT4_TOOL_CALL_CONFIG)
+DJANGO_17051_GPT4 = get_single_instance_config("django__django-17051", GPT4O_MINI_CONFIG)
 
 # Active configuration - change this to switch between configs
 ACTIVE_CONFIG = DJANGO_17051_DEEPSEEK  # Change this to run different configurations
