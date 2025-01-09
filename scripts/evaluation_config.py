@@ -16,7 +16,7 @@ DEFAULT_CONFIG = {
 
     # Dataset settings
     "split": "lite",  # choices: easy, lite, verified, lite_and_verified, lite_and_verified_solvable, small
-    "instance_ids": ["django__django-16527"],  # Optional list of specific instance IDs
+    "instance_ids": None,  # Optional list of specific instance IDs
     
     # Tree search settings
     "max_iterations": 20,
