@@ -7,9 +7,11 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 import argparse
+from dotenv import load_dotenv
 
 from moatless.benchmark.evaluation_v2 import (
-    EvaluationStatus, InstanceStatus, TreeSearchSettings, EvaluationRunner
+    EvaluationStatus, InstanceStatus, TreeSearchSettings, EvaluationRunner,
+    create_evaluation_name
 )
 from moatless.benchmark.repository import EvaluationFileRepository
 from moatless.completion.completion import CompletionModel, LLMResponseFormat
@@ -19,6 +21,9 @@ from moatless.benchmark.evaluation_factory import create_evaluation
 from moatless.benchmark.schema import EvaluationDatasetSplit, EvaluationInstance
 
 from scripts.evaluation_config import get_config
+
+# Load environment variables
+load_dotenv()
 
 def setup_loggers(evaluation_name: str):
     """Setup console and file loggers"""
@@ -206,13 +211,79 @@ class SimpleEvaluationMonitor:
             self.console.info(line)
             self.logger.info(line)
 
+def print_config(config: dict, console_logger: logging.Logger):
+    """Print configuration details"""
+    config_sections = {
+        "Model Settings": [
+            ("Model", "model"),
+            ("Response Format", "response_format"),
+            ("Thoughts in Action", "thoughts_in_action"),
+            ("API Key", "api_key"),
+            ("Base URL", "base_url"),
+        ],
+        "Dataset Settings": [
+            ("Split", "split"),
+            ("Instance IDs", "instance_ids"),
+        ],
+        "Tree Search Settings": [
+            ("Max Iterations", "max_iterations"),
+            ("Max Expansions", "max_expansions"),
+            ("Max Cost", "max_cost"),
+        ],
+        "Runner Settings": [
+            ("Number of Workers", "num_workers"),
+            ("Message History", "message_history"),
+        ],
+        "Evaluation Settings": [
+            ("Evaluation Name", "evaluation_name"),
+            ("Rerun Errors", "rerun_errors"),
+        ]
+    }
+    
+    console_logger.info("\nConfiguration Settings:")
+    console_logger.info("=" * 50)
+    
+    for section, settings in config_sections.items():
+        console_logger.info(f"\n{section}:")
+        console_logger.info("-" * 50)
+        for label, key in settings:
+            value = config.get(key)
+            if value is not None:
+                if isinstance(value, list) and len(value) > 3:
+                    value = f"{value[:3]} ... ({len(value)} items)"
+                console_logger.info(f"{label:20}: {value}")
+    
+    console_logger.info("\n" + "=" * 50 + "\n")
+
 async def run_evaluation(config: dict):
     """Run evaluation using provided configuration"""
     # Create evaluation name
-    evaluation_name = config.get("evaluation_name") or f"simple_eval_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    if config.get("evaluation_name"):
+        evaluation_name = config["evaluation_name"]
+    else:
+        # Create evaluation name using the same logic as run_evaluation.py
+        evaluation_name = create_evaluation_name(
+            model=config["model"],
+            date=datetime.now().strftime("%Y%m%d"),
+            max_expansions=config["max_expansions"],
+            response_format=LLMResponseFormat(config["response_format"]) if config.get("response_format") else None,
+            message_history=MessageHistoryType(config["message_history"]) if config.get("message_history") else None,
+            thoughts_in_action=config.get("thoughts_in_action", False)
+        )
+
+        # Check for existing evaluation directory and modify name if needed
+        repository = EvaluationFileRepository(os.getenv("MOATLESS_DIR", "./evals"))
+        base_evaluation_name = evaluation_name
+        counter = 1
+        while os.path.exists(os.path.join(repository.evaluations_dir, evaluation_name)):
+            evaluation_name = f"{base_evaluation_name}_{counter}"
+            counter += 1
     
     # Setup loggers
     console_logger, file_logger = setup_loggers(evaluation_name)
+    
+    # Print configuration
+    print_config(config, console_logger)
     
     # Initialize repository
     repository = EvaluationFileRepository(os.getenv("MOATLESS_DIR", "./evals"))

@@ -23,7 +23,7 @@ DEFAULT_CONFIG = {
     "max_cost": 1.0,
     
     # Runner settings
-    "num_workers": 1,
+    "num_workers": 10,
     "message_history": None,  # MessageHistoryType value
     
     # Evaluation settings
