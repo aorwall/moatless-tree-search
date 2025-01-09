@@ -226,8 +226,7 @@ async def create_evaluation_endpoint(request: EvaluationRequest):
     base_evaluation_name = create_evaluation_name(
         model=request.model,
         max_expansions=request.max_expansions,
-        date=None,
-        temp_bias=0.0
+        date=None
     )
     
     # Check for existing evaluation directory and modify name if needed
@@ -285,6 +284,7 @@ async def start_evaluation(evaluation_name: str, request: StartEvaluationRequest
     
     # Create evaluation runner with repository
     runner = EvaluationRunner(
+        evaluation=evaluation,
         repository=repository,
         dataset_name="princeton-nlp/SWE-bench_Verified",
         repo_base_dir=os.getenv("REPO_DIR", "/tmp/repos"),
