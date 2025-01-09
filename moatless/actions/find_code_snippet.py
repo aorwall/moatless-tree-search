@@ -1,5 +1,6 @@
 import logging
 from typing import List, Optional, Tuple, Type, ClassVar
+import os
 
 from pydantic import Field, model_validator
 
@@ -69,14 +70,13 @@ class FindCodeSnippet(SearchBaseAction):
             search_text=args.code_snippet, file_pattern=args.file_pattern
         )
 
-        if args.file_pattern:
+        if args.file_pattern and len(matches) > 1:
             matches = [
                 (file_path, line_num) 
                 for file_path, line_num in matches 
                 if fnmatch(file_path, args.file_pattern)
             ]
 
-            
         search_result_context = FileContext(repo=self._repository)
         for file_path, start_line in matches[:self.max_hits]:
             num_lines = len(args.code_snippet.splitlines())
