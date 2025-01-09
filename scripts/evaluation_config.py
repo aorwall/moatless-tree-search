@@ -7,15 +7,16 @@ from moatless.schema import MessageHistoryType
 # Default evaluation settings
 DEFAULT_CONFIG = {
     # Model settings
-    "model": "gemini/gemini-2.0-flash-exp",
+    "model": "deepseek/deepseek-chat",
+    "response_format": "react",
     "api_key": None,
     "base_url": None,
-    "response_format": None,  # LLMResponseFormat value
     "thoughts_in_action": False,
-    
+    "message_history": "react",
+
     # Dataset settings
     "split": "lite",  # choices: easy, lite, verified, lite_and_verified, lite_and_verified_solvable, small
-    "instance_ids": None,  # Optional list of specific instance IDs
+    "instance_ids": ["django__django-16527"],  # Optional list of specific instance IDs
     
     # Tree search settings
     "max_iterations": 20,
@@ -24,8 +25,7 @@ DEFAULT_CONFIG = {
     
     # Runner settings
     "num_workers": 10,
-    "message_history": None,  # MessageHistoryType value
-    
+
     # Evaluation settings
     "evaluation_name": None,  # If None, will be auto-generated
     "rerun_errors": False
