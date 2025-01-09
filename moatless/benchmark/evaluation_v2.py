@@ -133,6 +133,35 @@ class EvaluationRunner:
         with self._repo_lock:
             return self.repository.load_instance(evaluation_name, instance_id)
 
+    def generate_and_save_evaluation_response(self, evaluation: Evaluation) -> None:
+        """Generate and save evaluation response based on current instances."""
+        # Load resolution rates once for all instances
+        resolution_rates = load_resolution_rates()
+        
+        # Get all completed instances
+        completed_instances = self.repository.list_instances(evaluation.evaluation_name)
+        instance_items = []
+        for inst in completed_instances:
+            if inst.benchmark_result:
+                # Create instance item for evaluation response
+                inst_item = create_instance_dto(
+                    result=inst.benchmark_result,
+                    resolution_rates=resolution_rates,
+                    splits=[]  # Add splits if needed
+                )
+                instance_items.append(inst_item)
+        
+        # Create evaluation response
+        evaluation_response = create_evaluation_response(evaluation, instance_items)
+        evaluation_response_path = os.path.join(
+            self.repository.get_evaluation_dir(evaluation.evaluation_name),
+            "evaluation_response.json"
+        )
+        
+        logger.info(f"Saving evaluation response to {evaluation_response_path}")
+        with open(evaluation_response_path, "w") as f:
+            json.dump(evaluation_response.model_dump(), f, indent=2, cls=DateTimeEncoder)
+
     def run_evaluation(self, evaluation: Evaluation | None = None, rerun_errors: bool = False):
         """Run the evaluation process."""
 
@@ -149,16 +178,14 @@ class EvaluationRunner:
         error = 0
 
         results = []
-        instance_items = []  # Keep track of instance items for evaluation response
         instances = self.repository.list_instances(evaluation.evaluation_name)
         logger.info(f"Processing {len(instances)} instances with {self.num_workers} workers. Rerun error {rerun_errors}")
 
-        # Load resolution rates once for all instances
-        resolution_rates = load_resolution_rates()
-
-        # If rerun_errors is True, reset error instances and remove their directories
         if rerun_errors:
             new_instances = []
+            restarted_instances = []  # Instances that will continue from modified tree
+            reset_instances = []      # Instances that will be fully reset
+            
             for instance in instances:
                 if instance.status == InstanceStatus.ERROR or instance.error:
                     logger.info(f"Rerun instance {instance.instance_id}")
@@ -186,40 +213,55 @@ class EvaluationRunner:
                             # Save updated trajectory
                             search_tree.persist(trajectory_path)
                             
-                            # Delete only instance.json
-                            instance_file = os.path.join(instance_dir, "instance.json")
-                            if os.path.exists(instance_file):
-                                os.remove(instance_file)
-                            
-                            # Create new instance
-                            new_instance = EvaluationInstance(instance_id=instance.instance_id)
-                            self._save_instance(evaluation.evaluation_name, new_instance)
-                            
-                            # Update instance reference
-                            instance = new_instance
+                            instance.status = InstanceStatus.PENDING
+                            self._save_instance(evaluation.evaluation_name, instance)
+                            restarted_instances.append(instance.instance_id)
+                            new_instances.append(instance)
+                            continue
 
-                    if not modified:
-                        logger.info(f"No modified nodes found for instance {instance.instance_id}")
-                        self.repository.delete_instance(evaluation.evaluation_name, instance.instance_id)
-                            
-                        if os.path.exists(instance_dir):
-                            shutil.rmtree(instance_dir)
+                    # If we reach here, either no trajectory or no modifications possible
+                    logger.info(f"No modified nodes found for instance {instance.instance_id}")
+                    self.repository.delete_instance(evaluation.evaluation_name, instance.instance_id)
                         
-                        new_instance = EvaluationInstance(instance_id=instance.instance_id)
-                        self._save_instance(evaluation.evaluation_name, new_instance)
-                        
-                        # Emit event for instance that will be rerun
-                        self.emit_event(evaluation.evaluation_name, "instance_rerun", {
-                            "instance_id": new_instance.instance_id
-                        })
+                    if os.path.exists(instance_dir):
+                        shutil.rmtree(instance_dir)
+                    
+                    new_instance = EvaluationInstance(instance_id=instance.instance_id)
+                    self._save_instance(evaluation.evaluation_name, new_instance)
+                    reset_instances.append(new_instance.instance_id)
+                    
+                    # Emit event for instance that will be rerun
+                    self.emit_event(evaluation.evaluation_name, "instance_rerun", {
+                        "instance_id": new_instance.instance_id
+                    })
 
                     new_instances.append(new_instance)
                 else:
                     new_instances.append(instance)
-                
-                instances = new_instances
 
-            self._save_evaluation(evaluation)
+            if restarted_instances or reset_instances:
+                print("\nThe following changes will be made:")
+                if restarted_instances:
+                    print(f"\n{len(restarted_instances)} instances will be restarted from last valid state:")
+                    for instance_id in restarted_instances:
+                        print(f"- {instance_id}")
+                
+                if reset_instances:
+                    print(f"\n{len(reset_instances)} instances will be fully reset:")
+                    for instance_id in reset_instances:
+                        print(f"- {instance_id}")
+                
+                response = input("\nDo you want to continue? [Y/n] ").strip().lower()
+                if response and response != 'y':
+                    logger.info("Rerun cancelled by user")
+                    return
+                
+                logger.info("Proceeding with rerun")
+                instances = new_instances
+                self._save_evaluation(evaluation)
+            else:
+                logger.info("No instances found to rerun")
+                return
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.num_workers) as executor:
             futures = [
@@ -233,29 +275,8 @@ class EvaluationRunner:
                     if result:
                         results.append(result)
                         
-                        # Update instance_items list with completed instance
-                        completed_instances = self.repository.list_instances(evaluation.evaluation_name)
-                        instance_items = []
-                        for inst in completed_instances:
-                            if inst.benchmark_result:
-                                # Create instance item for evaluation response
-                                inst_item = create_instance_dto(
-                                    result=inst.benchmark_result,
-                                    resolution_rates=resolution_rates,
-                                    splits=[]  # Add splits if needed
-                                )
-                                instance_items.append(inst_item)
-                        
-                        # Create and save evaluation response after each instance
-                        evaluation_response = create_evaluation_response(evaluation, instance_items)
-                        evaluation_response_path = os.path.join(
-                            self.repository.get_evaluation_dir(evaluation.evaluation_name),
-                            "evaluation_response.json"
-                        )
-                        
-                        logger.info(f"Saving evaluation response to {evaluation_response_path}")
-                        with open(evaluation_response_path, "w") as f:
-                            json.dump(evaluation_response.model_dump(), f, indent=2, cls=DateTimeEncoder)
+                        # Update evaluation response after each instance
+                        self.generate_and_save_evaluation_response(evaluation)
                         
                         self.emit_event(evaluation.evaluation_name, "instance_completed", result.model_dump())
                         # Save evaluation state after each instance
@@ -273,13 +294,7 @@ class EvaluationRunner:
         self._save_evaluation(evaluation)
         
         # Create final evaluation response
-        evaluation_response = create_evaluation_response(evaluation, instance_items)
-        evaluation_response_path = os.path.join(
-            self.repository.get_evaluation_dir(evaluation.evaluation_name),
-            "evaluation_response.json"
-        )
-        with open(evaluation_response_path, "w") as f:
-            json.dump(evaluation_response.model_dump(), f, indent=2, cls=DateTimeEncoder)
+        self.generate_and_save_evaluation_response(evaluation)
             
         self.emit_event(evaluation.evaluation_name, "evaluation_completed", {
             "total_instances": len(instances),
