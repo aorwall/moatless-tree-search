@@ -404,7 +404,7 @@ def to_result(
             best_node = search_tree.get_best_trajectory()
             if not best_node:
                 status = "pending"
-            elif best_node.action and best_node.action.name == "Error":
+            elif (best_node.action and best_node.action.name == "Error") or best_node.error:
                 status = "error"
             elif not best_node.file_context.generate_git_patch():
                 status = "no_patch"
