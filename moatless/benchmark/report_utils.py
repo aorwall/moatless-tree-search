@@ -64,6 +64,7 @@ def derive_instance_status(result: BenchmarkResult) -> str:
     """Derive instance status from a BenchmarkResult."""
     return (
         "resolved" if result.resolved is True else
+        "error" if result.status == "error" else
         "failed" if result.resolved is False and result.status == "completed" else 
         result.status
     )

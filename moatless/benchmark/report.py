@@ -352,8 +352,10 @@ def create_trajectory_stats(
     if trajectory_state.reward:
         result.reward = trajectory_state.reward.value
 
-    if trajectory_state.is_terminal():
-        if (trajectory_state.action and trajectory_state.action.name == "Error") or trajectory_state.error:
+    if trajectory_state.error:
+        result.status = "error"
+    elif trajectory_state.is_terminal():
+        if trajectory_state.action and trajectory_state.action.name == "Error":
             result.status = "error"
         elif trajectory_state.action and trajectory_state.action.name == "Finish":
             result.status = "finished"
