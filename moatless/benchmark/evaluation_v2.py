@@ -266,7 +266,6 @@ class EvaluationRunner:
                 self._save_evaluation(evaluation)
             else:
                 logger.info("No instances found to rerun")
-                return
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.num_workers) as executor:
             futures = [
