@@ -36,6 +36,8 @@ from moatless.benchmark.schema import (
     InstanceStatus,
     EvaluationEvent,
 )
+from moatless.exceptions import RuntimeError
+
 from moatless.benchmark.swebench import (
     create_repository,
     create_index,
@@ -367,6 +369,8 @@ class EvaluationRunner:
                         search_tree=search_tree,
                         eval_result=eval_result
                     )
+            except RuntimeError as e:
+                raise e
 
             except Exception as e:
                 eval_result["status"] = "error"

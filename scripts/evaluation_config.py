@@ -35,7 +35,7 @@ DEEPSEEK_TOOL_CALL_CONFIG = {
     "message_history": "messages_compact",
     "thoughts_in_action": True,
     "split": "lite_and_verified_solvable",
-    "num_workers": 10
+    "num_workers": 5
 }
 
 # Configuration for deepseek-chat with react format
@@ -45,7 +45,7 @@ DEEPSEEK_REACT_CONFIG = {
     "response_format": "react",
     "message_history": "react",
     "split": "lite_and_verified_solvable",
-    "num_workers": 10
+    "num_workers": 5
 }
 
 # Configuration for GPT-4o-mini with tool_call format

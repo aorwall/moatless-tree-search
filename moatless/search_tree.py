@@ -523,16 +523,16 @@ class SearchTree(BaseModel):
 
     def assert_runnable(self):
         if self.root is None:
-            raise ValueError("SearchTree must have a root node.")
+            raise RuntimeError("SearchTree must have a root node.")
 
         if self.root.file_context is None:
-            raise ValueError("SearchTree root node must have a file context.")
+            raise RuntimeError("SearchTree root node must have a file context.")
         
         if self.agent is None:
-            raise ValueError("SearchTree must have an agent.")
+            raise RuntimeError("SearchTree must have an agent.")
         
         if not self.agent.actions:
-            raise ValueError("SearchTree agent must have actions.")
+            raise RuntimeError("SearchTree agent must have actions.")
 
         # if self.root.file_context._repo is None:
         #    raise ValueError("SearchTree root node file context must have a repository.")
