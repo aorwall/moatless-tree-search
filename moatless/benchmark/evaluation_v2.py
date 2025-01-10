@@ -164,7 +164,7 @@ class EvaluationRunner:
         with open(evaluation_response_path, "w") as f:
             json.dump(evaluation_response.model_dump(), f, indent=2, cls=DateTimeEncoder)
 
-    def run_evaluation(self, evaluation: Evaluation | None = None, rerun_errors: bool = False):
+    def run_evaluation(self, evaluation: Evaluation | None = None, rerun_errors: bool = False, instance_ids: List[str] = []):
         """Run the evaluation process."""
 
         if not evaluation:
@@ -181,6 +181,9 @@ class EvaluationRunner:
 
         results = []
         instances = self.repository.list_instances(evaluation.evaluation_name)
+        if instance_ids:
+            instances = [instance for instance in instances if instance.instance_id in instance_ids]
+            
         logger.info(f"Processing {len(instances)} instances with {self.num_workers} workers. Rerun error {rerun_errors}")
 
         if rerun_errors:
