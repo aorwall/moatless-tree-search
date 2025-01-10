@@ -58,12 +58,12 @@ from moatless.value_function.coding import CodingValueFunction
 from moatless.benchmark.instance_collections import sampled_50_instances
 from moatless.agent.settings import AgentSettings
 from moatless.benchmark.repository import EvaluationRepository, EvaluationFileRepository
-from moatless.benchmark.report_utils import (
-    create_evaluation_response,
-    create_instance_dto,
-    create_instance_response,
-    load_resolution_rates,
-)
+#from moatless.benchmark.report_utils import (
+#    create_evaluation_response,
+#    create_instance_dto,
+#    create_instance_response,
+#    load_resolution_rates,
+#)
 
 # Custom JSON encoder for datetime objects
 class DateTimeEncoder(json.JSONEncoder):
@@ -138,31 +138,31 @@ class EvaluationRunner:
     def generate_and_save_evaluation_response(self, evaluation: Evaluation) -> None:
         """Generate and save evaluation response based on current instances."""
         # Load resolution rates once for all instances
-        resolution_rates = load_resolution_rates()
+        #resolution_rates = load_resolution_rates()
         
         # Get all completed instances
-        completed_instances = self.repository.list_instances(evaluation.evaluation_name)
-        instance_items = []
-        for inst in completed_instances:
-            if inst.benchmark_result:
-                # Create instance item for evaluation response
-                inst_item = create_instance_dto(
-                    result=inst.benchmark_result,
-                    resolution_rates=resolution_rates,
-                    splits=[]  # Add splits if needed
-                )
-                instance_items.append(inst_item)
+        #completed_instances = self.repository.list_instances(evaluation.evaluation_name)
+        #instance_items = []
+        #for inst in completed_instances:
+        #    if inst.benchmark_result:
+        #        # Create instance item for evaluation response
+        #        inst_item = create_instance_dto(
+        #            result=inst.benchmark_result,
+        #            resolution_rates=resolution_rates,
+        #            splits=[]  # Add splits if needed
+        #        )
+        #        instance_items.append(inst_item)
         
         # Create evaluation response
-        evaluation_response = create_evaluation_response(evaluation, instance_items)
-        evaluation_response_path = os.path.join(
-            self.repository.get_evaluation_dir(evaluation.evaluation_name),
-            "evaluation_response.json"
-        )
+        #evaluation_response = create_evaluation_response(evaluation, instance_items)
+        #evaluation_response_path = os.path.join(
+        #    self.repository.get_evaluation_dir(evaluation.evaluation_name),
+        #    "evaluation_response.json"
+        #)
         
-        logger.info(f"Saving evaluation response to {evaluation_response_path}")
-        with open(evaluation_response_path, "w") as f:
-            json.dump(evaluation_response.model_dump(), f, indent=2, cls=DateTimeEncoder)
+        #logger.info(f"Saving evaluation response to {evaluation_response_path}")
+        #with open(evaluation_response_path, "w") as f:
+        #    json.dump(evaluation_response.model_dump(), f, indent=2, cls=DateTimeEncoder)
 
     def run_evaluation(self, evaluation: Evaluation | None = None, rerun_errors: bool = False, instance_ids: List[str] = []):
         """Run the evaluation process."""
@@ -372,6 +372,7 @@ class EvaluationRunner:
 
             if instance.status == InstanceStatus.COMPLETED:
                 logger.info(f"Instance {instance_id} is already completed")
+                return instance.benchmark_result
                 search_tree = SearchTree.from_file(
                     trajectory_path,
                 )
@@ -417,25 +418,25 @@ class EvaluationRunner:
             })
 
             # Load resolution rates for instance response
-            resolution_rates = load_resolution_rates()
+            # resolution_rates = load_resolution_rates()
             
             # Get instance splits
-            splits = []  # You'll need to implement logic to get splits if needed
+            # splits = []  # You'll need to implement logic to get splits if needed
             
             # Create and save full instance response DTO
-            instance_response = create_instance_response(
-                search_tree=search_tree,
-                instance=moatless_instance,
-                eval_result=eval_result,
-                resolution_rates=resolution_rates,
-                splits=splits,
-                result=benchmark_result
-            )
+            #instance_response = create_instance_response(
+            #    search_tree=search_tree,
+            #    instance=moatless_instance,
+            #    eval_result=eval_result,
+            #    resolution_rates=resolution_rates,
+            #     splits=splits,
+            #    result=benchmark_result
+            #)
             
             # Save instance response
-            instance_response_path = os.path.join(instance_dir, "instance_response.json")
-            with open(instance_response_path, "w") as f:
-                json.dump(instance_response.model_dump(), f, indent=2, cls=DateTimeEncoder)
+            #instance_response_path = os.path.join(instance_dir, "instance_response.json")
+            #with open(instance_response_path, "w") as f:
+            #    json.dump(instance_response.model_dump(), f, indent=2, cls=DateTimeEncoder)
 
             return benchmark_result
     
@@ -565,54 +566,86 @@ class EvaluationRunner:
             "instance_id": instance.instance_id,
         }
 
-        repository = create_repository(
-            moatless_instance, repo_base_dir=self.repo_base_dir
-        )
-        code_index = create_index(moatless_instance, repository=repository)
-
-        runtime = None
-        if self.use_testbed:
-            from moatless.runtime.testbed import TestbedEnvironment
-            run_id = hashlib.sha256(evaluation_name.encode()).hexdigest()[:8]
-            runtime = TestbedEnvironment(
-                repository=repository,
-                instance=moatless_instance,
-                dataset_name=self.dataset_name,
-                run_id=run_id,
-            )
-
-        completion_model = evaluation_settings.agent_settings.completion_model.clone()
-        completion_model.metadata = {"instance_id": instance.instance_id}
-
-        agent = CodingAgent.create(
-            completion_model=completion_model,
-            repository=repository,
-            code_index=code_index,
-            runtime=runtime,
-            message_history_type=evaluation_settings.agent_settings.message_history_type,
-            thoughts_in_action=evaluation_settings.agent_settings.thoughts_in_action,
-        )
 
         search_tree = None
         if os.path.exists(trajectory_path):
             try:
                 persisted_tree = SearchTree.from_file(
                     trajectory_path,
-                    repository=repository,
-                    runtime=runtime,
-                    code_index=code_index,
                 )
                 if persisted_tree.is_finished():
                     logger.info(f"Found completed search tree for {instance.instance_id}")
                     return persisted_tree
                 else:
                     logger.info(f"Found unfinished search tree for {instance.instance_id}, will continue from existing state")
+
+                    repository = create_repository(
+                        moatless_instance, repo_base_dir=self.repo_base_dir
+                    )
+                    code_index = create_index(moatless_instance, repository=repository)
+
+                    runtime = None
+                    if self.use_testbed:
+                        from moatless.runtime.testbed import TestbedEnvironment
+                        run_id = hashlib.sha256(evaluation_name.encode()).hexdigest()[:8]
+                        runtime = TestbedEnvironment(
+                            repository=repository,
+                            instance=moatless_instance,
+                            dataset_name=self.dataset_name,
+                            run_id=run_id,
+                        )
+
+                    completion_model = evaluation_settings.agent_settings.completion_model.clone()
+                    completion_model.metadata = {"instance_id": instance.instance_id}
+
+                    agent = CodingAgent.create(
+                        completion_model=completion_model,
+                        repository=repository,
+                        code_index=code_index,
+                        runtime=runtime,
+                        message_history_type=evaluation_settings.agent_settings.message_history_type,
+                        thoughts_in_action=evaluation_settings.agent_settings.thoughts_in_action,
+                    )
+                    persisted_tree = SearchTree.from_file(
+                        trajectory_path,
+                        repository=repository,
+                        runtime=runtime,
+                        code_index=code_index,
+                    )
                     search_tree = persisted_tree
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse search tree from {trajectory_path}. Will remove file to start over. Error: {e}")
                 os.remove(trajectory_path)
 
         if not search_tree:
+
+            repository = create_repository(
+                moatless_instance, repo_base_dir=self.repo_base_dir
+            )
+            code_index = create_index(moatless_instance, repository=repository)
+
+            runtime = None
+            if self.use_testbed:
+                from moatless.runtime.testbed import TestbedEnvironment
+                run_id = hashlib.sha256(evaluation_name.encode()).hexdigest()[:8]
+                runtime = TestbedEnvironment(
+                    repository=repository,
+                    instance=moatless_instance,
+                    dataset_name=self.dataset_name,
+                    run_id=run_id,
+                )
+
+            completion_model = evaluation_settings.agent_settings.completion_model.clone()
+            completion_model.metadata = {"instance_id": instance.instance_id}
+
+            agent = CodingAgent.create(
+                completion_model=completion_model,
+                repository=repository,
+                code_index=code_index,
+                runtime=runtime,
+                message_history_type=evaluation_settings.agent_settings.message_history_type,
+                thoughts_in_action=evaluation_settings.agent_settings.thoughts_in_action,
+            )
             search_tree = SearchTree.create(
                 message=problem_statement,
                 repository=repository,
