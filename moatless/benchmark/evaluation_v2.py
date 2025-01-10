@@ -58,12 +58,6 @@ from moatless.value_function.coding import CodingValueFunction
 from moatless.benchmark.instance_collections import sampled_50_instances
 from moatless.agent.settings import AgentSettings
 from moatless.benchmark.repository import EvaluationRepository, EvaluationFileRepository
-#from moatless.benchmark.report_utils import (
-#    create_evaluation_response,
-#    create_instance_dto,
-#    create_instance_response,
-#    load_resolution_rates,
-#)
 
 # Custom JSON encoder for datetime objects
 class DateTimeEncoder(json.JSONEncoder):
@@ -92,6 +86,7 @@ class EvaluationRunner:
         repo_base_dir: Union[str, None] = None,
         num_workers: int = 1,
         use_testbed: bool = False,
+        rerun_errors: bool = True
     ):
         self._event_handlers: List[Callable[[EvaluationEvent], None]] = []
         self._event_lock = threading.Lock()  # Add lock for event handlers
@@ -102,6 +97,7 @@ class EvaluationRunner:
         self.repo_base_dir = repo_base_dir
         self.num_workers = num_workers
         self.use_testbed = use_testbed
+        self.rerun_errors = rerun_errors
 
     def add_event_handler(self, handler: Callable[[EvaluationEvent], None]):
         """Add an event handler to receive evaluation events"""
@@ -131,38 +127,7 @@ class EvaluationRunner:
             self.repository.save_instance(evaluation_name, instance)
 
     def _load_instance(self, evaluation_name: str, instance_id: str) -> Optional[EvaluationInstance]:
-        """Thread-safe wrapper for loading instance"""
-        with self._repo_lock:
-            return self.repository.load_instance(evaluation_name, instance_id)
-
-    def generate_and_save_evaluation_response(self, evaluation: Evaluation) -> None:
-        """Generate and save evaluation response based on current instances."""
-        # Load resolution rates once for all instances
-        #resolution_rates = load_resolution_rates()
-        
-        # Get all completed instances
-        #completed_instances = self.repository.list_instances(evaluation.evaluation_name)
-        #instance_items = []
-        #for inst in completed_instances:
-        #    if inst.benchmark_result:
-        #        # Create instance item for evaluation response
-        #        inst_item = create_instance_dto(
-        #            result=inst.benchmark_result,
-        #            resolution_rates=resolution_rates,
-        #            splits=[]  # Add splits if needed
-        #        )
-        #        instance_items.append(inst_item)
-        
-        # Create evaluation response
-        #evaluation_response = create_evaluation_response(evaluation, instance_items)
-        #evaluation_response_path = os.path.join(
-        #    self.repository.get_evaluation_dir(evaluation.evaluation_name),
-        #    "evaluation_response.json"
-        #)
-        
-        #logger.info(f"Saving evaluation response to {evaluation_response_path}")
-        #with open(evaluation_response_path, "w") as f:
-        #    json.dump(evaluation_response.model_dump(), f, indent=2, cls=DateTimeEncoder)
+        return self.repository.load_instance(evaluation_name, instance_id)
 
     def run_evaluation(self, evaluation: Evaluation | None = None, rerun_errors: bool = False, instance_ids: List[str] = []):
         """Run the evaluation process."""
@@ -180,126 +145,13 @@ class EvaluationRunner:
         error = 0
 
         results = []
-        instances = self.repository.list_instances(evaluation.evaluation_name)
-        if instance_ids:
-            instances = [instance for instance in instances if instance.instance_id in instance_ids]
-
-        logger.info(f"Processing {len(instances)} instances with {self.num_workers} workers. Rerun error {rerun_errors}")
-
-        if rerun_errors:
-            # First collect all changes that would be made
-            changes_to_make = []  # List of (instance, action, data) tuples
-            restarted_instances = []  # Instances that will continue from modified tree
-            reset_instances = []      # Instances that will be fully reset
-            
-            for instance in instances:
-                if instance.status == InstanceStatus.ERROR or instance.error:
-                    logger.info(f"Analyzing instance {instance.instance_id}")
-
-                    instance_dir = self.repository.get_instance_dir(evaluation.evaluation_name, instance.instance_id)
-                    trajectory_path = os.path.join(instance_dir, "trajectory.json")
-                    
-                    if os.path.exists(trajectory_path):
-                        search_tree = SearchTree.from_file(trajectory_path)
-                        leaf_nodes = search_tree.get_leaf_nodes()
-                        
-                        # Just check if there are error nodes that can be removed
-                        has_removable_errors = any(
-                            leaf_node.error and leaf_node.parent 
-                            for leaf_node in leaf_nodes
-                        )
-                        
-                        if has_removable_errors or instance.error:
-                            # Will restart this instance
-                            restarted_instances.append(instance.instance_id)
-                            changes_to_make.append(("restart", instance, {
-                                "search_tree": search_tree,
-                                "trajectory_path": trajectory_path,
-                                "has_removable_errors": has_removable_errors
-                            }))
-                            continue
-
-                    # If we reach here, instance needs full reset
-                    reset_instances.append(instance.instance_id)
-                    changes_to_make.append(("reset", instance, {
-                        "instance_dir": instance_dir
-                    }))
-
-            if restarted_instances or reset_instances:
-                print("\nThe following changes will be made:")
-                if restarted_instances:
-                    print(f"\n{len(restarted_instances)} instances will be restarted from last valid state:")
-                    for instance_id in restarted_instances:
-                        print(f"- {instance_id}")
-                
-                if reset_instances:
-                    print(f"\n{len(reset_instances)} instances will be fully reset:")
-                    for instance_id in reset_instances:
-                        print(f"- {instance_id}")
-                
-                response = input("\nDo you want to continue? [Y/n] ").strip().lower()
-                if response and response != 'y':
-                    logger.info("Rerun cancelled by user")
-                    return
-                
-                logger.info("Proceeding with rerun")
-                
-                # Now apply all the changes
-                new_instances = []
-                for instance in instances:
-                    if instance.status != InstanceStatus.ERROR and not instance.error:
-                        new_instances.append(instance)
-                        continue
-                        
-                    # Find and apply change for this instance
-                    change = next((c for c in changes_to_make if c[1].instance_id == instance.instance_id), None)
-                    if not change:
-                        new_instances.append(instance)
-                        continue
-                        
-                    action, _, data = change
-                    if action == "restart":
-                        search_tree = data["search_tree"]
-                        if data["has_removable_errors"]:
-                            # Now actually remove the error nodes
-                            leaf_nodes = search_tree.get_leaf_nodes()
-                            for leaf_node in leaf_nodes:
-                                if leaf_node.error and leaf_node.parent:
-                                    # Remove error node from parent's children
-                                    leaf_node.parent.children = [c for c in leaf_node.parent.children if c.node_id != leaf_node.node_id]
-                            
-                            # Save updated trajectory
-                            search_tree.persist(data["trajectory_path"])
-                        
-                        instance.status = InstanceStatus.PENDING
-                        instance.error = None
-                        self._save_instance(evaluation.evaluation_name, instance)
-                        new_instances.append(instance)
-                        
-                    elif action == "reset":
-                        self.repository.delete_instance(evaluation.evaluation_name, instance.instance_id)
-                        if os.path.exists(data["instance_dir"]):
-                            shutil.rmtree(data["instance_dir"])
-                        
-                        new_instance = EvaluationInstance(instance_id=instance.instance_id)
-                        self._save_instance(evaluation.evaluation_name, new_instance)
-                        
-                        # Emit event for instance that will be rerun
-                        self.emit_event(evaluation.evaluation_name, "instance_rerun", {
-                            "instance_id": new_instance.instance_id
-                        })
-                        new_instances.append(new_instance)
-                
-                instances = new_instances
-                self._save_evaluation(evaluation)
-            else:
-                logger.info("No instances found to rerun")
-                return
+        
+        logger.info(f"Processing {len(instance_ids)} instances with {self.num_workers} workers. Rerun error {rerun_errors}")
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.num_workers) as executor:
             futures = [
-                executor.submit(self.evaluate_instance, evaluation, instance.instance_id)
-                for instance in instances
+                executor.submit(self.evaluate_instance, evaluation, instance_id)
+                for instance_id in instance_ids
             ]
 
             for future in futures:
@@ -307,10 +159,6 @@ class EvaluationRunner:
                     result = future.result()
                     if result:
                         results.append(result)
-                        
-                        # Update evaluation response after each instance
-                        # self.generate_and_save_evaluation_response(evaluation)
-                        
                         self.emit_event(evaluation.evaluation_name, "instance_completed", result.model_dump())
                         # Save evaluation state after each instance
                         self._save_evaluation(evaluation)
@@ -370,22 +218,17 @@ class EvaluationRunner:
                 except json.JSONDecodeError:
                     pass
 
-            if instance.status == InstanceStatus.COMPLETED:
-                logger.info(f"Instance {instance_id} is already completed")
-                return instance.benchmark_result
-                search_tree = SearchTree.from_file(
-                    trajectory_path,
-                )
-            else:
+            
                 
-                search_tree = self.create_and_run_search_tree(
-                    problem_statement=problem_statement,
-                    evaluation_name=evaluation.evaluation_name,
-                    instance=instance,
-                    moatless_instance=moatless_instance,
-                    trajectory_path=trajectory_path,
-                    evaluation_settings=evaluation.settings,
-                )
+                
+            search_tree = self.create_and_run_search_tree(
+                problem_statement=problem_statement,
+                evaluation_name=evaluation.evaluation_name,
+                instance=instance,
+                moatless_instance=moatless_instance,
+                trajectory_path=trajectory_path,
+                evaluation_settings=evaluation.settings,
+            )
 
             try:
                 # Evaluate all leaf nodes if using testbed
@@ -416,28 +259,6 @@ class EvaluationRunner:
                 "resolved": instance.resolved,
                 "benchmark_result": benchmark_result.dict() if benchmark_result else None
             })
-
-            # Load resolution rates for instance response
-            # resolution_rates = load_resolution_rates()
-            
-            # Get instance splits
-            # splits = []  # You'll need to implement logic to get splits if needed
-            
-            # Create and save full instance response DTO
-            #instance_response = create_instance_response(
-            #    search_tree=search_tree,
-            #    instance=moatless_instance,
-            #    eval_result=eval_result,
-            #    resolution_rates=resolution_rates,
-            #     splits=splits,
-            #    result=benchmark_result
-            #)
-            
-            # Save instance response
-            #instance_response_path = os.path.join(instance_dir, "instance_response.json")
-            #with open(instance_response_path, "w") as f:
-            #    json.dump(instance_response.model_dump(), f, indent=2, cls=DateTimeEncoder)
-
             return benchmark_result
     
         except Exception as e:
@@ -497,6 +318,7 @@ class EvaluationRunner:
         repository = create_repository(
             instance, repo_base_dir=self.repo_base_dir
         )
+        # TODO: Set run_id on testbed environment
         run_id = hashlib.sha256(self.evaluation.evaluation_name.encode()).hexdigest()[:8]
         runtime = TestbedEnvironment(
             repository=repository,
@@ -544,13 +366,6 @@ class EvaluationRunner:
 
         return eval_result
 
-    def read_trajectory(self, path) -> dict | None:
-        if os.path.exists(path):
-            with open(path) as f:
-                return json.load(f)
-        else:
-            return None
-
     def create_and_run_search_tree(
         self,
         problem_statement: str,
@@ -566,75 +381,53 @@ class EvaluationRunner:
             "instance_id": instance.instance_id,
         }
 
-
         search_tree = None
+        rerun_tree = False
         if os.path.exists(trajectory_path):
             try:
                 persisted_tree = SearchTree.from_file(
                     trajectory_path,
                 )
-                if persisted_tree.is_finished():
+
+                if self.rerun_errors:
+                    leaf_nodes = persisted_tree.get_leaf_nodes()
+                    for leaf_node in leaf_nodes:
+                        if leaf_node.error:
+                            rerun_tree = True
+                            break
+                
+                if persisted_tree.is_finished() and not rerun_tree:
                     logger.info(f"Found completed search tree for {instance.instance_id}")
                     return persisted_tree
-                else:
-                    logger.info(f"Found unfinished search tree for {instance.instance_id}, will continue from existing state")
-
-                    repository = create_repository(
-                        moatless_instance, repo_base_dir=self.repo_base_dir
-                    )
-                    code_index = create_index(moatless_instance, repository=repository)
-
-                    runtime = None
-                    if self.use_testbed:
-                        from moatless.runtime.testbed import TestbedEnvironment
-                        run_id = hashlib.sha256(evaluation_name.encode()).hexdigest()[:8]
-                        runtime = TestbedEnvironment(
-                            repository=repository,
-                            instance=moatless_instance,
-                            dataset_name=self.dataset_name,
-                            run_id=run_id,
-                        )
-
-                    completion_model = evaluation_settings.agent_settings.completion_model.clone()
-                    completion_model.metadata = {"instance_id": instance.instance_id}
-
-                    agent = CodingAgent.create(
-                        completion_model=completion_model,
-                        repository=repository,
-                        code_index=code_index,
-                        runtime=runtime,
-                        message_history_type=evaluation_settings.agent_settings.message_history_type,
-                        thoughts_in_action=evaluation_settings.agent_settings.thoughts_in_action,
-                    )
-                    persisted_tree = SearchTree.from_file(
-                        trajectory_path,
-                        repository=repository,
-                        runtime=runtime,
-                        code_index=code_index,
-                    )
-                    search_tree = persisted_tree
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse search tree from {trajectory_path}. Will remove file to start over. Error: {e}")
                 os.remove(trajectory_path)
+                
+        repository = create_repository(
+            moatless_instance, repo_base_dir=self.repo_base_dir
+        )
+        code_index = create_index(moatless_instance, repository=repository)
 
-        if not search_tree:
-
-            repository = create_repository(
-                moatless_instance, repo_base_dir=self.repo_base_dir
+        runtime = None
+        if self.use_testbed:
+            from moatless.runtime.testbed import TestbedEnvironment
+            run_id = hashlib.sha256(evaluation_name.encode()).hexdigest()[:8]
+            runtime = TestbedEnvironment(
+                repository=repository,
+                instance=moatless_instance,
+                dataset_name=self.dataset_name,
+                run_id=run_id,
             )
-            code_index = create_index(moatless_instance, repository=repository)
 
-            runtime = None
-            if self.use_testbed:
-                from moatless.runtime.testbed import TestbedEnvironment
-                run_id = hashlib.sha256(evaluation_name.encode()).hexdigest()[:8]
-                runtime = TestbedEnvironment(
-                    repository=repository,
-                    instance=moatless_instance,
-                    dataset_name=self.dataset_name,
-                    run_id=run_id,
-                )
-
+        # Load search tree from file again and set repository, runtime and code index
+        if os.path.exists(trajectory_path):
+            search_tree = SearchTree.from_file(
+                trajectory_path,
+                repository=repository,
+                runtime=runtime,
+                code_index=code_index,
+            )
+        else:
             completion_model = evaluation_settings.agent_settings.completion_model.clone()
             completion_model.metadata = {"instance_id": instance.instance_id}
 
@@ -659,8 +452,14 @@ class EvaluationRunner:
                 persist_path=trajectory_path,
                 metadata=metadata
             )
-        else:
-            search_tree.agent = agent
+
+        if self.rerun_errors:
+            leaf_nodes = search_tree.get_leaf_nodes()
+            for leaf_node in leaf_nodes:
+                if leaf_node.error and leaf_node.parent:
+                    # Remove error node from parent's children
+                    leaf_node.parent.children = [c for c in leaf_node.parent.children if c.node_id != leaf_node.node_id]
+                    logger.info(f"Removed error node {leaf_node.node_id} from parent {leaf_node.parent.node_id} on instance {instance.instance_id}")
 
         def tree_event_handler(event):
             logger.info(f"Got event {event['event_type']}")
