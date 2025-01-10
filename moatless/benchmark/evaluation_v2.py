@@ -553,6 +553,18 @@ class EvaluationRunner:
                 run_id=run_id,
             )
 
+        completion_model = evaluation_settings.agent_settings.completion_model.clone()
+        completion_model.metadata = {"instance_id": instance.instance_id}
+
+        agent = CodingAgent.create(
+            completion_model=completion_model,
+            repository=repository,
+            code_index=code_index,
+            runtime=runtime,
+            message_history_type=evaluation_settings.agent_settings.message_history_type,
+            thoughts_in_action=evaluation_settings.agent_settings.thoughts_in_action,
+        )
+
         search_tree = None
         if os.path.exists(trajectory_path):
             try:
@@ -573,18 +585,6 @@ class EvaluationRunner:
                 os.remove(trajectory_path)
 
         if not search_tree:
-            completion_model = evaluation_settings.agent_settings.completion_model.clone()
-            completion_model.metadata = { "instance_id": instance.instance_id }
-
-            agent = CodingAgent.create(
-                completion_model=completion_model,
-                repository=repository,
-                code_index=code_index,
-                runtime=runtime,
-                message_history_type=evaluation_settings.agent_settings.message_history_type,
-                thoughts_in_action=evaluation_settings.agent_settings.thoughts_in_action,
-            )
-
             search_tree = SearchTree.create(
                 message=problem_statement,
                 repository=repository,
@@ -598,6 +598,8 @@ class EvaluationRunner:
                 persist_path=trajectory_path,
                 metadata=metadata
             )
+        else:
+            search_tree.agent = agent
 
         def tree_event_handler(event):
             logger.info(f"Got event {event['event_type']}")
