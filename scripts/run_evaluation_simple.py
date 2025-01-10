@@ -100,9 +100,9 @@ class SimpleEvaluationMonitor:
         self._log_settings()
         
         self.console.info(f"Starting evaluation: {evaluation.evaluation_name}")
-        self.console.info(f"Found {len(self.instances_data)} instances to evaluate")
+        self.console.info(f"Found {len(self.instances_data)} instances in evaluation")
         self.logger.info(f"[SimpleEvaluationMonitor] Starting evaluation: {evaluation.evaluation_name}")
-        self.logger.info(f"[SimpleEvaluationMonitor] Found {len(self.instances_data)} instances to evaluate")
+        self.logger.info(f"[SimpleEvaluationMonitor] Found {len(self.instances_data)} instances in evaluation")
 
     def _log_settings(self):
         """Log evaluation configuration and settings"""
@@ -380,7 +380,7 @@ async def run_evaluation(config: dict):
 
     try:
         # Run evaluation
-        await loop.run_in_executor(ThreadPoolExecutor(), lambda: runner.run_evaluation(rerun_errors=config.get("rerun_errors", False)))
+        await loop.run_in_executor(ThreadPoolExecutor(), lambda: runner.run_evaluation(rerun_errors=config.get("rerun_errors", False), instance_ids=instance_ids))
         # Log final summary
         monitor.log_final_summary()
     except Exception as e:
