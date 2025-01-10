@@ -138,7 +138,6 @@ class SimpleEvaluationMonitor:
         data = event.data if event.data else {}
         
         instance_id = data.get("instance_id")
-        self.console.info(f"{event_type}: {data}")
         
         if event_type == "evaluation_started":
             self.console.info("Evaluation started")
@@ -167,11 +166,20 @@ class SimpleEvaluationMonitor:
                 error_msg = f"Error in instance {instance_id}: {instance.error}"
                 self.console.error(error_msg)
                 self.logger.error(error_msg)
-                # Abort on error if needed
-                sys.exit(1)
+            elif event_type == "tree_progress":
+                self.console.info(f"Tree progress: {instance_id}")
+                self.logger.info(f"Tree progress: {instance_id}")
+            else:
+                self.console.info(f"Unknown event: {event_type}: {data}")
+                self.logger.info(f"Unknown event: {event_type}: {data}")
+        else:
+            self.console.info(f"Unknown event: {event_type}: {data}")
+            self.logger.info(f"Unknown event: {event_type}: {data}")
 
     def _log_instance_summary(self, instance):
         """Log summary for a completed instance"""
+        cost = 0.0
+        tokens = 0
         if instance.usage:
             cost = instance.usage.completion_cost
             tokens = (
@@ -182,18 +190,35 @@ class SimpleEvaluationMonitor:
             self.total_cost += cost
             self.total_tokens += tokens
             
-            summary_lines = [
-                f"Instance {instance.instance_id} summary:",
-                f"  - Resolved: {instance.resolved}",
-                f"  - Duration: {instance.duration}s",
-                f"  - Iterations: {instance.iterations}",
-                f"  - Cost: ${cost:.2f}",
-                f"  - Tokens: {tokens:,}"
-            ]
-            
-            for line in summary_lines:
-                self.console.info(line)
-                self.logger.info(line)
+        summary = (
+            f"Instance {instance.instance_id} summary:\n"
+            f"  - Resolved: {instance.resolved}\n"
+            f"  - Duration: {instance.duration}s\n" 
+            f"  - Iterations: {instance.iterations}\n"
+            f"  - Cost: ${cost:.2f}\n"
+            f"  - Tokens: {tokens:,}"
+        )
+
+        self.console.info(summary)
+        self.logger.info(summary)
+
+        self.log_eval_summary()
+
+    def log_eval_summary(self):
+        """Log total instances, completed, errors and resolved instances"""
+        total = len(self.instances_data)
+        completed = sum(1 for i in self.instances_data.values() if i.status == InstanceStatus.COMPLETED)
+        errors = sum(1 for i in self.instances_data.values() if i.status == InstanceStatus.ERROR)
+        resolved = sum(1 for i in self.instances_data.values() if i.resolved is True)
+        summary = (
+            f"Evaluation progress summary:\n"
+            f"  - Total Instances: {total}\n"
+            f"  - Completed: {completed}\n"
+            f"  - Errors: {errors}\n"
+            f"  - Resolved: {resolved}"
+        )
+        self.console.info(summary)
+        self.logger.info(summary)
 
     def log_final_summary(self):
         """Log final evaluation summary"""
