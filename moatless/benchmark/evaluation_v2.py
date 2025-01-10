@@ -183,7 +183,7 @@ class EvaluationRunner:
         instances = self.repository.list_instances(evaluation.evaluation_name)
         if instance_ids:
             instances = [instance for instance in instances if instance.instance_id in instance_ids]
-            
+
         logger.info(f"Processing {len(instances)} instances with {self.num_workers} workers. Rerun error {rerun_errors}")
 
         if rerun_errors:
@@ -309,7 +309,7 @@ class EvaluationRunner:
                         results.append(result)
                         
                         # Update evaluation response after each instance
-                        self.generate_and_save_evaluation_response(evaluation)
+                        # self.generate_and_save_evaluation_response(evaluation)
                         
                         self.emit_event(evaluation.evaluation_name, "instance_completed", result.model_dump())
                         # Save evaluation state after each instance
@@ -327,7 +327,7 @@ class EvaluationRunner:
         self._save_evaluation(evaluation)
         
         # Create final evaluation response
-        self.generate_and_save_evaluation_response(evaluation)
+        # self.generate_and_save_evaluation_response(evaluation)
             
         self.emit_event(evaluation.evaluation_name, "evaluation_completed", {
             "total_instances": len(instances),
