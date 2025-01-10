@@ -254,6 +254,7 @@ class CompletionModel(BaseModel):
                 tools=tools,
                 tool_choice=tool_choice,
                 response_format=response_format,
+                request_timeout=self.timeout,
             )
             
         try:

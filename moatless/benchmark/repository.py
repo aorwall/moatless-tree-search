@@ -140,7 +140,7 @@ class EvaluationFileRepository(EvaluationRepository):
                                 new_status = status_map.get(instance_response.status.lower())
                                 if new_status != instance.status:
                                     instance.status = new_status
-                                    logger.debug(f"Updated instance {instance_id} status to {new_status} from response")
+                                    logger.info(f"Updated instance {instance_id} status to {new_status} from response")
                                 else:
                                     logger.warning(f"Unknown status value in instance_response: {instance_response.status}")
                             except Exception as e:

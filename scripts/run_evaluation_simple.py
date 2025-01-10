@@ -9,6 +9,7 @@ from typing import Optional
 import argparse
 from dotenv import load_dotenv
 import litellm
+from litellm import InMemoryCache
 
 from moatless.benchmark.evaluation_v2 import (
     EvaluationStatus, InstanceStatus, TreeSearchSettings, EvaluationRunner,
@@ -373,7 +374,10 @@ async def run_evaluation(config: dict):
     
     # Add event handler
     runner.add_event_handler(monitor.handle_event)
-    
+
+    # TODO: Just testing to disable cache...
+    litellm.in_memory_llm_clients_cache = InMemoryCache(max_size_in_memory=-1, default_ttl=-1)
+
     try:
         # Run evaluation
         await loop.run_in_executor(ThreadPoolExecutor(), lambda: runner.run_evaluation(rerun_errors=config.get("rerun_errors", False)))
