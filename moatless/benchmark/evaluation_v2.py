@@ -184,65 +184,43 @@ class EvaluationRunner:
         logger.info(f"Processing {len(instances)} instances with {self.num_workers} workers. Rerun error {rerun_errors}")
 
         if rerun_errors:
-            new_instances = []
+            # First collect all changes that would be made
+            changes_to_make = []  # List of (instance, action, data) tuples
             restarted_instances = []  # Instances that will continue from modified tree
             reset_instances = []      # Instances that will be fully reset
             
             for instance in instances:
                 if instance.status == InstanceStatus.ERROR or instance.error:
-                    logger.info(f"Rerun instance {instance.instance_id}")
+                    logger.info(f"Analyzing instance {instance.instance_id}")
 
                     instance_dir = self.repository.get_instance_dir(evaluation.evaluation_name, instance.instance_id)
-                    modified = False
                     trajectory_path = os.path.join(instance_dir, "trajectory.json")
                     
                     if os.path.exists(trajectory_path):
                         search_tree = SearchTree.from_file(trajectory_path)
-                        
                         leaf_nodes = search_tree.get_leaf_nodes()
-                                                
-                        # Check if any leaf node has an error
-                        for leaf_node in leaf_nodes:
-                            if leaf_node.error:
-                                # Get parent of error node
-                                parent = leaf_node.parent
-                                if parent:
-                                    # Remove error node from parent's children
-                                    parent.children = [c for c in parent.children if c.node_id != leaf_node.node_id]
-                                    modified = True
                         
-                        if modified:
-                            # Save updated trajectory
-                            search_tree.persist(trajectory_path)
-
-                        if modified or instance.error:
-                            
-                            instance.status = InstanceStatus.PENDING
-                            instance.error = None
-                            self._save_instance(evaluation.evaluation_name, instance)
+                        # Just check if there are error nodes that can be removed
+                        has_removable_errors = any(
+                            leaf_node.error and leaf_node.parent 
+                            for leaf_node in leaf_nodes
+                        )
+                        
+                        if has_removable_errors or instance.error:
+                            # Will restart this instance
                             restarted_instances.append(instance.instance_id)
-                            new_instances.append(instance)
+                            changes_to_make.append(("restart", instance, {
+                                "search_tree": search_tree,
+                                "trajectory_path": trajectory_path,
+                                "has_removable_errors": has_removable_errors
+                            }))
                             continue
 
-                    # If we reach here, either no trajectory or no modifications possible
-                    logger.info(f"No modified nodes found for instance {instance.instance_id}")
-                    self.repository.delete_instance(evaluation.evaluation_name, instance.instance_id)
-                        
-                    if os.path.exists(instance_dir):
-                        shutil.rmtree(instance_dir)
-                    
-                    new_instance = EvaluationInstance(instance_id=instance.instance_id)
-                    self._save_instance(evaluation.evaluation_name, new_instance)
-                    reset_instances.append(new_instance.instance_id)
-                    
-                    # Emit event for instance that will be rerun
-                    self.emit_event(evaluation.evaluation_name, "instance_rerun", {
-                        "instance_id": new_instance.instance_id
-                    })
-
-                    new_instances.append(new_instance)
-                else:
-                    new_instances.append(instance)
+                    # If we reach here, instance needs full reset
+                    reset_instances.append(instance.instance_id)
+                    changes_to_make.append(("reset", instance, {
+                        "instance_dir": instance_dir
+                    }))
 
             if restarted_instances or reset_instances:
                 print("\nThe following changes will be made:")
@@ -262,10 +240,58 @@ class EvaluationRunner:
                     return
                 
                 logger.info("Proceeding with rerun")
+                
+                # Now apply all the changes
+                new_instances = []
+                for instance in instances:
+                    if instance.status != InstanceStatus.ERROR and not instance.error:
+                        new_instances.append(instance)
+                        continue
+                        
+                    # Find and apply change for this instance
+                    change = next((c for c in changes_to_make if c[1].instance_id == instance.instance_id), None)
+                    if not change:
+                        new_instances.append(instance)
+                        continue
+                        
+                    action, _, data = change
+                    if action == "restart":
+                        search_tree = data["search_tree"]
+                        if data["has_removable_errors"]:
+                            # Now actually remove the error nodes
+                            leaf_nodes = search_tree.get_leaf_nodes()
+                            for leaf_node in leaf_nodes:
+                                if leaf_node.error and leaf_node.parent:
+                                    # Remove error node from parent's children
+                                    leaf_node.parent.children = [c for c in leaf_node.parent.children if c.node_id != leaf_node.node_id]
+                            
+                            # Save updated trajectory
+                            search_tree.persist(data["trajectory_path"])
+                        
+                        instance.status = InstanceStatus.PENDING
+                        instance.error = None
+                        self._save_instance(evaluation.evaluation_name, instance)
+                        new_instances.append(instance)
+                        
+                    elif action == "reset":
+                        self.repository.delete_instance(evaluation.evaluation_name, instance.instance_id)
+                        if os.path.exists(data["instance_dir"]):
+                            shutil.rmtree(data["instance_dir"])
+                        
+                        new_instance = EvaluationInstance(instance_id=instance.instance_id)
+                        self._save_instance(evaluation.evaluation_name, new_instance)
+                        
+                        # Emit event for instance that will be rerun
+                        self.emit_event(evaluation.evaluation_name, "instance_rerun", {
+                            "instance_id": new_instance.instance_id
+                        })
+                        new_instances.append(new_instance)
+                
                 instances = new_instances
                 self._save_evaluation(evaluation)
             else:
                 logger.info("No instances found to rerun")
+                return
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.num_workers) as executor:
             futures = [
