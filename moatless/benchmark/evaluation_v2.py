@@ -212,8 +212,11 @@ class EvaluationRunner:
                         if modified:
                             # Save updated trajectory
                             search_tree.persist(trajectory_path)
+
+                        if modified or instance.error:
                             
                             instance.status = InstanceStatus.PENDING
+                            instance.error = None
                             self._save_instance(evaluation.evaluation_name, instance)
                             restarted_instances.append(instance.instance_id)
                             new_instances.append(instance)

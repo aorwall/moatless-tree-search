@@ -307,7 +307,7 @@ class ActionAgent(BaseModel):
                     for action_data in obj.get("actions", [])
                 ]
             else:
-                logger.debug(f"No repository provided, skip initiating actions")
+                logger.info(f"No repository provided, skip initiating actions")
                 obj["actions"] = []
 
             if agent_class_path:
