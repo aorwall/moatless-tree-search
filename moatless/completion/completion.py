@@ -367,7 +367,10 @@ class CompletionModel(BaseModel):
                     if invalid_function_names:
                         available_actions = [r.name for r in response_model]
                         raise ValueError(f"Unknown functions {invalid_function_names}. Available functions: {available_actions}")
-
+                
+                if not content and not response_objects:
+                    raise ValueError("No tool call or content in message.")
+                
                 completion = Completion.from_llm_completion(
                     input_messages=messages,
                     completion_response=llm_completion_response,
@@ -379,7 +382,7 @@ class CompletionModel(BaseModel):
 
                 return CompletionResponse.create(text=content, output=response_objects, completion=completion)
 
-            except ValidationError as e:
+            except (ValidationError, ValueError) as e:
                 logger.warning(
                     f"Completion attempt failed with error: {e}. Will retry."
                 )
