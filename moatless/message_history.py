@@ -52,6 +52,10 @@ class MessageHistoryGenerator(BaseModel):
         default=False,
         description="Whether to include thoughts in the action or in the message"
     )
+    enable_index_in_tool_call: bool = Field(
+        default=True,
+        description="Whether to include index in the tool call"
+    )
 
     model_config = {
         "ser_json_timedelta": "iso8601",
@@ -178,6 +182,19 @@ class MessageHistoryGenerator(BaseModel):
             if not self.thoughts_in_action:
                 exclude = {"thoughts"}
                 # TODO: Add content to assistant message
+
+            tool_call = {
+                "id": tool_call_id,
+                
+                "type": "function",
+                "function": {
+                    "name": action.name,
+                    "arguments": action.model_dump_json(exclude=exclude),
+                },
+            }
+
+            if self.enable_index_in_tool_call:
+                tool_call["index"] = 0 # FIXME: Testing Deepseek compatiblity
 
             tool_calls.append({
                 "id": tool_call_id,
