@@ -122,9 +122,6 @@ def generate_report(dir: str):
     if os.path.exists(result_path):
         with open(result_path, "r") as f:
             external_result = json.load(f)
-    
-    if not external_result:
-        raise ValueError("External result not found")
 
     trajectories = get_trajectories(dir)
     print(f"Trajectories: {len(trajectories)}")
