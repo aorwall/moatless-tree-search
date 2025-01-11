@@ -394,7 +394,8 @@ async def run_evaluation(config: dict):
         evaluation=evaluation,
         dataset_name="princeton-nlp/SWE-bench_Lite",
         num_workers=config["num_workers"],
-        use_testbed=True
+        use_testbed=True,
+        rerun_errors=config.get("rerun_errors", False),
     )
     
     # Add event handler
@@ -405,7 +406,7 @@ async def run_evaluation(config: dict):
 
     try:
         # Run evaluation
-        await loop.run_in_executor(ThreadPoolExecutor(), lambda: runner.run_evaluation(rerun_errors=config.get("rerun_errors", False), instance_ids=instance_ids))
+        await loop.run_in_executor(ThreadPoolExecutor(), lambda: runner.run_evaluation(instance_ids=instance_ids))
         # Log final summary
         monitor.log_final_summary()
     except Exception as e:
