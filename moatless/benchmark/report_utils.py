@@ -1,6 +1,6 @@
 import os
 from typing import List, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from moatless.benchmark.report import BenchmarkResult
 from moatless.benchmark.repository import EvaluationFileRepository
 from moatless.file_context import FileContext
@@ -30,7 +30,7 @@ def load_resolution_rates() -> Dict[str, float]:
         }
 
 
-def create_evaluation_response(evaluation: "Evaluation", instance_items: List[InstanceItemDTO]) -> EvaluationResponseDTO:
+def create_evaluation_response(evaluation_name: str, instance_items: List[InstanceItemDTO], first_tree: Optional[SearchTree] = None) -> EvaluationResponseDTO:
     """Create EvaluationResponseDTO from evaluation and instance items."""
     # Calculate totals from instance items
     total_cost = sum(item.completionCost or 0 for item in instance_items)
@@ -39,18 +39,23 @@ def create_evaluation_response(evaluation: "Evaluation", instance_items: List[In
     cached_tokens = sum(item.cachedTokens or 0 for item in instance_items)
     total_tokens = prompt_tokens + completion_tokens + cached_tokens
 
+    # Create settings from first tree if available
+    settings = None
+    if first_tree:
+        settings = EvaluationSettingsDTO(
+            model=first_tree.agent._completion.model,
+            temperature=first_tree.agent._completion.temperature,
+            maxIterations=first_tree.max_iterations,
+            responseFormat=first_tree.agent._completion.response_format.value,
+            maxCost=first_tree.max_cost or 0.0
+        )
+
     return EvaluationResponseDTO(
-        name=evaluation.evaluation_name,
-        status=evaluation.status,
+        name=evaluation_name,
+        status="completed",
         isActive=False,
-        settings=EvaluationSettingsDTO(
-            model=evaluation.settings.model.model,
-            temperature=evaluation.settings.model.temperature,
-            maxIterations=evaluation.settings.max_iterations,
-            responseFormat=evaluation.settings.agent_settings.completion_model.response_format,
-            maxCost=evaluation.settings.max_cost,
-        ),
-        startedAt=evaluation.start_time if hasattr(evaluation, 'start_time') else None,
+        settings=settings,
+        startedAt=datetime.now(timezone.utc),
         totalCost=total_cost,
         promptTokens=prompt_tokens,
         completionTokens=completion_tokens,

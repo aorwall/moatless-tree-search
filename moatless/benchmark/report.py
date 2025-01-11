@@ -376,7 +376,6 @@ def to_result(
     search_tree: SearchTree,
     eval_report: dict | None = None,
     external_result: dict | None = None,
-    previous_result: dict | None = None,
 ) -> BenchmarkResult:
     info = search_tree.metadata
     instance = get_moatless_instance(info["instance_id"])
@@ -384,13 +383,6 @@ def to_result(
     if not eval_report:
         logger.info(f"No eval report for {info['instance_id']}")
         eval_report = {}
-
-    if previous_result:
-        previous_resolved = (
-            info.get("instance_id", "") in previous_result["resolved_ids"]
-        )
-    else:
-        previous_resolved = None
 
     try:
         resolved = None
@@ -431,7 +423,6 @@ def to_result(
             trajectories=[],
             status=status,
             resolved=resolved,
-            previous_resolved=previous_resolved,
             duration=info.get("duration", 0),
             total_cost=total_usage.completion_cost,
             prompt_tokens=total_usage.prompt_tokens,

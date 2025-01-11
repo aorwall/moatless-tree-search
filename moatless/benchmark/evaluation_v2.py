@@ -178,7 +178,7 @@ class EvaluationRunner:
         # self.generate_and_save_evaluation_response(evaluation)
             
         self.emit_event(evaluation.evaluation_name, "evaluation_completed", {
-            "total_instances": len(instances),
+            "total_instances": len(instance_ids),
             "errors": error
         })
 
@@ -389,7 +389,7 @@ class EvaluationRunner:
                 if self.rerun_errors:
                     leaf_nodes = persisted_tree.get_leaf_nodes()
                     for leaf_node in leaf_nodes:
-                        if leaf_node.error:
+                        if leaf_node.error or (leaf_node.action and leaf_node.action.name == "Error"):
                             rerun_tree = True
                             break
                 
@@ -424,6 +424,17 @@ class EvaluationRunner:
                 runtime=runtime,
                 code_index=code_index,
             )
+            completion_model = evaluation_settings.agent_settings.completion_model.clone()
+            completion_model.metadata = {"instance_id": instance.instance_id}
+
+            search_tree.agent = CodingAgent.create(
+                completion_model=completion_model,
+                repository=repository,
+                code_index=code_index,
+                runtime=runtime,
+                message_history_type=evaluation_settings.agent_settings.message_history_type,
+                thoughts_in_action=evaluation_settings.agent_settings.thoughts_in_action,
+            )
         else:
             completion_model = evaluation_settings.agent_settings.completion_model.clone()
             completion_model.metadata = {"instance_id": instance.instance_id}
@@ -453,7 +464,7 @@ class EvaluationRunner:
         if self.rerun_errors:
             leaf_nodes = search_tree.get_leaf_nodes()
             for leaf_node in leaf_nodes:
-                if leaf_node.error and leaf_node.parent:
+                if (leaf_node.error or (leaf_node.action and leaf_node.action.name == "Error")) and leaf_node.parent:
                     # Remove error node from parent's children
                     leaf_node.parent.children = [c for c in leaf_node.parent.children if c.node_id != leaf_node.node_id]
                     logger.info(f"Removed error node {leaf_node.node_id} from parent {leaf_node.parent.node_id} on instance {instance.instance_id}")
