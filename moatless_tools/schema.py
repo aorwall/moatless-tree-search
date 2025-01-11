@@ -12,8 +12,10 @@ class InstanceItemDTO(BaseModel):
     error: Optional[str] = None
     iterations: Optional[int] = None
     completionCost: Optional[float] = None
+    totalTokens: Optional[int] = None
     promptTokens: Optional[int] = None
     completionTokens: Optional[int] = None
+    cachedTokens: Optional[int] = None
     resolutionRate: Optional[float] = None
     flags: List[str] = []
     failedActions: int = 0
@@ -36,6 +38,8 @@ class EvaluationResponseDTO(BaseModel):
     totalCost: float
     promptTokens: int
     completionTokens: int
+    cachedTokens: int
+    totalTokens: int
     totalInstances: int
     completedInstances: int
     errorInstances: int
@@ -61,6 +65,8 @@ class EvaluationListItemDTO(BaseModel):
     totalCost: float = 0.0
     promptTokens: int = 0
     completionTokens: int = 0
+    cachedTokens: int = 0
+    totalTokens: int = 0
     resolvedByDollar: float = 0.0  # resolved instances per dollar spent
 
 class EvaluationListResponseDTO(BaseModel):
@@ -174,6 +180,8 @@ class InstanceResponseDTO(BaseModel):
     completionCost: Optional[float] = None
     promptTokens: Optional[int] = None
     completionTokens: Optional[int] = None
+    cachedTokens: Optional[int] = None
+    totalTokens: Optional[int] = None
     resolutionRate: Optional[float] = None
     splits: List[str] = []
     flags: List[str] = []

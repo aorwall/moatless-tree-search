@@ -36,7 +36,9 @@ def create_evaluation_response(evaluation: "Evaluation", instance_items: List[In
     total_cost = sum(item.completionCost or 0 for item in instance_items)
     prompt_tokens = sum(item.promptTokens or 0 for item in instance_items)
     completion_tokens = sum(item.completionTokens or 0 for item in instance_items)
-    
+    cached_tokens = sum(item.cachedTokens or 0 for item in instance_items)
+    total_tokens = prompt_tokens + completion_tokens + cached_tokens
+
     return EvaluationResponseDTO(
         name=evaluation.evaluation_name,
         status=evaluation.status,
@@ -52,6 +54,8 @@ def create_evaluation_response(evaluation: "Evaluation", instance_items: List[In
         totalCost=total_cost,
         promptTokens=prompt_tokens,
         completionTokens=completion_tokens,
+        cachedTokens=cached_tokens,
+        totalTokens=total_tokens,
         totalInstances=len(instance_items),
         completedInstances=sum(1 for i in instance_items if i.status == "completed"),
         errorInstances=sum(1 for i in instance_items if i.status == "error"),
@@ -85,7 +89,9 @@ def create_instance_dto(result: BenchmarkResult, resolution_rates: Dict[str, flo
         error=result.error if result.error else None,
         iterations=result.all_transitions,
         completionCost=result.total_cost,
-        promptTokens=result.prompt_tokens,
+        totalTokens=result.prompt_tokens + result.completion_tokens + result.cached_tokens,
+        promptTokens=result.prompt_tokens + result.cached_tokens,
+        cachedTokens=result.cached_tokens,
         completionTokens=result.completion_tokens,
         resolutionRate=resolution_rate,
         splits=splits or [],
@@ -241,12 +247,13 @@ def create_instance_response(
         evalResult=eval_result,
         status=status,
         duration=result.duration if result else None,
+        totalTokens=result.prompt_tokens + result.completion_tokens + result.cached_tokens if result else None,
+        promptTokens=result.prompt_tokens + result.cached_tokens if result else None,
+        cachedTokens=result.cached_tokens if result else None,
+        completionTokens=result.completion_tokens if result else None,
         resolved=result.resolved if result else None,
         error=result.error if result else None,
         iterations=result.all_transitions if result else None,
-        completionCost=result.total_cost if result else None,
-        promptTokens=result.prompt_tokens if result else None,
-        completionTokens=result.completion_tokens if result else None,
         resolutionRate=resolution_rates.get(instance_id) if resolution_rates else None,
         splits=splits or [],
         flags=result.flags if result else None

@@ -218,9 +218,6 @@ class EvaluationRunner:
                 except json.JSONDecodeError:
                     pass
 
-            
-                
-                
             search_tree = self.create_and_run_search_tree(
                 problem_statement=problem_statement,
                 evaluation_name=evaluation.evaluation_name,
