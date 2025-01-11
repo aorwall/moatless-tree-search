@@ -13,6 +13,7 @@ from moatless.benchmark.utils import get_moatless_instances
 from moatless.search_tree import SearchTree
 from moatless.benchmark.report_utils import create_evaluation_response, create_instance_dto, create_instance_response, load_resolution_rates
 from moatless.benchmark.repository import EvaluationFileRepository
+from moatless_tools.schema import EvaluationSettingsDTO, EvaluationResponseDTO, InstanceItemDTO
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -121,25 +122,15 @@ def generate_report(dir: str):
     if os.path.exists(result_path):
         with open(result_path, "r") as f:
             external_result = json.load(f)
-
-    previous_result_path = "/home/albert/repos/albert/moatless-tree-search/scripts/evaluations/results.json"
-    previous_results = None
-    if os.path.exists(previous_result_path):
-        with open(previous_result_path, "r") as f:
-            previous_results = json.load(f)
+    
+    if not external_result:
+        raise ValueError("External result not found")
 
     trajectories = get_trajectories(dir)
     print(f"Trajectories: {len(trajectories)}")
     if not trajectories:
         raise ValueError("No trajectories found")
     instances = get_moatless_instances()
-
-    # Initialize repository early
-    repository = get_repository()
-    evaluation = repository.load_evaluation(dir)
-    if not evaluation:
-        logger.error(f"Failed to load evaluation from {dir}")
-        return
 
     # Load resolution rates once
     resolution_rates = load_resolution_rates()
@@ -165,9 +156,9 @@ def generate_report(dir: str):
                     eval_report = json.load(f)
         except Exception as e:
             logger.exception(f"Failed to load eval report from {eval_result_file}. : {e}")
-
+        
         # Process trajectory and create result
-        result = to_result(trajectory, eval_report, external_result, previous_result=previous_results)
+        result = to_result(trajectory, eval_report, external_result)
         results.append(result)
 
         # Create instance DTO for list view
@@ -192,12 +183,6 @@ def generate_report(dir: str):
         with open(instance_response_path, "w") as f:
             json.dump(instance_response.model_dump(), f, indent=2, cls=DateTimeEncoder)
 
-        # Create and save partial evaluation response after each instance
-        partial_evaluation_response = create_evaluation_response(evaluation, instance_items)
-        
-        # Save current state of evaluation_response.json
-        with open(os.path.join(dir, "evaluation_response.json"), "w") as f:
-            json.dump(partial_evaluation_response.model_dump(), f, indent=2, cls=DateTimeEncoder)
 
         # Handle predictions if best node exists
         best_node = trajectory.get_best_trajectory()
@@ -210,6 +195,19 @@ def generate_report(dir: str):
             with open(predictions_path, "a") as file:
                 json_string = json.dumps(prediction)
                 file.write(json_string + "\n")
+
+    # Create and save partial evaluation response after each instance
+    evaluation_name = dir.split("/")[-1]
+    first_tree = trajectories[0][0] if trajectories else None
+    partial_evaluation_response = create_evaluation_response(
+        evaluation_name, 
+        instance_items,
+        first_tree=first_tree
+    )
+    
+    # Save current state of evaluation_response.json
+    with open(os.path.join(dir, "evaluation_response.json"), "w") as f:
+        json.dump(partial_evaluation_response.model_dump(), f, indent=2, cls=DateTimeEncoder)
 
     # Save the results as report.json
     report_path = os.path.join(dir, "report.json")
@@ -310,7 +308,6 @@ def generate_report(dir: str):
     # to json
     with open(os.path.join(dir, "report.json"), "w") as f:
         json.dump([result.model_dump() for result in results], f, indent=2)
-
 
 if __name__ == "__main__":
     import sys
