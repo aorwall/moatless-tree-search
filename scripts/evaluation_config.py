@@ -11,7 +11,7 @@ DEFAULT_CONFIG = {
     "base_url": None,
 
     # Dataset settings
-    "split": "lite",  # choices: easy, lite, verified, lite_and_verified, lite_and_verified_solvable, small
+    "split": "lite_and_verified_solvable",
     "instance_ids": None,  # Optional list of specific instance IDs
     
     # Tree search settings
@@ -38,6 +38,17 @@ DEEPSEEK_TOOL_CALL_CONFIG = {
     "num_workers": 5
 }
 
+# Configuration for deepseek-chat with tool_call format
+DEEPSEEK_TOOL_CALL_SUMMARY_CONFIG = {
+    **DEFAULT_CONFIG,
+    "model": "deepseek/deepseek-chat",
+    "response_format": "tool_call",
+    "message_history": "summary",
+    "thoughts_in_action": True,
+    "split": "lite_and_verified_solvable",
+    "num_workers": 5
+}
+
 # Configuration for deepseek-chat with react format
 DEEPSEEK_REACT_CONFIG = {
     **DEFAULT_CONFIG,
@@ -55,8 +66,6 @@ GPT4O_MINI_CONFIG = {
     "response_format": "tool_call",
     "message_history": "messages",
     "thoughts_in_action": True,
-    "split": "lite_and_verified_solvable",
-    "num_workers": 10
 }
 
 # Configuration for GPT-4o with tool_call format
@@ -66,10 +75,18 @@ GPT4O_CONFIG = {
     "response_format": "tool_call",
     "message_history": "messages",
     "thoughts_in_action": True,
-    "split": "lite_and_verified_solvable",
-    "num_workers": 10
+    "split": "lite_and_verified_solvable"
 }
 
+# Configuration for GPT-4o with tool_call format
+CLAUDE_35_SONNET_CONFIG = {
+    **DEFAULT_CONFIG,
+    "model": "claude-3-5-sonnet-20241022",
+    "response_format": "tool_call",
+    "message_history": "messages",
+    "thoughts_in_action": False,
+    "split": "lite_and_verified_solvable"
+}
 # Configuration for single instance runs
 def get_single_instance_config(instance_id: str, base_config: dict = DEEPSEEK_TOOL_CALL_CONFIG) -> dict:
     """Create a configuration for running a single instance"""
