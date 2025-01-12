@@ -1,6 +1,4 @@
 import collections
-from typing import List
-import collections
 import json
 import logging
 from typing import List
@@ -90,7 +88,8 @@ class MultiAgentDebate(BaseModel):
                 )
 
                 assistant_message = self.format_agent_message(
-                    completion_response.structured_output, completion_response.completion
+                    completion_response.structured_output,
+                    completion_response.completion,
                 )
                 agent_context.append(assistant_message)
 
@@ -182,7 +181,11 @@ class MultiAgentDebate(BaseModel):
             response_model=[output_format],
         )
 
-        return completion_response.structured_output, completion_response.completion, None
+        return (
+            completion_response.structured_output,
+            completion_response.completion,
+            None,
+        )
 
     def format_agent_message(self, action_request, completion):
         if action_request:

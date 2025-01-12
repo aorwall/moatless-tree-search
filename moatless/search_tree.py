@@ -1,8 +1,8 @@
 import json
 import logging
 import os
-from typing import Optional, Dict, Any, List, Callable, Union
 from datetime import datetime
+from typing import Optional, Dict, Any, List, Callable, Union
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -14,17 +14,17 @@ from moatless.discriminator import MeanAwardDiscriminator, Discriminator
 from moatless.exceptions import RuntimeError, RejectError
 from moatless.expander import Expander
 from moatless.feedback import FeedbackGenerator
+from moatless.feedback.feedback_agent import FeedbackAgent
 from moatless.feedback.reward_feedback import RewardFeedbackGenerator
 from moatless.file_context import FileContext
 from moatless.index.code_index import CodeIndex
 from moatless.node import Node, generate_ascii_tree
 from moatless.repository.repository import Repository
-from moatless.selector import BestFirstSelector, Selector, SoftmaxSelector, LLMSelector, FeedbackSelector
-from moatless.selector.feedback_selector import FeedbackSelector
 from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.selector import BestFirstSelector, Selector, SoftmaxSelector, LLMSelector
+from moatless.selector.feedback_selector import FeedbackSelector
 from moatless.value_function.base import ValueFunction
 from moatless.value_function.model import Reward
-from moatless.feedback.feedback_agent import FeedbackAgent
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -32,14 +32,17 @@ logger.setLevel(logging.INFO)
 
 class SearchTree(BaseModel):
     root: Node = Field(..., description="The root node of the search tree.")
-    selector: Union[BestFirstSelector, SoftmaxSelector, LLMSelector, FeedbackSelector] = Field(
-        ..., description="Selector for node selection."
-    )
+    selector: Union[
+        BestFirstSelector, SoftmaxSelector, LLMSelector, FeedbackSelector
+    ] = Field(..., description="Selector for node selection.")
     agent: ActionAgent = Field(..., description="Agent for generating actions.")
     agent_settings: Optional[AgentSettings] = Field(
         None, description="Agent settings for the search tree."
     )
-    actions: List[Action] = Field(default_factory=list, description="Actions that can be used by the agent in the search tree.")
+    actions: List[Action] = Field(
+        default_factory=list,
+        description="Actions that can be used by the agent in the search tree.",
+    )
     repository: Optional[Repository] = Field(
         None, description="Repository for the search tree."
     )
@@ -92,8 +95,9 @@ class SearchTree(BaseModel):
     finish_before_reexpanding_depth: Optional[int] = Field(
         20, description="The depth to reach a Finish state before reexpanding."
     )
-    event_handlers: List[Callable] = Field(default_factory=list, description="Event handlers for tree events", exclude=True)
-
+    event_handlers: List[Callable] = Field(
+        default_factory=list, description="Event handlers for tree events", exclude=True
+    )
 
     class Config:
         arbitrary_types_allowed = True
@@ -219,10 +223,14 @@ class SearchTree(BaseModel):
                 code_index=code_index,
                 runtime=runtime,
             )
-            
-        if "feedback_generator" in data and isinstance(data["feedback_generator"], dict):
-            data["feedback_generator"] = FeedbackGenerator.model_validate(data["feedback_generator"])
-            
+
+        if "feedback_generator" in data and isinstance(
+            data["feedback_generator"], dict
+        ):
+            data["feedback_generator"] = FeedbackGenerator.model_validate(
+                data["feedback_generator"]
+            )
+
         return cls.model_validate(data, repository)
 
     @classmethod
@@ -265,16 +273,24 @@ class SearchTree(BaseModel):
                 self._backpropagate(new_node)
                 self.maybe_persist()
                 self.log(logger.info, generate_ascii_tree(self.root, new_node))
-                
+
                 # Emit iteration event
-                self.emit_event("tree_iteration", {
-                    "iteration": len(self.root.get_all_nodes()),
-                    "total_cost": total_cost,
-                    "best_reward": max((n.reward.value if n.reward else 0) for n in self.root.get_all_nodes()),
-                    "finished_nodes": len(self.get_finished_nodes()),
-                    "total_nodes": len(self.root.get_all_nodes()),
-                    "best_node_id": self.get_best_trajectory().node_id if self.get_best_trajectory() else None
-                })
+                self.emit_event(
+                    "tree_iteration",
+                    {
+                        "iteration": len(self.root.get_all_nodes()),
+                        "total_cost": total_cost,
+                        "best_reward": max(
+                            (n.reward.value if n.reward else 0)
+                            for n in self.root.get_all_nodes()
+                        ),
+                        "finished_nodes": len(self.get_finished_nodes()),
+                        "total_nodes": len(self.root.get_all_nodes()),
+                        "best_node_id": self.get_best_trajectory().node_id
+                        if self.get_best_trajectory()
+                        else None,
+                    },
+                )
             else:
                 self.log(logger.info, "Search complete: no more nodes to expand.")
                 break
@@ -299,30 +315,34 @@ class SearchTree(BaseModel):
         if not expandable_nodes:
             self.log(logger.info, "No expandable nodes found.")
             return None
-        
+
         if expandable_nodes and self.finish_before_reexpanding:
             # Sort by node_id to get the most recently created node
             latest_node = max(expandable_nodes, key=lambda n: n.node_id)
-            
+
             # Check if any node in the tree has reached a finished state
             all_nodes = node.get_all_nodes()
             has_finished_node = any(n.is_finished() for n in all_nodes)
-            
+
             # Check if any node has exceeded the depth limit
-            max_depth_exceeded = any(
-                n.get_depth() >= self.finish_before_reexpanding_depth 
-                for n in all_nodes
-            ) if self.finish_before_reexpanding_depth is not None else False
-            
+            max_depth_exceeded = (
+                any(
+                    n.get_depth() >= self.finish_before_reexpanding_depth
+                    for n in all_nodes
+                )
+                if self.finish_before_reexpanding_depth is not None
+                else False
+            )
+
             # Continue linear expansion only if no finished nodes exist and depth never exceeded
             if not has_finished_node and not max_depth_exceeded:
                 return latest_node
             else:
                 self.log(
-                    logger.info, 
-                    f"Breaking linear path: {'finished state exists' if has_finished_node else 'depth limit exceeded'}"
+                    logger.info,
+                    f"Breaking linear path: {'finished state exists' if has_finished_node else 'depth limit exceeded'}",
                 )
-        
+
         # If we have a finished node or exceeded depth, use normal selection
         return self.selector.select(expandable_nodes)
 
@@ -331,7 +351,9 @@ class SearchTree(BaseModel):
 
         # Check if any action step was not executed, if so return the node
         if node.action_steps and node.has_unexecuted_actions():
-            self.log(logger.info, f"Returning Node{node.node_id} with unexecuted actions")
+            self.log(
+                logger.info, f"Returning Node{node.node_id} with unexecuted actions"
+            )
             return node
 
         child_node = self.expander.expand(node, self, force_expansion)
@@ -346,7 +368,9 @@ class SearchTree(BaseModel):
                 self.agent.actions,
             )
 
-        self.log(logger.info, f"Expanded Node{node.node_id} to new Node{child_node.node_id}")
+        self.log(
+            logger.info, f"Expanded Node{node.node_id} to new Node{child_node.node_id}"
+        )
         return child_node
 
     def _simulate(self, node: Node):
@@ -416,7 +440,10 @@ class SearchTree(BaseModel):
             return nodes[0]
 
         if self.discriminator is None:
-            self.log(logger.info, "No discriminator provided. Returning the first finished node.")
+            self.log(
+                logger.info,
+                "No discriminator provided. Returning the first finished node.",
+            )
             return nodes[-1]
 
         return self.discriminator.select(nodes)
@@ -434,7 +461,9 @@ class SearchTree(BaseModel):
 
         # Check max iterations
         if len(self.root.get_all_nodes()) >= self.max_iterations:
-            logger.info(f"Search finished: Reached max iterations {self.max_iterations}")
+            logger.info(
+                f"Search finished: Reached max iterations {self.max_iterations}"
+            )
             return True
 
         finished_nodes = self.get_finished_nodes()
@@ -447,7 +476,9 @@ class SearchTree(BaseModel):
             self.max_finished_nodes
             and len(unique_finished_parents) >= self.max_finished_nodes
         ):
-            logger.info(f"Search finished: Reached max finished nodes {self.max_finished_nodes}")
+            logger.info(
+                f"Search finished: Reached max finished nodes {self.max_finished_nodes}"
+            )
             return True
 
         # Check reward threshold
@@ -455,8 +486,13 @@ class SearchTree(BaseModel):
             node.reward and node.reward.value >= self.reward_threshold
             for node in finished_nodes
         ):
-            if not self.min_finished_nodes or len(unique_finished_parents) >= self.min_finished_nodes:
-                logger.info(f"Search finished: Found solution meeting reward threshold {self.reward_threshold}")
+            if (
+                not self.min_finished_nodes
+                or len(unique_finished_parents) >= self.min_finished_nodes
+            ):
+                logger.info(
+                    f"Search finished: Found solution meeting reward threshold {self.reward_threshold}"
+                )
                 return True
 
         # Check if there are no more expandable nodes
@@ -527,10 +563,10 @@ class SearchTree(BaseModel):
 
         if self.root.file_context is None:
             raise RuntimeError("SearchTree root node must have a file context.")
-        
+
         if self.agent is None:
             raise RuntimeError("SearchTree must have an agent.")
-        
+
         if not self.agent.actions:
             raise RuntimeError("SearchTree agent must have actions.")
 
@@ -580,7 +616,7 @@ class SearchTree(BaseModel):
             )
 
         selector = selector or BestFirstSelector()
-        
+
         expander = expander or Expander(max_expansions=max_expansions)
 
         return cls(
@@ -604,7 +640,12 @@ class SearchTree(BaseModel):
         )
 
     @classmethod
-    def model_validate(cls, obj: Any, repository: Repository | None = None, runtime: RuntimeEnvironment | None = None):
+    def model_validate(
+        cls,
+        obj: Any,
+        repository: Repository | None = None,
+        runtime: RuntimeEnvironment | None = None,
+    ):
         if isinstance(obj, dict):
             obj = obj.copy()
 
@@ -625,10 +666,14 @@ class SearchTree(BaseModel):
                 obj["agent"] = ActionAgent.model_validate(obj["agent"])
 
             if "agent_settings" in obj and isinstance(obj["agent_settings"], dict):
-                obj["agent_settings"] = AgentSettings.model_validate(obj["agent_settings"])
+                obj["agent_settings"] = AgentSettings.model_validate(
+                    obj["agent_settings"]
+                )
 
             if "actions" in obj and isinstance(obj["actions"], list):
-                obj["actions"] = [Action.from_name(action_name) for action_name in obj["actions"]]
+                obj["actions"] = [
+                    Action.from_name(action_name) for action_name in obj["actions"]
+                ]
 
             if "expander" in obj and isinstance(obj["expander"], dict):
                 obj["expander"] = Expander.model_validate(obj["expander"])
@@ -658,9 +703,13 @@ class SearchTree(BaseModel):
                 obj["repository"] = Repository.model_validate(obj["repository"])
 
             if "root" in obj:
-                obj["root"] = Node.reconstruct(obj["root"], repo=repository, runtime=runtime)
+                obj["root"] = Node.reconstruct(
+                    obj["root"], repo=repository, runtime=runtime
+                )
             elif "nodes" in obj:
-                obj["root"] = Node.reconstruct(obj["nodes"], repo=repository, runtime=runtime)
+                obj["root"] = Node.reconstruct(
+                    obj["nodes"], repo=repository, runtime=runtime
+                )
                 del obj["nodes"]
 
         return super().model_validate(obj)
@@ -734,7 +783,7 @@ class SearchTree(BaseModel):
                 "feedback_generator",
                 "discriminator",
                 "persist_path",
-                "event_handlers"
+                "event_handlers",
             ]
         }
 
@@ -743,7 +792,9 @@ class SearchTree(BaseModel):
         data["selector"] = self.selector.model_dump(**kwargs)
         data["expander"] = self.expander.model_dump(**kwargs)
         data["agent"] = self.agent.model_dump(**kwargs)
-        data["agent_settings"] = self.agent_settings.model_dump(**kwargs) if self.agent_settings else None
+        data["agent_settings"] = (
+            self.agent_settings.model_dump(**kwargs) if self.agent_settings else None
+        )
         data["repository"] = (
             self.repository.model_dump(**kwargs) if self.repository else None
         )
@@ -777,10 +828,11 @@ class SearchTree(BaseModel):
     def create_feedback_generator(self) -> Optional[FeedbackGenerator]:
         if not self.feedback_generator:
             # Get the instance directory from the persist_path or current directory
-            instance_dir = os.path.dirname(self.persist_path) if self.persist_path else None
+            instance_dir = (
+                os.path.dirname(self.persist_path) if self.persist_path else None
+            )
             self.feedback_generator = FeedbackAgent(
-                completion_model=self.agent.completion_model,
-                instance_dir=instance_dir
+                completion_model=self.agent.completion_model, instance_dir=instance_dir
             )
         return self.feedback_generator
 
@@ -792,8 +844,10 @@ class SearchTree(BaseModel):
         """Emit an event to all registered handlers."""
         logger.info(f"Emit event {event_type}")
         for handler in self.event_handlers:
-            handler({
-                "event_type": event_type,
-                "data": data,
-                "timestamp": datetime.now().isoformat()
-            })
+            handler(
+                {
+                    "event_type": event_type,
+                    "data": data,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )

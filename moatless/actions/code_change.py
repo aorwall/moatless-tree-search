@@ -1,6 +1,6 @@
 import logging
 from enum import Enum
-from typing import Optional, List, Union, Tuple, Any, Type, ClassVar
+from typing import Optional, List, Tuple, Any, Type, ClassVar
 
 from pydantic import Field, PrivateAttr, model_validator
 
@@ -158,17 +158,21 @@ class RequestCodeChange(Action):
         **data,
     ):
         import warnings
+
         warnings.warn(
             "RequestCodeChange is deprecated. Use StringReplace from moatless/actions/string_replace.py instead.",
             DeprecationWarning,
-            stacklevel=2
+            stacklevel=2,
         )
         super().__init__(**data)
         self._repository = repository
         self._completion_model = completion_model
 
     def execute(
-        self, args: RequestCodeChangeArgs, file_context: FileContext | None = None, workspace: Workspace | None = None
+        self,
+        args: RequestCodeChangeArgs,
+        file_context: FileContext | None = None,
+        workspace: Workspace | None = None,
     ) -> Observation:
         logger.info(
             f"RequestCodeChange: file_path={args.file_path}, start_line={args.start_line}, end_line={args.end_line}, change_type={args.change_type}"
@@ -339,6 +343,7 @@ class RequestCodeChange(Action):
         )
 
         from litellm.types.llms.openai import ChatCompletionUserMessage
+
         messages.append(ChatCompletionUserMessage(role="user", content=user_message))
         response, completion = self._completion_model.create_text_completion(
             messages=messages,

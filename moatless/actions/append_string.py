@@ -1,5 +1,8 @@
+import re
 from typing import List
+
 from pydantic import Field
+
 from moatless.actions.action import Action
 from moatless.actions.code_action_value_mixin import CodeActionValueMixin
 from moatless.actions.code_modification_mixin import CodeModificationMixin
@@ -9,9 +12,6 @@ from moatless.index.code_index import CodeIndex
 from moatless.repository.file import do_diff
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
-from datetime import datetime, timezone
-import re
-
 from moatless.workspace import Workspace
 
 
@@ -19,8 +19,11 @@ class AppendStringArgs(ActionArguments):
     """
     Append text content to the end of a file.
     """
+
     path: str = Field(..., description="Path to the file to append to")
-    new_str: str = Field(..., description="Text content to append at the end of the file")
+    new_str: str = Field(
+        ..., description="Text content to append at the end of the file"
+    )
 
     class Config:
         title = "AppendString"
@@ -33,10 +36,9 @@ class AppendStringArgs(ActionArguments):
 
     @classmethod
     def format_schema_for_llm(cls) -> str:
-        return cls.format_xml_schema({
-            "path": "file/path.py",
-            "new_str": "\ncontent to append at end of file\n"
-        })
+        return cls.format_xml_schema(
+            {"path": "file/path.py", "new_str": "\ncontent to append at end of file\n"}
+        )
 
     @classmethod
     def get_few_shot_examples(cls) -> List[FewShotExample]:
@@ -56,11 +58,13 @@ def format_timestamp(dt: datetime) -> str:
             ),
         ]
 
+
 class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
     """
     Action to append text content strictly to the end of a file.
     This action only adds content at the file's end and cannot modify existing content.
     """
+
     args_schema = AppendStringArgs
 
     def __init__(
@@ -76,7 +80,12 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
         object.__setattr__(self, "_code_index", code_index)
         object.__setattr__(self, "_repository", repository)
 
-    def execute(self, args: AppendStringArgs, file_context: FileContext | None = None, workspace: Workspace | None = None) -> Observation:
+    def execute(
+        self,
+        args: AppendStringArgs,
+        file_context: FileContext | None = None,
+        workspace: Workspace | None = None,
+    ) -> Observation:
         path_str = self.normalize_path(args.path)
         path, error = self.validate_file_access(path_str, file_context)
         if error:
@@ -91,10 +100,10 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
 
         file_text = context_file.content.expandtabs()
         new_str = args.new_str.expandtabs()
-        
+
         # Check if this looks like top-of-file content (imports, etc)
-        looks_like_import = bool(re.match(r'^(import|from)\s+\w+', new_str.lstrip()))
-        
+        looks_like_import = bool(re.match(r"^(import|from)\s+\w+", new_str.lstrip()))
+
         if looks_like_import:
             return Observation(
                 message=(
@@ -104,13 +113,13 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
                 properties={"fail_reason": "wrong_action_for_imports"},
                 expect_correction=True,
             )
-        
+
         # Normal append logic
         if file_text:
-            file_text = file_text.rstrip('\n')
+            file_text = file_text.rstrip("\n")
             new_str = f"\n\n{new_str.lstrip('\n')}"
         else:
-            new_str = new_str.lstrip('\n')
+            new_str = new_str.lstrip("\n")
 
         new_file_text = file_text + new_str
 

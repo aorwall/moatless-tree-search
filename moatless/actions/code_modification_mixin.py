@@ -5,20 +5,21 @@ from typing import Optional, Tuple
 from pydantic import PrivateAttr
 
 from moatless.actions.model import Observation
-from moatless.actions.run_tests import RunTests, RunTestsArgs
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
-from moatless.utils.file import is_test
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.utils.file import is_test
 
 logger = logging.getLogger(__name__)
+
 
 class CodeModificationMixin:
     """
     A mixin that provides common functionality for actions that modify code files.
     This includes path normalization, file validation, test running, and observation handling.
     """
+
     _runtime: RuntimeEnvironment | None = PrivateAttr(default=None)
     _code_index: CodeIndex | None = PrivateAttr(default=None)
     _repository: Repository | None = PrivateAttr(default=None)
@@ -50,7 +51,7 @@ class CodeModificationMixin:
                 message=f"File {path} not found.",
                 properties={"fail_reason": "file_not_found"},
             )
-        
+
         if not file_context.has_file(str(path)):
             return None, Observation(
                 message=f"You have not yet viewed the file {path}. Use ViewCode to view the parts of the file that you want to modify.",
@@ -76,7 +77,7 @@ class CodeModificationMixin:
             )
 
             for search_result in search_results:
-                 file_context.add_test_file(search_result.file_path)
+                file_context.add_test_file(search_result.file_path)
         else:
             logger.warning(f"No code index cannot find test files for {file_path}")
             return ""

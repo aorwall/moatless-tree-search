@@ -106,8 +106,23 @@ def test_delete_instance(repository):
     assert not os.path.exists(instance_dir)
 
 
-def test_list_instances(repository, test_completion_model):
-    # Create a test evaluation
+def test_evaluation_with_instances(repository, test_completion_model):
+    # Create a test evaluation with instances
+    instances = {
+        "instance1": EvaluationInstance(
+            instance_id="instance1",
+            status=InstanceStatus.COMPLETED,
+            created_at=datetime.now(timezone.utc),
+            resolved=True,
+        ),
+        "instance2": EvaluationInstance(
+            instance_id="instance2",
+            status=InstanceStatus.ERROR,
+            created_at=datetime.now(timezone.utc),
+            error="Test error",
+        ),
+    }
+
     evaluation = Evaluation(
         evaluations_dir=repository.evaluations_dir,
         evaluation_name="test_eval",
@@ -117,39 +132,27 @@ def test_list_instances(repository, test_completion_model):
                 message_history_type=MessageHistoryType.MESSAGES
             )
         ),
+        instances=instances,
         status=EvaluationStatus.RUNNING,
     )
 
-    # Save evaluation
+    # Save evaluation and instances
     repository.save_evaluation(evaluation)
+    for instance in instances.values():
+        repository.save_instance(evaluation.evaluation_name, instance)
 
-    # Create and save test instances
-    instance1 = EvaluationInstance(
-        instance_id="instance1",
-        status=InstanceStatus.COMPLETED,
-        created_at=datetime.now(timezone.utc),
-        resolved=True,
-    )
-    instance2 = EvaluationInstance(
-        instance_id="instance2",
-        status=InstanceStatus.ERROR,
-        created_at=datetime.now(timezone.utc),
-        error="Test error",
-    )
-
-    repository.save_instance(evaluation.evaluation_name, instance1)
-    repository.save_instance(evaluation.evaluation_name, instance2)
-
-    # List instances
-    instances = repository.list_instances("test_eval")
-    assert len(instances) == 2
-
+    # Load evaluation and verify instances
+    loaded_evaluation = repository.load_evaluation("test_eval")
+    assert len(loaded_evaluation.instances) == len(evaluation.instances)
+    
     # Verify instance details
-    instance_dict = {i.instance_id: i for i in instances}
-    assert instance_dict["instance1"].status == InstanceStatus.COMPLETED
-    assert instance_dict["instance1"].resolved is True
-    assert instance_dict["instance2"].status == InstanceStatus.ERROR
-    assert instance_dict["instance2"].error == "Test error"
+    loaded_instance1 = loaded_evaluation.instances["instance1"]
+    assert loaded_instance1.status == InstanceStatus.COMPLETED
+    assert loaded_instance1.resolved is True
+
+    loaded_instance2 = loaded_evaluation.instances["instance2"]
+    assert loaded_instance2.status == InstanceStatus.ERROR
+    assert loaded_instance2.error == "Test error"
 
 
 def test_nonexistent_evaluation(repository):
@@ -161,33 +164,4 @@ def test_nonexistent_evaluation(repository):
 def test_nonexistent_instance(repository):
     # Try to load a non-existent instance
     loaded_instance = repository.load_instance("test_eval", "nonexistent_instance")
-    assert loaded_instance is None
-
-
-def test_list_instances_empty_evaluation(repository, test_completion_model):
-    # Create a test evaluation with no instances
-    evaluation = Evaluation(
-        evaluations_dir=repository.evaluations_dir,
-        evaluation_name="test_eval",
-        settings=TreeSearchSettings(
-            agent_settings=AgentSettings(
-                completion_model=test_completion_model,
-                message_history_type=MessageHistoryType.MESSAGES
-            )
-        ),
-        status=EvaluationStatus.PENDING,
-    )
-
-    repository.save_evaluation(evaluation)
-
-    # List instances should return empty list
-    instances = repository.list_instances("test_eval")
-    assert isinstance(instances, list)
-    assert len(instances) == 0
-
-
-def test_list_instances_nonexistent_evaluation(repository):
-    # List instances for non-existent evaluation should return empty list
-    instances = repository.list_instances("nonexistent_eval")
-    assert isinstance(instances, list)
-    assert len(instances) == 0 
+    assert loaded_instance is None 

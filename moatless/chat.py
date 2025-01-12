@@ -1,26 +1,30 @@
-import json
 import logging
 from typing import Optional, Dict, Any, Callable, List
 
 from pydantic import BaseModel, Field
 
 from moatless.agent.agent import ActionAgent
-from moatless.completion.model import Usage
-from moatless.exceptions import RuntimeError
-from moatless.file_context import FileContext
-from moatless.node import Node
-from moatless.repository.repository import Repository
-from moatless.schema import Attachment, Message, UserMessage, ActionView, AssistantMessage
 from moatless.artifacts.artifact import ArtifactChange, ArtifactHandler, Artifact
 from moatless.artifacts.file import FileArtifact
-
+from moatless.completion.model import Usage
+from moatless.exceptions import RuntimeError
+from moatless.node import Node
+from moatless.schema import (
+    Attachment,
+    Message,
+    UserMessage,
+    ActionView,
+    AssistantMessage,
+)
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
 
 class Chat(BaseModel):
-    current_node: Optional[Node] = Field(None, description="The root node of the chat sequence.")
+    current_node: Optional[Node] = Field(
+        None, description="The root node of the chat sequence."
+    )
     agent: ActionAgent = Field(..., description="Agent for generating responses.")
     artifact_handlers: List[ArtifactHandler] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(
@@ -34,7 +38,9 @@ class Chat(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
-    def send_message(self, message: str, attachments: Optional[List[Attachment]] = None) -> str:
+    def send_message(
+        self, message: str, attachments: Optional[List[Attachment]] = None
+    ) -> str:
         """Send a message with optional attachments and get a response."""
 
         if not self.current_node:
@@ -55,7 +61,12 @@ class Chat(BaseModel):
             self.log(logger.error, f"Runtime error: {e.message}")
             return f"Error: {e.message}"
 
-    def _create_node(self, workspace: Workspace, message: str, attachments: Optional[List[Attachment]] = None) -> Node:
+    def _create_node(
+        self,
+        workspace: Workspace,
+        message: str,
+        attachments: Optional[List[Attachment]] = None,
+    ) -> Node:
         artifact_changes = []
         if attachments:
             for attachment in attachments:
@@ -65,40 +76,47 @@ class Chat(BaseModel):
                     name=attachment.file_name,
                     file_path=attachment.file_name,
                     content=attachment.content,
-                    mime_type=attachment.mime_type
+                    mime_type=attachment.mime_type,
                 )
 
                 workspace.add_artifact(artifact)
-                artifact_changes.append(ArtifactChange(
-                    artifact_id=artifact.id,
-                    change_type="added",
-                    actor="user",
-                ))
+                artifact_changes.append(
+                    ArtifactChange(
+                        artifact_id=artifact.id,
+                        change_type="added",
+                        actor="user",
+                    )
+                )
 
         return Node(
             node_id=self._generate_unique_id(),
             workspace=workspace,
             artifact_changes=artifact_changes,
-            user_message=message
+            user_message=message,
         )
 
     def get_messages(self) -> List[Message]:
         messages = []
         for node in self.current_node.get_trajectory():
-            user_artifacts = [change.artifact_id for change in node.artifact_changes if change.actor == "user"]
+            user_artifacts = [
+                change.artifact_id
+                for change in node.artifact_changes
+                if change.actor == "user"
+            ]
 
             if user_artifacts or node.user_message:
-                messages.append(UserMessage(
-                    content=node.user_message,
-                    artifact_ids=user_artifacts
-                ))
+                messages.append(
+                    UserMessage(content=node.user_message, artifact_ids=user_artifacts)
+                )
 
             if node.action_steps or node.assistant_message:
-                action_views = [ActionView(name=action_step.action.name) for action_step in node.action_steps]
+                action_views = [
+                    ActionView(name=action_step.action.name)
+                    for action_step in node.action_steps
+                ]
                 messages.append(
                     AssistantMessage(
-                        content=node.assistant_message,
-                        actions=action_views
+                        content=node.assistant_message, actions=action_views
                     )
                 )
 
@@ -151,6 +169,7 @@ class Chat(BaseModel):
         data = self.model_dump(exclude_none=True)
         with open(file_path, "w") as f:
             import json
+
             json.dump(data, f, indent=2)
 
     def _generate_unique_id(self) -> int:

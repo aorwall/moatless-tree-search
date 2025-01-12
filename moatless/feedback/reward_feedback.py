@@ -1,12 +1,10 @@
-from typing import List
+from typing import List, Any
 
 from moatless.actions.code_change import RequestCodeChange
 from moatless.actions.model import ActionArguments
 from moatless.actions.run_tests import RunTests
 from moatless.feedback.feedback import FeedbackGenerator
 from moatless.node import Node
-from moatless.feedback.feedback import FeedbackGenerator
-from typing import List, Any
 
 
 class RewardFeedbackGenerator(FeedbackGenerator):
@@ -17,14 +15,16 @@ class RewardFeedbackGenerator(FeedbackGenerator):
         if not visited_children:
             return None
 
+
 #         # else:
+
 
 class RewardFeedbackGenerator(FeedbackGenerator):
     def generate_feedback(self, node: Node, actions: List[Any] = None) -> str | None:
         if node.reward:
             if node.reward.feedback:
                 return self._create_message_feedback_llmselector(node)
-        
+
         else:
             visited_children = [child for child in node.children if child.reward]
             if not visited_children:
@@ -80,10 +80,10 @@ class RewardFeedbackGenerator(FeedbackGenerator):
         prompt += feedback if feedback is not None else node.reward.feedback
         prompt += "\n</feedback>"
         return prompt
-    
+
     def _create_message_feedback_llmselector(self, node: Node):
         prompt = "This is feedback from an Agent monitoring your progress. Take it into account."
         prompt += "\n\n<feedback>\n"
         prompt += node.reward.feedback
         prompt += "\n</feedback>"
-        return prompt 
+        return prompt

@@ -6,6 +6,7 @@ from moatless.actions.edit import ClaudeEditTool, EditActionArguments
 from moatless.actions.model import Observation
 from moatless.file_context import FileContext
 from moatless.repository import FileRepository
+from moatless.repository.repository import InMemRepository
 
 
 @pytest.fixture
@@ -33,8 +34,8 @@ def add(a, b):
     return "/src/test.py"
 
 @pytest.fixture
-def edit_action():
-    return ClaudeEditTool()
+def edit_action(repository):
+    return ClaudeEditTool(repository=repository)
 
 def test_view_command(edit_action, file_context, test_file):
     args = EditActionArguments(
@@ -87,7 +88,8 @@ def test_str_replace_command(edit_action, file_context, test_file):
         old_str='print("Hello, World!")',
         new_str='print("Hi, World!")'
     )
-    
+
+    file_context.add_file(test_file, show_all_spans=True)
     result = edit_action.execute(args, file_context)
     assert isinstance(result, Observation)
     assert result.properties.get("diff")
@@ -130,6 +132,8 @@ print('test')
 """
     file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_text(content)
+
+    file_context.add_file("src/test_multiple.py", show_all_spans=True)
 
     args = EditActionArguments(
         scratch_pad="Replace string with multiple occurrences",

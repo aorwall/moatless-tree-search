@@ -30,7 +30,12 @@ class Action(BaseModel, ABC):
     def __init__(self, **data):
         super().__init__(**data)
 
-    def execute(self, args: ActionArguments, file_context: FileContext | None = None, workspace: Workspace | None = None) -> Observation:
+    def execute(
+        self,
+        args: ActionArguments,
+        file_context: FileContext | None = None,
+        workspace: Workspace | None = None,
+    ) -> Observation:
         """
         Execute the action.
         """
@@ -38,7 +43,12 @@ class Action(BaseModel, ABC):
         message = self._execute(args, file_context=file_context, workspace=workspace)
         return Observation.create(message)
 
-    def _execute(self, args: ActionArguments, file_context: FileContext | None = None, workspace: Workspace | None = None) -> str | None:
+    def _execute(
+        self,
+        args: ActionArguments,
+        file_context: FileContext | None = None,
+        workspace: Workspace | None = None,
+    ) -> str | None:
         """
         Execute the action and return the updated FileContext.
         """
@@ -61,7 +71,7 @@ class Action(BaseModel, ABC):
                 "Exploratory Actions: Recognize that initial searches and information-gathering steps are essential and should not be heavily penalized if they don't yield immediate results.",
                 "Appropriateness of Action: Evaluate if the action is logical given the agent's current knowledge and the early stage of problem-solving.",
             ]
-        
+
         else:
             return [
                 "Solution Quality: Assess the logical changes, contextual fit, and overall improvement without introducing new issues.",
@@ -214,16 +224,18 @@ At this stage, the agent is still working on the solution. Your task is twofold:
                 if isinstance(obj, type) and issubclass(obj, Action) and obj != Action:
                     _actions[name] = obj
 
-
     @classmethod
-    def model_validate(cls, obj: Any,
-                       repository: Repository = None,
-                       runtime: Any = None,
-                       code_index: CodeIndex = None) -> "Action":
+    def model_validate(
+        cls,
+        obj: Any,
+        repository: Repository = None,
+        runtime: Any = None,
+        code_index: CodeIndex = None,
+    ) -> "Action":
         if isinstance(obj, dict):
             obj = obj.copy()
             action_class_path = obj.pop("action_class", None)
-            
+
             if action_class_path:
                 module_name, class_name = action_class_path.rsplit(".", 1)
                 module = importlib.import_module(module_name)
@@ -237,9 +249,8 @@ At this stage, the agent is still working on the solution. Your task is twofold:
                     obj["runtime"] = runtime
 
                 return action_class(**obj)
-                
-        return cls(**obj)
 
+        return cls(**obj)
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         dump = super().model_dump(**kwargs)

@@ -1,12 +1,12 @@
 import importlib
 import logging
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 from litellm.types.llms.openai import ChatCompletionUserMessage
-from pydantic import BaseModel, PrivateAttr, Field
+from pydantic import BaseModel, Field
 
 from moatless.actions.action import Action, RewardScaleEntry
-from moatless.completion.completion import CompletionModel, Message
+from moatless.completion.completion import CompletionModel
 from moatless.completion.model import Completion
 from moatless.message_history import MessageHistoryGenerator
 from moatless.node import Node, generate_ascii_tree
@@ -21,7 +21,7 @@ class ValueFunction(BaseModel):
     )
     message_generator: MessageHistoryGenerator = Field(
         default_factory=lambda: MessageHistoryGenerator(),
-        description="Generator for message history"
+        description="Generator for message history",
     )
     correction_award: Optional[int] = Field(
         0,
@@ -29,11 +29,11 @@ class ValueFunction(BaseModel):
     )
     include_search_tree: bool = Field(
         default=False,
-        description="Whether to include the search tree visualization in the value prompt"
+        description="Whether to include the search tree visualization in the value prompt",
     )
     coding_value_function: Optional["ValueFunction"] = Field(
         default=None,
-        description="Optional CodingValueFunction to provide additional context for value decisions"
+        description="Optional CodingValueFunction to provide additional context for value decisions",
     )
 
     def get_reward(self, node: Node) -> Tuple[Reward, Optional[Completion]]:
@@ -41,11 +41,11 @@ class ValueFunction(BaseModel):
         coding_reward = None
         if self.coding_value_function:
             coding_reward, _ = self.coding_value_function.get_reward(node)
-            
+
         messages = self.message_generator.generate(node)
         if messages is None:
             messages = []  # Ensure we have a valid list
-        
+
         last_message = ""
 
         # Handle automatic reward cases by adding them to the message
@@ -55,7 +55,9 @@ class ValueFunction(BaseModel):
 
         if node.action.name in ["Reject", "Error"]:
             last_message += "# Automatic Reward Assessment\n"
-            last_message += f"{node.action.name} action detected. Suggested value: -100\n\n"
+            last_message += (
+                f"{node.action.name} action detected. Suggested value: -100\n\n"
+            )
 
         # Format the action section
         if node.action.name == "Finish":
@@ -113,30 +115,36 @@ class ValueFunction(BaseModel):
 
         # Ensure we append the message only if we have content
         if last_message:
-            messages.append(ChatCompletionUserMessage(role="user", content=last_message))
-        
+            messages.append(
+                ChatCompletionUserMessage(role="user", content=last_message)
+            )
+
         system_prompt = self._create_system_prompt(node, coding_reward)
-        
+
         # Add defensive check
         if not messages:
-            messages = [ChatCompletionUserMessage(role="user", content="No message history available")]
-        
+            messages = [
+                ChatCompletionUserMessage(
+                    role="user", content="No message history available"
+                )
+            ]
+
         try:
             completion_response = self.completion_model.create_completion(
-                messages=messages, 
-                system_prompt=system_prompt, 
-                response_model=Reward
+                messages=messages, system_prompt=system_prompt, response_model=Reward
             )
-            
+
             return completion_response.structured_output, completion_response.completion
 
         except Exception as e:
             logger.error(f"Error getting reward: {e}")
             raise
 
-    def _create_system_prompt(self, node: Node, coding_reward: Optional[Reward] = None) -> str:
+    def _create_system_prompt(
+        self, node: Node, coding_reward: Optional[Reward] = None
+    ) -> str:
         base_prompt = self._build_system_prompt(node)
-        
+
         if coding_reward:
             base_prompt += """
 # Coding Value Function Context
@@ -163,76 +171,8 @@ Evaluation Guidelines:
 * Discourage actions that would lead to duplicate or very similar outcomes
 </search_tree_guidelines>
 """
-        
+
         return base_prompt
-
-    def _create_message(self, node: Node) -> Message:
-        previous_nodes = node.get_trajectory()[:-1]
-
-        message = node.get_root().message
-
-        formatted_history: List[str] = []
-        counter = 0
-        for previous_node in previous_nodes:
-            if previous_node.action:
-                counter += 1
-                formatted_state = (
-                    f"\n## {counter}. Action: {previous_node.action.name}\n"
-                )
-                formatted_state += previous_node.action.to_prompt()
-
-                if previous_node.observation:
-                    formatted_state += (
-                        f"\n\nOutput: {previous_node.observation.message}"
-                    )
-                    formatted_history.append(formatted_state)
-                else:
-                    logger.warning(f"No output found for Node{previous_node.node_id}")
-
-        if formatted_history:
-            message += "Below is the history of previously executed actions and their outputs that led up to the current state.\n"
-            message += "<history>\n"
-            message += "\n".join(formatted_history)
-            message += "\n</history>\n\n"
-
-        if node.action.name == "Finish":
-            message += "<reasoning_for_completion>\n"
-            message += node.action.finish_reason
-            message += "</reasoning_for_completion>\n"
-        else:
-            message += "## Last Executed Action:\n"
-            message += "Here is the most recent action that was executed and its output. This is the subject of your evaluation.\n"
-            message += "\n<executed_action>\n"
-            message += node.action.to_prompt()
-            message += f"\n\n**Output:**\n{node.observation.message}"
-            if node.observation.extra:
-                message += f"\n{node.observation.extra}"
-            message += "\n</executed_action>\n\n"
-
-        message += "Current state of relevant files and code context after the last executed action:\n"
-        message += "<file_context>\n"
-        if node.file_context and not node.file_context.is_empty():
-            message += node.file_context.create_prompt(
-                show_outcommented_code=True,
-                exclude_comments=True,
-                outcomment_code_comment="... code not in context",
-            )
-        else:
-            message += "No files added to file context yet."
-        message += "\n</file_context>\n\n"
-
-        full_patch = node.file_context.generate_git_patch()
-        message += "Changes made to the codebase so far:\n"
-        if full_patch.strip():
-            message += "<git_patch>\n"
-            message += full_patch
-            message += "\n</git_patch>\n\n"
-        else:
-            message += "<git_patch>\n"
-            message += "No changes made yet."
-            message += "\n</git_patch>\n\n"
-
-        return ChatCompletionUserMessage(role="user", content=message)
 
     def _build_system_prompt(self, node: Node):
         action = Action.get_action_by_args_class(type(node.action))
@@ -309,7 +249,9 @@ Evaluation Guidelines:
             f"{self.__class__.__module__}.{self.__class__.__name__}"
         )
         if self.coding_value_function:
-            dump["coding_value_function"] = self.coding_value_function.model_dump(**kwargs)
+            dump["coding_value_function"] = self.coding_value_function.model_dump(
+                **kwargs
+            )
         return dump
 
     @classmethod
@@ -321,13 +263,18 @@ Evaluation Guidelines:
             coding_value_function_data = obj.pop("coding_value_function", None)
 
             if completion_data:
-                obj["completion_model"] = CompletionModel.model_validate(completion_data)
+                obj["completion_model"] = CompletionModel.model_validate(
+                    completion_data
+                )
             else:
                 obj["completion_model"] = None
 
             if coding_value_function_data:
                 from moatless.value_function.coding import CodingValueFunction
-                obj["coding_value_function"] = CodingValueFunction.model_validate(coding_value_function_data)
+
+                obj["coding_value_function"] = CodingValueFunction.model_validate(
+                    coding_value_function_data
+                )
 
             if value_function_class_path:
                 module_name, class_name = value_function_class_path.rsplit(".", 1)
@@ -349,7 +296,4 @@ Evaluation Guidelines:
             f"1. General Assessment: {reward1.explanation}\n"
             f"2. Code Quality Assessment: {reward2.explanation}"
         )
-        return Reward(
-            value=combined_value,
-            explanation=combined_explanation
-        )
+        return Reward(value=combined_value, explanation=combined_explanation)

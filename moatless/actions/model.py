@@ -2,14 +2,11 @@ import importlib
 import logging
 import pkgutil
 from abc import ABC
-from typing import Dict, Type, Any, Optional, Self
+from typing import Dict, Type, Any, Optional
 
-from instructor.utils import classproperty
-from pydantic import Field, BaseModel, model_validator, ValidationError
-import xml.etree.ElementTree as ET
+from pydantic import Field, BaseModel, model_validator
 
 from moatless.completion.model import ToolCall, Completion, StructuredOutput
-from moatless.file_context import FileContext
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +23,7 @@ class ActionArguments(StructuredOutput, ABC):
     @classmethod
     def get_name(cls) -> str:
         """Returns the action name for the class based on Config title."""
-        return str(getattr(cls.Config, 'title', cls.__name__))
+        return str(getattr(cls.Config, "title", cls.__name__))
 
     def format_for_llm(self) -> str:
         """Format the action name for LLM consumption"""
@@ -57,7 +54,7 @@ class ActionArguments(StructuredOutput, ABC):
             [f"  {k}: {v}" for k, v in self.model_dump(exclude={"thoughts"}).items()]
         )
         return prompt
-    
+
     def short_summary(self) -> str:
         return f"{self.name}()"
 
@@ -143,7 +140,7 @@ class RewardScaleEntry(BaseModel):
 class Observation(BaseModel):
     message: Optional[str] = Field(
         None,
-        description="The message returned to the agent, will be displayed in message history."
+        description="The message returned to the agent, will be displayed in message history.",
     )
     summary: Optional[str] = Field(
         None,

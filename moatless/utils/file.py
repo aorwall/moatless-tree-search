@@ -18,4 +18,3 @@ def is_test(file_path: str) -> bool:
         "tests.py",
     ]
     return any(fnmatch.fnmatch(path.name, pattern) for pattern in test_file_patterns)
-

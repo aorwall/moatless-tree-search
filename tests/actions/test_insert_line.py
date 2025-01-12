@@ -1,6 +1,8 @@
+from unittest.mock import Mock
+
 import pytest
 
-from moatless.actions.insert_line import InsertLine, InsertLineArgs
+from moatless.actions.insert_line import InsertLine, InsertLinesArgs
 from moatless.file_context import FileContext
 from moatless.repository.repository import InMemRepository
 
@@ -18,12 +20,12 @@ def repository():
 def file_context(repository):
     context = FileContext(repo=repository)
     # Add file to context to ensure it's available
-    context.add_file("test.py")
+    context.add_file("test.py", show_all_spans=True)
     return context
 
 def test_insert_line_basic(repository, file_context):
     action = InsertLine(repository=repository)
-    args = InsertLineArgs(
+    args = InsertLinesArgs(
         path="test.py",
         insert_line=2,
         new_str='    logger.info(message)',
@@ -40,7 +42,7 @@ def test_insert_line_basic(repository, file_context):
 
 def test_insert_line_at_start(repository, file_context):
     action = InsertLine(repository=repository)
-    args = InsertLineArgs(
+    args = InsertLinesArgs(
         path="test.py",
         insert_line=0,
         new_str='import logging\n',
@@ -55,7 +57,7 @@ def test_insert_line_at_start(repository, file_context):
 
 def test_insert_line_invalid_line(repository, file_context):
     action = InsertLine(repository=repository)
-    args = InsertLineArgs(
+    args = InsertLinesArgs(
         path="test.py",
         insert_line=999,
         new_str='invalid line',
@@ -69,7 +71,7 @@ def test_insert_line_invalid_line(repository, file_context):
 
 def test_insert_line_file_not_found(repository, file_context):
     action = InsertLine(repository=repository)
-    args = InsertLineArgs(
+    args = InsertLinesArgs(
         path="nonexistent.py",
         insert_line=1,
         new_str='new line',
@@ -79,11 +81,10 @@ def test_insert_line_file_not_found(repository, file_context):
     observation = action.execute(args, file_context)
     
     assert observation.properties["fail_reason"] == "file_not_found"
-    assert observation.expect_correction
 
 def test_insert_multiline(repository, file_context):
     action = InsertLine(repository=repository)
-    args = InsertLineArgs(
+    args = InsertLinesArgs(
         path="test.py",
         insert_line=1,
         new_str='''def setup():
@@ -109,7 +110,7 @@ def test_insert_line_with_indentation(repository, file_context):
     file_context.add_file("test2.py", show_all_spans=True)
     
     action = InsertLine(repository=repository)
-    args = InsertLineArgs(
+    args = InsertLinesArgs(
         path="test2.py",
         insert_line=2,
         new_str='    def new_method(self):\n        return "test"',
@@ -125,12 +126,13 @@ def test_insert_line_with_indentation(repository, file_context):
     assert "class Test:" in content
     assert "diff" in observation.properties
 
-def test_insert_line_lines_not_in_context(repository, file_context):
+def test_insert_line_lines_not_in_context(repository):
     # Mock lines_is_in_context to return False
+    file_context = Mock(FileContext)
     file_context.get_file("test.py").lines_is_in_context = lambda start, end: False
     
     action = InsertLine(repository=repository)
-    args = InsertLineArgs(
+    args = InsertLinesArgs(
         path="test.py",
         insert_line=2,
         new_str='    new_line',
@@ -140,4 +142,3 @@ def test_insert_line_lines_not_in_context(repository, file_context):
     observation = action.execute(args, file_context)
     
     assert observation.properties["fail_reason"] == "lines_not_in_context"
-    assert observation.expect_correction

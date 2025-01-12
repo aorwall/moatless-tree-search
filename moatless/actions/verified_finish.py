@@ -18,14 +18,15 @@ class VerifiedFinishArgs(ActionArguments):
     """Indicate that the task is fully completed and verified with new or modified tests."""
 
     thoughts: str = Field(
-        ..., description="Your reasoning about why the task is complete and verified with tests."
+        ...,
+        description="Your reasoning about why the task is complete and verified with tests.",
     )
     finish_reason: str = Field(..., description="Explain why the task is complete.")
     test_verification: str = Field(
-        ..., 
-        description="Detailed description of how the solution was verified, including: 1) Which tests were added/modified 2) What scenarios these tests cover 3) How the tests verify the changes work correctly"
+        ...,
+        description="Detailed description of how the solution was verified, including: 1) Which tests were added/modified 2) What scenarios these tests cover 3) How the tests verify the changes work correctly",
     )
-    
+
     class Config:
         title = "Finish"
 
@@ -44,9 +45,13 @@ class VerifiedFinishArgs(ActionArguments):
 class VerifiedFinish(Action):
     args_schema: ClassVar[Type[ActionArguments]] = VerifiedFinishArgs
 
-    def execute(self, args: VerifiedFinishArgs, file_context: FileContext | None = None, workspace: Workspace | None = None):
+    def execute(
+        self,
+        args: VerifiedFinishArgs,
+        file_context: FileContext | None = None,
+        workspace: Workspace | None = None,
+    ):
         return Observation(message=args.finish_reason, terminal=True)
-
 
     @classmethod
     def get_evaluation_criteria(cls, trajectory_length: int) -> List[str]:
@@ -102,7 +107,7 @@ class VerifiedFinish(Action):
                     "The trajectory is entirely incorrect AND lacks proper test verification. The finish action is entirely premature.",
                 ),
             ]
-        ) 
+        )
 
     @classmethod
     def get_few_shot_examples(cls) -> List[FewShotExample]:
@@ -136,7 +141,7 @@ class VerifiedFinish(Action):
                         "   - Invalid date formats\n"
                         "3. Added test_date_validation for boundary conditions\n"
                         "All tests pass, confirming the bug is fixed and won't regress."
-                    )
+                    ),
                 ),
             ),
-        ] 
+        ]

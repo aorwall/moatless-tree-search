@@ -117,7 +117,7 @@ def trajectory_table(report_path: str):
     all_actions = set()
     for result in results:
         # Debug print to see the result structure
-        if hasattr(result, 'actions') and result.actions:  # Check if actions exists
+        if hasattr(result, "actions") and result.actions:  # Check if actions exists
             all_actions.update(result.actions.keys())
 
     df["success_status"] = df.apply(
@@ -156,9 +156,9 @@ def trajectory_table(report_path: str):
         )
     with col2:
         solution_status_filter = st.multiselect(
-            "Solution Status", 
-            ["Has Resolved Solutions", "Has Unresolved Solutions", "No Solutions"], 
-            key="solution_status_filter"
+            "Solution Status",
+            ["Has Resolved Solutions", "Has Unresolved Solutions", "No Solutions"],
+            key="solution_status_filter",
         )
     with col3:
         flag_filter = st.multiselect(
@@ -191,15 +191,14 @@ def trajectory_table(report_path: str):
             mask &= (df["resolved_solutions"] == 0) & (df["failed_solutions"] == 0)
     if flag_filter:
         mask &= df.apply(
-            lambda row: any(
-                flag in row.get("flags", []) for flag in flag_filter
-            ),
+            lambda row: any(flag in row.get("flags", []) for flag in flag_filter),
             axis=1,
         )
     if action_filter:
         mask &= df.apply(
-            lambda row: row.get('actions', {}) and any(
-                action in row['actions'] and row['actions'][action] > 0
+            lambda row: row.get("actions", {})
+            and any(
+                action in row["actions"] and row["actions"][action] > 0
                 for action in action_filter
             ),
             axis=1,
@@ -220,14 +219,14 @@ def trajectory_table(report_path: str):
     # Create a new column for fail issues that combines icons for different issues
     def create_fail_issues_column(row):
         # Get number of flags
-        num_flags = len(row.get('flags', []))
-        
+        num_flags = len(row.get("flags", []))
+
         if num_flags == 0:
             return ""
-        
+
         # Create tooltip with just flags
         tooltip = f"Flags: {', '.join(row.get('flags', []))}"
-        
+
         # Only show number of flags in the column
         return f'<span title="{tooltip}">{num_flags}</span>'
 
@@ -268,20 +267,27 @@ def trajectory_table(report_path: str):
             "Partially Resolved": "rgba(255, 235, 59, 0.3)",
             "Running": "rgba(33, 150, 243, 0.3)",
             "Error": "rgba(156, 39, 176, 0.3)",  # Purple
-            "Failed": "rgba(244, 67, 54, 0.3)"
+            "Failed": "rgba(244, 67, 54, 0.3)",
         }
-        
+
         color = base_colors.get(row["success_status"], "rgba(244, 67, 54, 0.3)")
         styles = [f"background-color: {color}"] * len(row)
-        
+
         # Add error tooltip to status column if status is Error
         if row["success_status"] == "Error" and row.get("error"):
             # Find index of status column
             status_idx = display_columns.index("status")
             # Escape error message
-            error = row["error"].replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;')
-            styles[status_idx] = f"background-color: {color}; cursor: help; title: '<pre>{error}</pre>'"
-        
+            error = (
+                row["error"]
+                .replace('"', "&quot;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+            )
+            styles[status_idx] = (
+                f"background-color: {color}; cursor: help; title: '<pre>{error}</pre>'"
+            )
+
         return styles
 
     # Apply the styling
@@ -337,7 +343,6 @@ def trajectory_table(report_path: str):
     )
 
 
-
 def show_completion(completion):
     if completion:
         st.json(
@@ -350,7 +355,6 @@ def show_completion(completion):
             st.subheader("Input prompts")
             for input_idx, input_msg in enumerate(completion.input):
                 try:
-
                     if "content" in input_msg:
                         if isinstance(input_msg["content"], str):
                             content = input_msg["content"]
@@ -358,7 +362,10 @@ def show_completion(completion):
                             isinstance(input_msg["content"], list)
                             and input_msg["role"] == "user"
                         ):
-                            content_list = [c.get("content") or c.get("text") for c in input_msg["content"]]
+                            content_list = [
+                                c.get("content") or c.get("text")
+                                for c in input_msg["content"]
+                            ]
 
                             content = "\n\n".join(content_list)
                         else:
@@ -380,9 +387,10 @@ def show_completion(completion):
                         ):
                             st.json(input_msg)
                 except Exception as e:
-                    logger.exception(f"Failed to parse {json.dumps(input_msg, indent=2)}")
+                    logger.exception(
+                        f"Failed to parse {json.dumps(input_msg, indent=2)}"
+                    )
 
         if completion.response:
             st.subheader("Completion response")
             st.json(completion.response)
-

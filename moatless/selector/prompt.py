@@ -7,6 +7,7 @@ def format_examples(examples):
         formatted.append(header + node_id + feedback)
     return "\n\n".join(formatted)
 
+
 SYSTEM_PROMPT = """You are an AI tasked with analyzing a Monte Carlo Tree Search (MCTS) tree and selecting the most promising node for expansion.
 The agent starts with searching through the codebase to find the most promising approach to the problem, and then continues by implementing code changes and tests to validate the approach, before concluding by reaching a finish state.
 By choosing a node, you are selecting the state at which the agent will continue from.

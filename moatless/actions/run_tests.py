@@ -11,10 +11,8 @@ from moatless.actions.model import (
     RewardScaleEntry,
 )
 from moatless.file_context import FileContext
-from moatless.index.code_index import CodeIndex, is_test
 from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment, TestResult, TestStatus
-from moatless.utils.tokenizer import count_tokens
+from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -63,7 +61,10 @@ class RunTests(Action):
         self._runtime = runtime
 
     def execute(
-        self, args: RunTestsArgs, file_context: FileContext | None = None, workspace: Workspace | None = None
+        self,
+        args: RunTestsArgs,
+        file_context: FileContext | None = None,
+        workspace: Workspace | None = None,
     ) -> Observation:
         """
         Run all tests found in file context or provided in args.
@@ -77,7 +78,7 @@ class RunTests(Action):
         non_existent_files = []
         directories = []
         test_files = []
-        
+
         for test_file in args.test_files:
             if not file_context.file_exists(test_file):
                 non_existent_files.append(test_file)
@@ -89,17 +90,21 @@ class RunTests(Action):
         if not test_files:
             error_details = []
             if non_existent_files:
-                error_details.append(f"Files not found: {', '.join(non_existent_files)}")
+                error_details.append(
+                    f"Files not found: {', '.join(non_existent_files)}"
+                )
             if directories:
-                error_details.append(f"Directories provided instead of files: {', '.join(directories)}")
-                
+                error_details.append(
+                    f"Directories provided instead of files: {', '.join(directories)}"
+                )
+
             return Observation(
                 message="Unable to run tests: " + "; ".join(error_details),
                 properties={"test_results": [], "fail_reason": "no_test_files"},
             )
 
         test_files = file_context.run_tests(test_files)
-        
+
         response_msg = f"Running tests for the following files:\n"
         for test_file in test_files:
             response_msg += f"* {test_file.file_path}\n"
@@ -115,7 +120,6 @@ class RunTests(Action):
             message=response_msg,
             summary=summary,
         )
-
 
     @classmethod
     def get_evaluation_criteria(cls, trajectory_length) -> List[str]:

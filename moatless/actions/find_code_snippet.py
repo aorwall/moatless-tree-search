@@ -1,11 +1,10 @@
 import logging
+from fnmatch import fnmatch
 from typing import List, Optional, Tuple, Type, ClassVar
-import os
 
 from pydantic import Field, model_validator
 
-from fnmatch import fnmatch
-from moatless.actions.model import ActionArguments, FewShotExample, Observation
+from moatless.actions.model import ActionArguments, FewShotExample
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
 from moatless.file_context import FileContext
 
@@ -53,6 +52,7 @@ class FindCodeSnippetArgs(SearchBaseArgs):
             param_str += f", file_pattern={self.file_pattern}"
         return f"{self.name}({param_str})"
 
+
 class FindCodeSnippet(SearchBaseAction):
     args_schema: ClassVar[Type[ActionArguments]] = FindCodeSnippetArgs
 
@@ -61,7 +61,9 @@ class FindCodeSnippet(SearchBaseAction):
         description="The maximum number of search results to return. Default is 10.",
     )
 
-    def _search_for_context(self, args: FindCodeSnippetArgs) -> Tuple[FileContext, bool]:
+    def _search_for_context(
+        self, args: FindCodeSnippetArgs
+    ) -> Tuple[FileContext, bool]:
         logger.info(
             f"{self.name}: {args.code_snippet} (file_pattern: {args.file_pattern})"
         )
@@ -72,13 +74,13 @@ class FindCodeSnippet(SearchBaseAction):
 
         if args.file_pattern and len(matches) > 1:
             matches = [
-                (file_path, line_num) 
-                for file_path, line_num in matches 
+                (file_path, line_num)
+                for file_path, line_num in matches
                 if fnmatch(file_path, args.file_pattern)
             ]
 
         search_result_context = FileContext(repo=self._repository)
-        for file_path, start_line in matches[:self.max_hits]:
+        for file_path, start_line in matches[: self.max_hits]:
             num_lines = len(args.code_snippet.splitlines())
             end_line = start_line + num_lines - 1
 

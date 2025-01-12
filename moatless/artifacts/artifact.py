@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Literal, Optional, Union, TypeVar, Generic
-from pydantic import BaseModel, Field
 
+from pydantic import BaseModel, Field
 
 
 class TextPromptModel(BaseModel):
@@ -35,13 +35,15 @@ class ArtifactChange(BaseModel):
 
 
 # Create a TypeVar for the specific Artifact type
-T = TypeVar('T', bound='Artifact')
+T = TypeVar("T", bound="Artifact")
+
 
 class ArtifactHandler(ABC, BaseModel, Generic[T]):
     """
     Defines how to load, save, update, and delete artifacts of a certain type.
     The type parameter T specifies which Artifact subclass this handler manages.
     """
+
     type: str = Field(description="Type of artifact this handler manages")
 
     @abstractmethod

@@ -9,46 +9,47 @@ from moatless.completion.completion import CompletionModel
 from moatless.completion.model import StructuredOutput
 from moatless.feedback import FeedbackGenerator
 from moatless.feedback.feedback_agent import FeedbackData
-from moatless.node import Node, generate_ascii_tree
+from moatless.node import Node
 
 logger = logging.getLogger(__name__)
+
 
 class ImplementationGuidance(BaseModel):
     focus: str = Field(..., description="Area that needs attention")
     consideration: str = Field(..., description="What to keep in mind")
     why: str = Field(..., description="Why this aspect is important")
 
+
 class TestRequirement(BaseModel):
     scenario: str = Field(..., description="What to verify")
     criteria: str = Field(..., description="How to know it works")
 
+
 class NovelSolutionFeedback(StructuredOutput):
     """Provide novel solution feedback to the coding agent."""
-    
+
     implementation_guidance: ImplementationGuidance = Field(
         ...,
-        description="A focused suggestion highlighting the most important aspect to consider"
+        description="A focused suggestion highlighting the most important aspect to consider",
     )
     test_requirements: List[TestRequirement] = Field(
         ...,
         description="2 specific scenarios or conditions that demonstrate success",
         min_items=2,
-        max_items=2
+        max_items=2,
     )
+
 
 class NovelSolutionFeedbackAgent(FeedbackGenerator):
     completion_model: CompletionModel = Field(
-        ..., 
-        description="The completion model to use"
+        ..., description="The completion model to use"
     )
 
     def generate_feedback(
-        self,
-        node: Node,
-        actions: List[Action] | None = None
+        self, node: Node, actions: List[Action] | None = None
     ) -> Optional[FeedbackData]:
         """Generate guidance-focused feedback for solution implementation."""
-        
+
         messages = self._create_analysis_messages(node)
         system_prompt = self._create_system_prompt()
 
@@ -56,7 +57,7 @@ class NovelSolutionFeedbackAgent(FeedbackGenerator):
             completion_response = self.completion_model.create_completion(
                 messages=messages,
                 system_prompt=system_prompt,
-                response_model=NovelSolutionFeedback
+                response_model=NovelSolutionFeedback,
             )
 
             node.completions["feedback"] = completion_response.completion
@@ -66,14 +67,18 @@ class NovelSolutionFeedbackAgent(FeedbackGenerator):
                 return None
 
             feedback_response = completion_response.structured_output
-            
+
             feedback_message = "Consider this aspect in your implementation:\n\n"
-            
+
             feedback_message += "**Key Focus**:\n"
-            feedback_message += f" - What: {feedback_response.implementation_guidance.focus}\n"
+            feedback_message += (
+                f" - What: {feedback_response.implementation_guidance.focus}\n"
+            )
             feedback_message += f" - Consider: {feedback_response.implementation_guidance.consideration}\n"
-            feedback_message += f" - Why: {feedback_response.implementation_guidance.why}\n\n"
-            
+            feedback_message += (
+                f" - Why: {feedback_response.implementation_guidance.why}\n\n"
+            )
+
             feedback_message += "\nValidate your solution against these scenarios:\n\n"
             for i, test in enumerate(feedback_response.test_requirements, 1):
                 feedback_message += f"**Test Scenario {i}**:\n"
@@ -83,14 +88,16 @@ class NovelSolutionFeedbackAgent(FeedbackGenerator):
             return FeedbackData(
                 analysis=completion_response.text_response,
                 feedback=feedback_message,
-                suggested_node_id=None
+                suggested_node_id=None,
             )
 
         except Exception as e:
             logger.exception(f"Error generating novel solution feedback: {e}")
             return None
 
-    def _create_analysis_messages(self, current_node: Node) -> List[ChatCompletionUserMessage]:
+    def _create_analysis_messages(
+        self, current_node: Node
+    ) -> List[ChatCompletionUserMessage]:
         messages = []
 
         root_node = current_node.get_root()
@@ -123,19 +130,23 @@ class NovelSolutionFeedbackAgent(FeedbackGenerator):
                 if latest_feedback:
                     attempts_message += "\n\n### Previous Feedback:\n"
                     attempts_message += latest_feedback
-                
+
                 if node.file_context and not node.file_context.is_empty():
                     attempts_message += "\n\n### Final Code State:\n"
-                    attempts_message += "Code identified as relevant and modified in this attempt\n"
+                    attempts_message += (
+                        "Code identified as relevant and modified in this attempt\n"
+                    )
                     attempts_message += "<file_context>\n"
                     attempts_message += node.file_context.create_prompt(
                         show_outcommented_code=True,
                         exclude_comments=True,
-                        outcomment_code_comment="... code not in context for this attempt"
+                        outcomment_code_comment="... code not in context for this attempt",
                     )
                     attempts_message += "\n</file_context>"
 
-                patch = node.file_context.generate_git_patch() if node.file_context else ""
+                patch = (
+                    node.file_context.generate_git_patch() if node.file_context else ""
+                )
                 if patch.strip():
                     attempts_message += "\n\n### Changes Made:\n"
                     attempts_message += "<git_patch>\n"
@@ -149,9 +160,13 @@ class NovelSolutionFeedbackAgent(FeedbackGenerator):
                 if node.reward:
                     attempts_message += f"\n\n### Reward: {node.reward.value}/100\n"
                     if node.reward.explanation:
-                        attempts_message += f"Reward Explanation: {node.reward.explanation}\n"
+                        attempts_message += (
+                            f"Reward Explanation: {node.reward.explanation}\n"
+                        )
 
-            messages.append(ChatCompletionUserMessage(role="user", content=attempts_message))
+            messages.append(
+                ChatCompletionUserMessage(role="user", content=attempts_message)
+            )
 
         return messages
 
@@ -220,4 +235,3 @@ Structure your response with:
 
 Keep guidance general enough to allow for creative solutions while ensuring 
 critical aspects aren't overlooked. Favor simplicity and consistency over clever solutions."""
-

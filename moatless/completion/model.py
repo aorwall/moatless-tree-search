@@ -2,12 +2,10 @@ import hashlib
 import json
 import logging
 from typing import Optional, Any, Union, Self, ClassVar
-from docstring_parser import parse
 
-from instructor import OpenAISchema
+from docstring_parser import parse
 from instructor.utils import classproperty
 from pydantic import BaseModel, model_validator, Field, ValidationError
-from pydantic_core.core_schema import ValidationInfo
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +41,7 @@ class AssistantMessage(Message):
             return None
 
         # Create a string combining name and input for hashing
-        tool_str = (
-            f"{str(self.tool_call.name)}:{json.dumps(self.tool_call.input, sort_keys=True)}"
-        )
+        tool_str = f"{str(self.tool_call.name)}:{json.dumps(self.tool_call.input, sort_keys=True)}"
         # Generate SHA-256 hash and take first 8 characters
         hash_id = hashlib.sha256(tool_str.encode()).hexdigest()[:8]
         return f"call_{hash_id}"
@@ -98,6 +94,7 @@ class Usage(BaseModel):
 
         try:
             import litellm
+
             cost = litellm.completion_cost(
                 completion_response=completion_response, model=model
             )
@@ -105,6 +102,7 @@ class Usage(BaseModel):
             # If cost calculation fails, fall back to calculating it manually
             try:
                 from litellm import cost_per_token, NotFoundError
+
                 prompt_cost, completion_cost = cost_per_token(
                     model=model,
                     prompt_tokens=prompt_tokens,
@@ -135,7 +133,7 @@ class Usage(BaseModel):
         other_completion = getattr(other, "completion_tokens", 0)
         other_prompt = getattr(other, "prompt_tokens", 0)
         other_cached = getattr(other, "cached_tokens", 0)
-        
+
         return Usage(
             completion_cost=self.completion_cost + other_cost,
             completion_tokens=self.completion_tokens + other_completion,
@@ -168,11 +166,20 @@ class Completion(BaseModel):
     response: dict[str, Any] | None = None
     retries: int | None = None
     usage: Usage | None = None
-    flags: list[str] = Field(default_factory=list, description="List of flags indicating special conditions or states during completion")
+    flags: list[str] = Field(
+        default_factory=list,
+        description="List of flags indicating special conditions or states during completion",
+    )
 
     @classmethod
     def from_llm_completion(
-        cls, input_messages: list[dict], completion_response: Any, model: str, usage: Usage | None = None, retries: int | None = None, flags: list[str] | None = None
+        cls,
+        input_messages: list[dict],
+        completion_response: Any,
+        model: str,
+        usage: Usage | None = None,
+        retries: int | None = None,
+        flags: list[str] | None = None,
     ) -> Optional["Completion"]:
         if isinstance(completion_response, BaseModel):
             response = completion_response.model_dump()
@@ -193,14 +200,16 @@ class Completion(BaseModel):
             response=response,
             retries=retries,
             usage=usage,
-            flags=flags or []
+            flags=flags or [],
         )
+
 
 class NameDescriptor:
     def __get__(self, obj, cls=None) -> str:
         if hasattr(cls, "Config") and hasattr(cls.Config, "title") and cls.Config.title:
             return cls.Config.title
         return cls.__name__
+
 
 class StructuredOutput(BaseModel):
     name: ClassVar[NameDescriptor] = NameDescriptor()
@@ -220,7 +229,10 @@ class StructuredOutput(BaseModel):
         schema = cls.model_json_schema()
         docstring = parse(cls.__doc__ or "")
         parameters = {
-            k: v for k, v in schema.items() if k not in ("title", "description") and (thoughts_in_action or k != "thoughts")
+            k: v
+            for k, v in schema.items()
+            if k not in ("title", "description")
+            and (thoughts_in_action or k != "thoughts")
         }
 
         if not thoughts_in_action and parameters["properties"].get("thoughts"):
@@ -242,7 +254,7 @@ class StructuredOutput(BaseModel):
             """Recursively resolve $ref references in the schema"""
             if not isinstance(obj, dict):
                 return obj
-            
+
             result = {}
             for k, v in obj.items():
                 if k == "items" and isinstance(v, dict) and "$ref" in v:
@@ -259,20 +271,25 @@ class StructuredOutput(BaseModel):
                         ref_name = ref_path.split("/")[-1]
                         if ref_name in defs:
                             # Create a new dict with all properties except $ref
-                            resolved = {k2: v2 for k2, v2 in obj.items() if k2 != "$ref"}
+                            resolved = {
+                                k2: v2 for k2, v2 in obj.items() if k2 != "$ref"
+                            }
                             # Merge with the referenced definition
                             referenced = defs[ref_name].copy()
                             referenced.update(resolved)
                             return resolve_refs(referenced, defs)
-                
+
                 # Recursively resolve nested objects/arrays
                 if isinstance(v, dict):
                     result[k] = resolve_refs(v, defs)
                 elif isinstance(v, list):
-                    result[k] = [resolve_refs(item, defs) if isinstance(item, dict) else item for item in v]
+                    result[k] = [
+                        resolve_refs(item, defs) if isinstance(item, dict) else item
+                        for item in v
+                    ]
                 else:
                     result[k] = v
-            
+
             return result
 
         # Remove default field from all properties recursively
@@ -291,7 +308,9 @@ class StructuredOutput(BaseModel):
                     parameters["properties"][name]["description"] = description
 
         parameters["required"] = sorted(
-            k for k, v in parameters["properties"].items() if "default" not in v and (thoughts_in_action or k != "thoughts")
+            k
+            for k, v in parameters["properties"].items()
+            if "default" not in v and (thoughts_in_action or k != "thoughts")
         )
 
         if "description" not in schema:
@@ -309,7 +328,7 @@ class StructuredOutput(BaseModel):
                 "name": name,
                 "description": schema["description"],
                 "parameters": parameters,
-            }
+            },
         }
 
     @classmethod
@@ -345,7 +364,7 @@ class StructuredOutput(BaseModel):
         parsed_input = {}
         # Fields that can be parsed from XML format
         xml_fields = ["path", "old_str", "new_str", "file_text", "insert_line"]
-        
+
         for field in xml_fields:
             start_tag = f"<{field}>"
             end_tag = f"</{field}>"
@@ -353,15 +372,15 @@ class StructuredOutput(BaseModel):
                 start_idx = xml_text.index(start_tag) + len(start_tag)
                 end_idx = xml_text.index(end_tag)
                 content = xml_text[start_idx:end_idx]
-                
+
                 # Handle both single-line and multi-line block content
                 if content:
                     # If content starts/ends with newlines, preserve the inner content
-                    if content.startswith('\n') and content.endswith('\n'):
+                    if content.startswith("\n") and content.endswith("\n"):
                         # Remove first and last newline but preserve internal formatting
-                        content = content[1:-1].rstrip('\n')
+                        content = content[1:-1].rstrip("\n")
                     parsed_input[field] = content
-                    
+
         return cls.model_validate(parsed_input)
 
     @classmethod
@@ -381,10 +400,10 @@ class StructuredOutput(BaseModel):
                     return {k: unescape_values(v) for k, v in obj.items()}
                 elif isinstance(obj, list):
                     return [unescape_values(v) for v in obj]
-                elif isinstance(obj, str) and '\\' in obj:
-                    return obj.encode().decode('unicode_escape')
+                elif isinstance(obj, str) and "\\" in obj:
+                    return obj.encode().decode("unicode_escape")
                 return obj
-                
+
             cleaned_data = unescape_values(parsed_data)
             cleaned_json = json.dumps(cleaned_data)
             return super().model_validate_json(cleaned_json, **kwarg)
@@ -431,7 +450,12 @@ class StructuredOutput(BaseModel):
         Format the input arguments for LLM completion calls. Override in subclasses for custom formats.
         Default implementation returns JSON format.
         """
-        return json.dumps(self.model_dump(exclude={"thoughts"} if hasattr(self, "thoughts") else None), indent=2)
+        return json.dumps(
+            self.model_dump(
+                exclude={"thoughts"} if hasattr(self, "thoughts") else None
+            ),
+            indent=2,
+        )
 
     @classmethod
     def format_schema_for_llm(cls, thoughts_in_action: bool = False) -> str:
@@ -444,7 +468,9 @@ class StructuredOutput(BaseModel):
         if not thoughts_in_action and schema["properties"].get("thoughts"):
             del schema["properties"]["thoughts"]
             schema["required"] = sorted(
-                k for k, v in schema["properties"].items() if "default" not in v and (thoughts_in_action or k != "thoughts")
+                k
+                for k, v in schema["properties"].items()
+                if "default" not in v and (thoughts_in_action or k != "thoughts")
             )
 
         return f"Requires a JSON response with the following schema: {json.dumps(schema, ensure_ascii=False)}"
@@ -454,17 +480,17 @@ class StructuredOutput(BaseModel):
         """
         Format XML schema description.
         Used by actions that require XML-formatted input.
-        
+
         Args:
             xml_fields: Dictionary mapping field names to their descriptions
         """
         schema = [f"Requires the following XML format:"]
-        
+
         # Build example XML structure
         example = []
         for field_name, field_desc in xml_fields.items():
             example.append(f"<{field_name}>{field_desc}</{field_name}>")
-            
+
         return "\n".join(schema + example)
 
 
@@ -473,6 +499,7 @@ def extract_json_from_message(message: str) -> tuple[dict | str, list[dict]]:
     Extract JSON from a message, handling both code blocks and raw JSON.
     Returns a tuple of (selected_json_dict, all_found_json_dicts).
     """
+
     def clean_json_string(json_str: str) -> str:
         # Remove single-line comments and clean control characters
         lines = []
@@ -502,7 +529,9 @@ def extract_json_from_message(message: str) -> tuple[dict | str, list[dict]]:
             try:
                 json_dict = json.loads(potential_json)
                 # Validate that this is a complete, non-truncated JSON object
-                if isinstance(json_dict, dict) and all(isinstance(k, str) for k in json_dict.keys()):
+                if isinstance(json_dict, dict) and all(
+                    isinstance(k, str) for k in json_dict.keys()
+                ):
                     all_found_jsons.append(json_dict)
             except json.JSONDecodeError:
                 pass
@@ -527,13 +556,15 @@ def extract_json_from_message(message: str) -> tuple[dict | str, list[dict]]:
                     potential_json = clean_json_string(message[start:end])
                     json_dict = json.loads(potential_json)
                     # Validate that this is a complete, non-truncated JSON object
-                    if isinstance(json_dict, dict) and all(isinstance(k, str) for k in json_dict.keys()):
+                    if isinstance(json_dict, dict) and all(
+                        isinstance(k, str) for k in json_dict.keys()
+                    ):
                         all_found_jsons.append(json_dict)
                     break
                 except json.JSONDecodeError:
                     continue
             if not all_found_jsons:  # If no valid JSON found, move past this {
-                current_pos = start- + 1
+                current_pos = start - +1
             else:
                 current_pos = end
 

@@ -1,7 +1,6 @@
 import logging
 from pathlib import Path
 from typing import List
-from datetime import datetime, timedelta
 
 from pydantic import Field
 
@@ -9,7 +8,6 @@ from moatless.actions.action import Action
 from moatless.actions.code_action_value_mixin import CodeActionValueMixin
 from moatless.actions.code_modification_mixin import CodeModificationMixin
 from moatless.actions.model import ActionArguments, Observation, FewShotExample
-from moatless.actions.run_tests import RunTests, RunTestsArgs
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.file import do_diff
@@ -57,6 +55,7 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
     """
     Action to insert text at a specific line in a file.
     """
+
     args_schema = InsertLinesArgs
 
     def __init__(
@@ -72,7 +71,12 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
         object.__setattr__(self, "_code_index", code_index)
         object.__setattr__(self, "_repository", repository)
 
-    def execute(self, args: InsertLinesArgs, file_context: FileContext | None = None, workspace: Workspace | None = None) -> Observation:
+    def execute(
+        self,
+        args: InsertLinesArgs,
+        file_context: FileContext | None = None,
+        workspace: Workspace | None = None,
+    ) -> Observation:
         if args.path.startswith("/repo"):
             args.path = args.path[5:]
         if args.path.startswith("/"):

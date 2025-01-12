@@ -71,7 +71,7 @@ class InMemRepository(Repository):
 
     def is_directory(self, file_path: str) -> bool:
         return False
-    
+
     def list_directory(self, directory_path: str = "") -> Dict[str, List[str]]:
         return {"files": [], "directories": []}
 

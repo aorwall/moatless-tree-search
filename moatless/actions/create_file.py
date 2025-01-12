@@ -8,7 +8,6 @@ from moatless.actions.action import Action
 from moatless.actions.code_action_value_mixin import CodeActionValueMixin
 from moatless.actions.code_modification_mixin import CodeModificationMixin
 from moatless.actions.model import ActionArguments, Observation, FewShotExample
-from moatless.actions.run_tests import RunTests, RunTestsArgs
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.file import do_diff
@@ -28,6 +27,7 @@ class CreateFileArgs(ActionArguments):
     * Will create parent directories if they don't exist
     * File content should include proper indentation and formatting
     """
+
     path: str = Field(..., description="Path where the new file should be created")
     file_text: str = Field(..., description="Complete content to write to the new file")
 
@@ -42,16 +42,16 @@ class CreateFileArgs(ActionArguments):
 
     @classmethod
     def format_schema_for_llm(cls) -> str:
-        return cls.format_xml_schema({
-            "path": "file/path.py",
-            "file_text": "\ncomplete file content\n"
-        })
+        return cls.format_xml_schema(
+            {"path": "file/path.py", "file_text": "\ncomplete file content\n"}
+        )
 
 
 class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
     """
     Action to create a new file with specified content.
     """
+
     args_schema = CreateFileArgs
 
     def __init__(
@@ -67,7 +67,12 @@ class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
         object.__setattr__(self, "_code_index", code_index)
         object.__setattr__(self, "_repository", repository)
 
-    def execute(self, args: CreateFileArgs, file_context: FileContext | None = None, workspace: Workspace | None = None) -> Observation:
+    def execute(
+        self,
+        args: CreateFileArgs,
+        file_context: FileContext | None = None,
+        workspace: Workspace | None = None,
+    ) -> Observation:
         if args.path.startswith("/repo"):
             args.path = args.path[5:]
         if args.path.startswith("/"):
@@ -100,7 +105,6 @@ class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
             observation.message += f"\n\n{test_summary}"
 
         return observation
-
 
     @classmethod
     def get_few_shot_examples(cls) -> List[FewShotExample]:

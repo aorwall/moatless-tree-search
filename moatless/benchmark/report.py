@@ -17,9 +17,9 @@ from moatless.benchmark.utils import (
     read_search_trees,
 )
 from moatless.file_context import FileContext
-from moatless.utils.file import is_test
 from moatless.node import Node
 from moatless.search_tree import SearchTree
+from moatless.utils.file import is_test
 
 logger = logging.getLogger(__name__)
 
@@ -250,13 +250,12 @@ def create_trajectory_stats(
                 result.expect_corrections += 1
 
             if node.file_context and node.file_context.test_files:
-                
                 passed, failed, errored = node.file_context.get_test_counts()
                 failed_test_count = failed + errored
 
                 if result.initial_failed_tests is None:
                     result.initial_failed_tests = failed_test_count
-                
+
                 if passed + failed + errored > result.max_tests_run:
                     result.max_tests_run = passed + failed + errored
 
@@ -268,7 +267,6 @@ def create_trajectory_stats(
                     if failed_test_count > 0:
                         result.flags.append("has_failed_tests")
 
-                
             if node.observation and node.observation.properties:
                 if "flags" in node.observation.properties:
                     for flag in node.observation.properties["flags"]:
@@ -277,7 +275,7 @@ def create_trajectory_stats(
 
                 if "fail_reason" in node.observation.properties:
                     fail_reason = node.observation.properties["fail_reason"]
-                    
+
                     if fail_reason not in ["no_spans_added"]:
                         result.failed_actions += 1
 
@@ -291,7 +289,7 @@ def create_trajectory_stats(
                     file_path = node.action.path
                 else:
                     file_path = ""
-    
+
                 if is_test(file_path):
                     result.test_edits += 1
                 else:
@@ -310,7 +308,7 @@ def create_trajectory_stats(
 
             current_action_dump = node.action.model_dump(exclude={"thoughts"})
             action_dumps.append(current_action_dump)
-            
+
             if current_action_dump in action_dumps[:-1]:
                 result.duplicated_actions += 1
 
@@ -396,7 +394,9 @@ def to_result(
             best_node = search_tree.get_best_trajectory()
             if not best_node:
                 status = "pending"
-            elif (best_node.action and best_node.action.name == "Error") or best_node.error:
+            elif (
+                best_node.action and best_node.action.name == "Error"
+            ) or best_node.error:
                 status = "error"
             elif not best_node.file_context.generate_git_patch():
                 status = "no_patch"
@@ -404,17 +404,18 @@ def to_result(
                 status = "completed"
 
         if external_result:
-            resolved = (
-                info.get("instance_id", "") in external_result["resolved_ids"]
-            )
+            resolved = info.get("instance_id", "") in external_result["resolved_ids"]
 
-        elif eval_report:            
+        elif eval_report:
             best_node = search_tree.get_best_trajectory()
             if best_node:
-                resolved = eval_report.get("node_results", {}).get(str(best_node.node_id), {}).get("resolved", None)
+                resolved = (
+                    eval_report.get("node_results", {})
+                    .get(str(best_node.node_id), {})
+                    .get("resolved", None)
+                )
             else:
                 logger.warning(f"No best node found for {info['instance_id']}")
-                
 
         total_usage = search_tree.total_usage()
 
@@ -504,7 +505,9 @@ def to_result(
                 if flag not in result.flags:
                     result.flags.append(flag)
 
-            result.max_build_tokens = max(result.max_build_tokens, traj.max_build_tokens)
+            result.max_build_tokens = max(
+                result.max_build_tokens, traj.max_build_tokens
+            )
 
             result.duplicated_actions += traj.duplicated_actions
 
@@ -514,7 +517,10 @@ def to_result(
         else:
             result.error = ""
 
-        if result.duplicated_actions > 0 and "has_duplicated_actions" not in result.flags:
+        if (
+            result.duplicated_actions > 0
+            and "has_duplicated_actions" not in result.flags
+        ):
             result.flags.append("has_duplicated_actions")
         if result.test_edits == 0 and "no_test_edits" not in result.flags:
             result.flags.append("no_test_edits")
@@ -649,12 +655,12 @@ def to_dataframe(
 
         for k, v in d.items():
             new_key = f"{parent_key}{sep}{k}" if parent_key else k
-            
+
             # Special handling for actions dictionary
             if k == "actions":
                 items.append((k, v))  # Keep actions as a dictionary
                 continue
-                
+
             if isinstance(v, dict):
                 items.extend(flatten_dict(v, new_key, sep=sep).items())
             else:

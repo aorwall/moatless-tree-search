@@ -6,7 +6,6 @@ from litellm.types.llms.openai import ChatCompletionUserMessage
 from pydantic import Field
 
 from moatless.completion.completion import CompletionModel
-
 from moatless.repository.file import FileRepository
 from moatless.utils.repo import maybe_clone, checkout_commit, clone_and_checkout
 

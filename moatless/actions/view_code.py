@@ -4,28 +4,18 @@ from typing import List, Optional
 from pydantic import Field, BaseModel, PrivateAttr
 
 from moatless.actions.action import Action
+from moatless.actions.identify_mixin import IdentifyMixin
 from moatless.actions.model import (
     ActionArguments,
     FewShotExample,
     Observation,
-    RetryException,
     RewardScaleEntry,
 )
 from moatless.codeblocks import CodeBlockType
+from moatless.completion import CompletionModel
 from moatless.file_context import FileContext, ContextFile
 from moatless.repository.repository import Repository
 from moatless.workspace import Workspace
-from moatless.actions.search_base import (
-    SearchBaseArgs,
-    IDENTIFY_SYSTEM_PROMPT,
-    Identify,
-    IdentifiedSpans,
-)
-from litellm.types.llms.openai import ChatCompletionAssistantMessage, ChatCompletionUserMessage
-from moatless.completion import CompletionModel
-from moatless.completion.model import Completion
-from moatless.exceptions import CompletionRejectError
-from moatless.actions.identify_mixin import IdentifyMixin
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +78,6 @@ class ViewCodeArgs(ActionArguments):
             if file.span_ids:
                 prompt += f"  Spans: {', '.join(file.span_ids)}\n"
         return prompt
-    
 
     def short_summary(self) -> str:
         param_strs = []
@@ -96,7 +85,6 @@ class ViewCodeArgs(ActionArguments):
             param_strs.append(f"path={file.file_path}")
         param_str = ", ".join(param_strs)
         return f"{self.name}({param_str})"
-
 
 
 class ViewCode(Action, IdentifyMixin):
@@ -108,7 +96,7 @@ class ViewCode(Action, IdentifyMixin):
         self,
         repository: Repository = None,
         completion_model: CompletionModel | None = None,
-        **data
+        **data,
     ):
         super().__init__(completion_model=completion_model, **data)
         self._repository = repository
@@ -118,7 +106,12 @@ class ViewCode(Action, IdentifyMixin):
         description="The maximum number of tokens in the requested code.",
     )
 
-    def execute(self, args: ViewCodeArgs, file_context: FileContext | None = None, workspace: Workspace | None = None) -> Observation:
+    def execute(
+        self,
+        args: ViewCodeArgs,
+        file_context: FileContext | None = None,
+        workspace: Workspace | None = None,
+    ) -> Observation:
         if file_context is None:
             raise ValueError(
                 "File context must be provided to execute the view action."
@@ -194,7 +187,9 @@ class ViewCode(Action, IdentifyMixin):
 
                         for block in blocks:
                             view_context.add_span_to_context(
-                                file_path, block.belongs_to_span.span_id, add_extra=False
+                                file_path,
+                                block.belongs_to_span.span_id,
+                                add_extra=False,
                             )
 
                     elif block_span.initiating_block.type == CodeBlockType.CLASS:
@@ -222,7 +217,9 @@ class ViewCode(Action, IdentifyMixin):
                     view_file.set_patch(file.patch)
 
             if view_context.context_size() > self.max_tokens:
-                view_context, completion = self._identify_code(args, view_context, self.max_tokens)
+                view_context, completion = self._identify_code(
+                    args, view_context, self.max_tokens
+                )
 
             new_span_ids = file_context.add_file_context(view_context)
             properties["files"][file_path] = {
@@ -230,8 +227,7 @@ class ViewCode(Action, IdentifyMixin):
             }
 
         added_new_spans = any(
-            len(file["new_span_ids"]) > 0
-            for file in properties["files"].values()
+            len(file["new_span_ids"]) > 0 for file in properties["files"].values()
         )
 
         if view_context.is_empty():
@@ -249,7 +245,10 @@ class ViewCode(Action, IdentifyMixin):
             )
 
             if added_new_spans:
-                summary = f"Showed the following code spans:\n" + view_context.create_summary()
+                summary = (
+                    f"Showed the following code spans:\n"
+                    + view_context.create_summary()
+                )
             else:
                 summary = "The specified code spans has already been viewed in a previous action."
 

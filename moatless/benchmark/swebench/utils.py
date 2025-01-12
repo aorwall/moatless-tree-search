@@ -2,7 +2,6 @@ import fcntl
 import logging
 import os
 import shutil
-import contextlib
 from typing import Optional
 
 from moatless.benchmark.utils import (
@@ -157,16 +156,21 @@ def create_repository(
         try:
             # Check if the commit exists in the repo
             import subprocess
+
             result = subprocess.run(
-                ['git', 'cat-file', '-e', instance['base_commit']],
+                ["git", "cat-file", "-e", instance["base_commit"]],
                 cwd=repo_path,
                 capture_output=True,
-                check=True
+                check=True,
             )
-            logger.info(f"Found existing repo with commit {instance['base_commit']} at {repo_path}")
+            logger.info(
+                f"Found existing repo with commit {instance['base_commit']} at {repo_path}"
+            )
             return GitRepository(repo_path=repo_path)
         except subprocess.CalledProcessError:
-            logger.warning(f"Existing repo at {repo_path} doesn't have commit {instance['base_commit']}")
+            logger.warning(
+                f"Existing repo at {repo_path} doesn't have commit {instance['base_commit']}"
+            )
             shutil.rmtree(repo_path)
         except Exception as e:
             logging.warning(f"Error checking repository: {e}")

@@ -4,6 +4,29 @@ you cannot communicate with the user but must rely on information you can get fr
 
 REACT_GUIDELINES = """# Action and ReAct Guidelines
 
+1. **Analysis First**
+   - Review all previous actions and their observations
+   - Understand what has been done and what information you have
+
+2. **Document Your Thoughts**
+   - ALWAYS write your reasoning in `<thoughts>` tags before any action
+   - Explain what you learned from previous observations
+   - Justify why you're choosing the next action
+   - Describe what you expect to learn/achieve
+
+3. **Single Action Execution**
+   - Run ONLY ONE action at a time
+   - Choose from the available functions
+   - Never try to execute multiple actions at once
+
+4. **Wait and Observe**
+   - After executing an action, STOP
+   - Wait for the observation (result) to be returned
+   - Do not plan or execute any further actions until you receive the observation
+"""
+
+REACT_MULTI_ACTION_GUIDELINES = """# Action and ReAct Guidelines
+
 - ALWAYS write your reasoning in `<thoughts>` tags before any action  
 - **Action Patterns:**
   * **Single Action Flow:** When you need an observation to inform your next step:
@@ -47,7 +70,42 @@ REACT_CORE_OPERATION_RULES = """
    - Any risks to watch for
   """
 
-def generate_workflow_prompt(actions) -> str:
+SUMMARY_CORE_OPERATION_RULES = """
+# Core Operation Rules
+
+First, analyze the provided history which will be in this format:
+<history>
+## Step {counter}
+Thoughts: Previous reasoning
+Action: Previous function call
+Observation: Result of the function call
+
+Code that has been viewed:
+{filename}
+```
+{code contents}
+```
+</history>
+
+Then, use WriteThoughts to document your analysis and reasoning:
+1. Analysis of history:
+   - What actions have been taken so far
+   - What code has been viewed
+   - What we've learned from observations
+   - What gaps remain
+
+2. Next steps reasoning:
+   - What we need to do next and why
+   - What we expect to learn/achieve
+   - Any risks to consider
+
+Finally, make ONE function call to proceed with the task.
+
+After your function call, you will receive an Observation to inform your next step.
+"""
+
+
+def generate_workflow_prompt(actions, has_runtime: bool = False) -> str:
     """Generate the workflow prompt based on available actions."""
     search_actions = []
     modify_actions = []
@@ -55,19 +113,19 @@ def generate_workflow_prompt(actions) -> str:
 
     # Define search action descriptions
     search_descriptions = {
-        'FindClass': 'Search for class definitions by class name',
-        'FindFunction': 'Search for function definitions by function name',
-        'FindCodeSnippet': 'Search for specific code patterns or text',
-        'SemanticSearch': 'Search code by semantic meaning and natural language description'
+        "FindClass": "Search for class definitions by class name",
+        "FindFunction": "Search for function definitions by function name",
+        "FindCodeSnippet": "Search for specific code patterns or text",
+        "SemanticSearch": "Search code by semantic meaning and natural language description",
     }
 
     # Define modify action descriptions
     modify_descriptions = {
-        'StringReplace': 'Replace exact text strings in files with new content',
-        'CreateFile': 'Create new files with specified content',
-        'InsertLine': 'Insert new lines at specific positions in files',
-        'AppendString': 'Add content to the end of files',
-        'ClaudeEditTool': 'Make complex code edits using natural language instructions'
+        "StringReplace": "Replace exact text strings in files with new content",
+        "CreateFile": "Create new files with specified content",
+        "InsertLine": "Insert new lines at specific positions in files",
+        "AppendString": "Add content to the end of files",
+        "ClaudeEditTool": "Make complex code edits using natural language instructions",
     }
 
     for action in actions:
@@ -76,7 +134,7 @@ def generate_workflow_prompt(actions) -> str:
             search_actions.append((action_name, search_descriptions[action_name]))
         elif action_name in modify_descriptions:
             modify_actions.append((action_name, modify_descriptions[action_name]))
-        elif action_name not in ['Finish', 'Reject', 'RunTests', 'ListFiles']:
+        elif action_name not in ["Finish", "Reject", "RunTests", "ListFiles"]:
             other_actions.append(action_name)
 
     prompt = """
@@ -95,7 +153,7 @@ def generate_workflow_prompt(actions) -> str:
         for action_name, description in search_actions:
             prompt += f"\n      * {action_name} - {description}"
 
-    if 'ViewCode' in [a.__class__.__name__ for a in actions]:
+    if "ViewCode" in [a.__class__.__name__ for a in actions]:
         prompt += """
   * **Secondary Method - ViewCode:** Only use when you need to see:
       * Additional context not returned by searches
@@ -105,40 +163,49 @@ def generate_workflow_prompt(actions) -> str:
     if modify_actions:
         prompt += """
   
-4. **Modify Code**
+3. **Modify Code**
   * **Apply Changes:**"""
         for action_name, description in modify_actions:
             prompt += f"\n    * {action_name} - {description}"
 
-    prompt += """
+    if has_runtime:
+        prompt += """
   * **Tests Run Automatically:** Tests execute after code changes
 
-5. **Locate Test Code**
+4. **Locate Test Code**
  * **Find Tests:** Use the same search and view code actions as step 2 to find:
      * Existing test files and test functions
      * Related test cases for modified components
      * Test utilities and helper functions
 
-6. **Modify Tests**
- * **Update Tests:** Use the code modification actions from step 4 to:
+5. **Modify Tests**
+ * **Update Tests:** Use the code modification actions from step 3 to:
      * Update existing tests to match code changes
      * Add new test cases for added functionality
      * Test edge cases, error conditions, and boundary values
      * Verify error handling and invalid inputs
  * **Tests Run Automatically:** Tests execute after test modifications
 
-7. **Iterate as Needed**
-  * Continue the process until all changes are complete and verified with new tests
+6. **Iterate as Needed**
+  * Continue the process until all changes are complete and verified with new tests"""
 
-8. **Complete Task**
-  * Use Finish when confident all changes are correct and verified with new tests. Explain why the task is complete and how it's verified with new tests.
-"""
+    prompt += """
+
+7. **Complete Task**"""
+    if has_runtime:
+        prompt += """
+  * Use Finish when confident all changes are correct and verified with new tests. Explain why the task is complete and how it's verified with new tests."""
+    else:
+        prompt += """
+  * Use Finish when confident all changes are correct and complete."""
 
     return prompt
 
+
 WORKFLOW_PROMPT = None  # This will be set dynamically when creating the agent
 
-GUIDELINE_PROMPT = """
+def generate_guideline_prompt(has_runtime: bool = False) -> str:
+    prompt = """
 # Important Guidelines
 
  * **Focus on the Specific Task**
@@ -147,12 +214,17 @@ GUIDELINE_PROMPT = """
 
  * **Code Context and Changes**
    - Limit code changes to files in the code you can see.
-   - If you need to examine more code, use ViewCode to see it.
+   - If you need to examine more code, use ViewCode to see it."""
+
+    if has_runtime:
+        prompt += """
 
  * **Testing**
    - Tests run automatically after each code change.
    - Always update or add tests to verify your changes.
-   - If tests fail, analyze the output and do necessary corrections.
+   - If tests fail, analyze the output and do necessary corrections."""
+
+    prompt += """
 
  * **Task Completion**
    - Finish the task only when the task is fully resolved and verified.
@@ -163,6 +235,7 @@ GUIDELINE_PROMPT = """
    - Before performing a new action, check your history to ensure you are not repeating previous steps.
    - Use the information you've already gathered to inform your next steps without re-fetching the same data.
 """
+    return prompt
 
 REACT_GUIDELINE_PROMPT = """
  * **One Action at a Time**
@@ -197,14 +270,6 @@ After each action, you will receive an Observation that contains the result of y
 - **Observations:** After each function call, you will receive an Observation containing the result. Use this information to plan your next step.
 - **One Action at a Time:** Only perform one action before waiting for its Observation.
 """
-
-
-SYSTEM_PROMPT = AGENT_ROLE + "WORKFLOW_PROMPT" + GUIDELINE_PROMPT + ADDITIONAL_NOTES
-
-SYSTEM_REACT_TOOL_PROMPT = AGENT_ROLE + REACT_GUIDELINES + "WORKFLOW_PROMPT" + GUIDELINE_PROMPT + ADDITIONAL_NOTES
-
-REACT_SYSTEM_PROMPT = AGENT_ROLE + REACT_CORE_OPERATION_RULES + "WORKFLOW_PROMPT" + GUIDELINE_PROMPT + ADDITIONAL_NOTES
-
 
 SIMPLE_CODE_PROMPT = (
     AGENT_ROLE
@@ -348,7 +413,9 @@ You will interact with an AI agent with limited programming capabilities, so it'
 )
 
 
-CLAUDE_REACT_PROMPT = AGENT_ROLE + """
+CLAUDE_REACT_PROMPT = (
+    AGENT_ROLE
+    + """
 You are expected to actively fix issues by making code changes. Do not just make suggestions - implement the necessary changes directly.
 
 # Action and ReAct Guidelines
@@ -451,3 +518,4 @@ You are expected to actively fix issues by making code changes. Do not just make
   - Make all necessary code changes to resolve the task
   - Verify changes through testing
 """
+)

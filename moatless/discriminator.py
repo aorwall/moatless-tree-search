@@ -1,8 +1,9 @@
 import logging
 from typing import List, Optional
-from pydantic import Field, BaseModel, ConfigDict
 
 from litellm.types.llms.openai import ChatCompletionUserMessage
+from pydantic import Field, BaseModel, ConfigDict
+
 from moatless.completion.completion import CompletionModel
 from moatless.completion.model import StructuredOutput
 from moatless.debate import MultiAgentDebate

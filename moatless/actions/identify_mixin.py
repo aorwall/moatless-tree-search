@@ -1,6 +1,10 @@
+import logging
 from typing import Optional, Tuple
 
-from litellm.types.llms.openai import ChatCompletionAssistantMessage, ChatCompletionUserMessage
+from litellm.types.llms.openai import (
+    ChatCompletionAssistantMessage,
+    ChatCompletionUserMessage,
+)
 from pydantic import Field
 
 from moatless.actions.search_base import IDENTIFY_SYSTEM_PROMPT, Identify
@@ -9,9 +13,8 @@ from moatless.completion.model import Completion
 from moatless.exceptions import CompletionRejectError
 from moatless.file_context import FileContext
 
-import logging
-
 logger = logging.getLogger(__name__)
+
 
 class IdentifyMixin:
     """Mixin that provides identify flow functionality for large code sections."""
@@ -33,12 +36,12 @@ class IdentifyMixin:
         self, args, view_context: FileContext, max_tokens: int
     ) -> Tuple[FileContext, Completion]:
         """Identify relevant code sections in a large context.
-        
+
         Args:
             args: The arguments containing the request information
             view_context: The context containing the code to identify from
             max_tokens: The maximum number of tokens allowed in the result
-            
+
         Returns:
             A tuple of (identified_context, completion)
         """
@@ -95,14 +98,16 @@ class IdentifyMixin:
                 )
 
                 messages.append(
-                    ChatCompletionAssistantMessage(role="assistant", content=identified_code.model_dump_json())
+                    ChatCompletionAssistantMessage(
+                        role="assistant", content=identified_code.model_dump_json()
+                    )
                 )
 
                 messages.append(
                     ChatCompletionUserMessage(
                         role="user",
                         content=f"The identified code sections are too large ({tokens} tokens). Maximum allowed is {max_tokens} tokens. "
-                        f"Please identify a smaller subset of the most relevant code sections."
+                        f"Please identify a smaller subset of the most relevant code sections.",
                     )
                 )
             else:
@@ -115,4 +120,4 @@ class IdentifyMixin:
         raise CompletionRejectError(
             f"Unable to reduce code selection to under {max_tokens} tokens after {MAX_RETRIES} attempts",
             last_completion=completion,
-        ) 
+        )

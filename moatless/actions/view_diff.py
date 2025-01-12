@@ -1,8 +1,6 @@
 import logging
 from typing import List
 
-from pydantic import Field
-
 from moatless.actions.action import Action
 from moatless.actions.model import ActionArguments, Observation, FewShotExample
 from moatless.file_context import FileContext
@@ -31,9 +29,14 @@ class ViewDiff(Action):
 
     args_schema = ViewDiffArgs
 
-    def execute(self, args: ViewDiffArgs, file_context: FileContext | None = None, workspace: Workspace | None = None) -> Observation:
+    def execute(
+        self,
+        args: ViewDiffArgs,
+        file_context: FileContext | None = None,
+        workspace: Workspace | None = None,
+    ) -> Observation:
         diff = file_context.generate_git_patch()
-        
+
         if not diff:
             return Observation(
                 message="No changes detected in the workspace.",
@@ -50,8 +53,6 @@ class ViewDiff(Action):
         return [
             FewShotExample.create(
                 user_input="Show me the current changes in the workspace",
-                action=ViewDiffArgs(
-                    thoughts="Viewing current git diff of all changes"
-                ),
+                action=ViewDiffArgs(thoughts="Viewing current git diff of all changes"),
             )
-        ] 
+        ]

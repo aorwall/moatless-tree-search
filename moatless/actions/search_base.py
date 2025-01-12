@@ -1,17 +1,17 @@
 import logging
 from abc import ABC
 from typing import List, Optional, Type, Any, ClassVar, Tuple
-import json
-import os
-from pathlib import Path
 
-from litellm.types.llms.openai import ChatCompletionAssistantMessage, ChatCompletionUserMessage
-from pydantic import Field, PrivateAttr, BaseModel, field_validator, model_validator
+from litellm.types.llms.openai import (
+    ChatCompletionAssistantMessage,
+    ChatCompletionUserMessage,
+)
+from pydantic import Field, PrivateAttr, BaseModel, field_validator
 
 from moatless.actions.action import Action
 from moatless.actions.model import ActionArguments, Observation, RewardScaleEntry
 from moatless.completion import CompletionModel
-from moatless.completion.model import Completion, StructuredOutput, UserMessage, Message
+from moatless.completion.model import Completion, StructuredOutput
 from moatless.exceptions import CompletionRejectError
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
@@ -124,9 +124,11 @@ class SearchBaseAction(Action):
         self._repository = repository
         self._code_index = code_index
 
-
     def execute(
-        self, args: SearchBaseArgs, file_context: FileContext | None = None, workspace: Workspace | None = None
+        self,
+        args: SearchBaseArgs,
+        file_context: FileContext | None = None,
+        workspace: Workspace | None = None,
     ) -> Observation:
         if file_context is None:
             raise ValueError(
@@ -146,19 +148,22 @@ class SearchBaseAction(Action):
 
         completion = None
 
-        if search_result_context.span_count() == 1 and search_result_context.context_size() > self.max_identify_tokens:
+        if (
+            search_result_context.span_count() == 1
+            and search_result_context.context_size() > self.max_identify_tokens
+        ):
             logger.warning(
                 f"{self.name}: Conext for {search_result_context.create_summary()} is too large ({search_result_context.context_size()} tokens)."
             )
             properties["fail_reason"] = "search_too_large"
             return Observation(
                 message="Search too large. Found a single code section that is too large to view. Please refine the search query.",
-                properties=properties
+                properties=properties,
             )
         elif (
-            (search_result_context.context_size() > self.max_search_tokens and search_result_context.span_count() > 1)
-            or search_result_context.span_count() > self.max_hits
-        ):
+            search_result_context.context_size() > self.max_search_tokens
+            and search_result_context.span_count() > 1
+        ) or search_result_context.span_count() > self.max_hits:
             logger.info(
                 f"{self.name}: Search too large. {properties['search_tokens']} tokens and {search_result_context.span_count()} hits, will ask for clarification."
             )
@@ -230,7 +235,7 @@ class SearchBaseAction(Action):
                 search_result_context.add_span_to_context(
                     hit.file_path, span.span_id, add_extra=True
                 )
-                
+
         return search_result_context, alternative_suggestion
 
     def _select_span_instructions(self, search_result: SearchCodeResponse) -> str:
@@ -324,14 +329,16 @@ class SearchBaseAction(Action):
                 )
 
                 messages.append(
-                    ChatCompletionAssistantMessage(role="assistant", content=identified_code.model_dump_json())
+                    ChatCompletionAssistantMessage(
+                        role="assistant", content=identified_code.model_dump_json()
+                    )
                 )
 
                 messages.append(
                     ChatCompletionUserMessage(
                         role="user",
                         content=f"The identified code sections are too large ({tokens} tokens). Maximum allowed is {self.max_search_tokens} tokens. "
-                        f"Please identify a smaller subset of the most relevant code sections."
+                        f"Please identify a smaller subset of the most relevant code sections.",
                     )
                 )
             else:

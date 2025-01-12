@@ -30,8 +30,14 @@ class LogHandler(CustomLogger):
 
         # Check if instance_id exists in kwargs
         instance_id = None
-        if "kwargs" in data and "litellm_params" in data["kwargs"] and "metadata" in data["kwargs"]["litellm_params"]:
-            instance_id = data["kwargs"]["litellm_params"]["metadata"].get("instance_id")
+        if (
+            "kwargs" in data
+            and "litellm_params" in data["kwargs"]
+            and "metadata" in data["kwargs"]["litellm_params"]
+        ):
+            instance_id = data["kwargs"]["litellm_params"]["metadata"].get(
+                "instance_id"
+            )
 
         # Use instance_id directory if available, otherwise use default log_dir
         log_path = f"{self.log_dir}/{instance_id}" if instance_id else self.log_dir

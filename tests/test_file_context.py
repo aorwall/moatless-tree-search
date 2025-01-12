@@ -95,11 +95,11 @@ def test_to_prompt_string_outcommented_code_block_with_line_numbers():
     assert (
         module.to_prompt(show_line_numbers=True)
         == """      # ...
-     2
+     2	
       # ...
-     6
-     7  # Regular comment
-     8  # with linebreak
+     6	
+     7	# Regular comment
+     8	# with linebreak
       # ..."""
     )
 

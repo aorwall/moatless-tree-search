@@ -4,6 +4,7 @@ from moatless.actions.action import Action
 from moatless.actions.model import RewardScaleEntry
 from moatless.actions.run_tests import RunTests
 
+
 class CodeActionValueMixin:
     """
     A mixin class that provides common evaluation criteria and reward scales for code modification actions that run tests.

@@ -14,7 +14,7 @@ load_dotenv()
 moatless_dir = os.getenv("MOATLESS_DIR", "/tmp/moatless")
 
 global_params = {
-    "model": "gpt-4o-mini-2024-07-18",  # "azure/gpt-4o",
+    "model": "gpt-4o-mini-2024-07-18",
     "temperature": 0.5,
     "max_tokens": 2000,
     "max_prompt_file_tokens": 8000,
@@ -29,22 +29,68 @@ pytest.mark.llm_integration = pytest.mark.skipif(
 @pytest.mark.parametrize(
     "model",
     [
-        # "claude-3-5-sonnet-20241022",
-        # "claude-3-5-haiku-20241022",
-        # "anthropic.claude-3-5-sonnet-20241022-v2:0",
-        "anthropic.claude-3-5-haiku-20241022-v1:0",
-        # "claude-3-5-sonnet-20241022",
-        # "azure/gpt-4o-mini",
-        # "gpt-4o-2024-08-06",
-        # "deepseek/deepseek-chat",
-        "gemini/gemini-2.0-flash-exp"
+        # Claude 3.5 Sonnet
+        {
+            "model": "claude-3-5-sonnet-20241022",
+            "response_format": LLMResponseFormat.TOOLS,
+            "message_history_type": MessageHistoryType.MESSAGES,
+            "thoughts_in_action": False
+        },
+        # Claude 3.5 Haiku
+        {
+            "model": "claude-3-5-haiku-20241022",
+            "response_format": LLMResponseFormat.TOOLS,
+            "message_history_type": MessageHistoryType.MESSAGES,
+            "thoughts_in_action": False
+        },
+        # GPT-4o
+        {
+            "model": "azure/gpt-4o",
+            "response_format": LLMResponseFormat.TOOLS,
+            "message_history_type": MessageHistoryType.MESSAGES,
+            "thoughts_in_action": True
+        },
+        # GPT-4o Mini
+        {
+            "model": "azure/gpt-4o-mini",
+            "response_format": LLMResponseFormat.TOOLS,
+            "message_history_type": MessageHistoryType.MESSAGES,
+            "thoughts_in_action": True
+        },
+        # DeepSeek Chat
+        {
+            "model": "deepseek/deepseek-chat",
+            "response_format": LLMResponseFormat.REACT,
+            "message_history_type": MessageHistoryType.REACT,
+            "thoughts_in_action": True
+        },
+        # Gemini Flash
+        {
+            "model": "gemini/gemini-2.0-flash-exp",
+            "response_format": LLMResponseFormat.TOOLS,
+            "message_history_type": MessageHistoryType.MESSAGES,
+            "thoughts_in_action": True
+        },
+        # Qwen 2.5 Coder
+        {
+            "model": "openrouter/qwen/qwen-2.5-coder-32b-instruct",
+            "response_format": LLMResponseFormat.REACT,
+            "message_history_type": MessageHistoryType.REACT,
+            "thoughts_in_action": False
+        }
     ],
+    ids=["claude-3-5-sonnet", "claude-3-5-haiku", "gpt-4o", "gpt-4o-mini", "deepseek-chat", "gemini-2.0-flash", "qwen-2.5-coder"]
 )
 @pytest.mark.llm_integration
-def test_basic_coding_tree(model):
-    completion_model = CompletionModel(model=model, temperature=0.0, response_format=LLMResponseFormat.TOOLS)
+def test_basic_coding_task(model):
+    completion_model = CompletionModel(
+        model=model["model"], 
+        temperature=0.0, 
+        response_format=model["response_format"], 
+        thoughts_in_action=model["thoughts_in_action"]
+    )
 
-    instance = load_instance("django__django-16379")
+    instance = load_instance("django__django-16527")
     repository = create_repository(instance)
 
     index_store_dir = os.getenv("INDEX_STORE_DIR", "/tmp/index_store")
@@ -56,13 +102,14 @@ def test_basic_coding_tree(model):
         completion_model=completion_model,
         repository=repository,
         code_index=code_index,
-        message_history_type=MessageHistoryType.MESSAGES
+        message_history_type=model["message_history_type"],
+        thoughts_in_action=model["thoughts_in_action"]
     )
 
-    persist_path = f"itegration_test_{model.replace('.', '_').replace('/', '_')}.json"
+    persist_path = f"itegration_test_{model['model'].replace('.', '_').replace('/', '_')}.json"
 
     search_tree = SearchTree.create(
-        instance["problem_statement"],
+        f"<task>\n{instance['problem_statement']}\n</task>",
         agent=agent,
         repository=repository,
         max_expansions=1,

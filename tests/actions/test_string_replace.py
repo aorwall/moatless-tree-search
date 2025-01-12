@@ -93,7 +93,6 @@ def test_string_replace_file_not_found(repository, file_context):
     observation = action.execute(args, file_context)
     
     assert observation.properties["fail_reason"] == "file_not_found"
-    assert observation.expect_correction
 
 def test_string_replace_same_string(repository, file_context):
     action = StringReplace(repository=repository)

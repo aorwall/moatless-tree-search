@@ -15,7 +15,17 @@ logger = logging.getLogger(__name__)
 _moatless_instances = {}
 
 
-def load_moatless_datasets(split: str):
+def load_moatless_datasets(split: str | None):
+    global _moatless_instances
+
+    if split:
+        _load_moatless_dataset(split)
+    else:
+        _load_moatless_dataset("lite")
+        _load_moatless_dataset("verified")
+
+
+def _load_moatless_dataset(split: str):
     global _moatless_instances
 
     file_path = os.path.join(
@@ -23,26 +33,24 @@ def load_moatless_datasets(split: str):
     )
     with open(file_path) as f:
         dataset = json.load(f)
-        _moatless_instances[split] = {d["instance_id"]: d for d in dataset}
+        _moatless_instances.update({d["instance_id"]: d for d in dataset})
 
 
-def get_moatless_instances(split: str = "lite"):
+def get_moatless_instances(split: str | None = None):
     global _moatless_instances
-    if split not in _moatless_instances:
+    if not _moatless_instances:
         load_moatless_datasets(split)
-    return _moatless_instances.get(split)
+    return _moatless_instances
 
 
-def get_moatless_instance(instance_id: str, split: str = "lite"):
+def get_moatless_instance(instance_id: str, split: str | None = None):
     global _moatless_instances
-    if split not in _moatless_instances:
+    if not _moatless_instances:
         load_moatless_datasets(split)
+
     instance = _moatless_instances.get(split).get(instance_id)
-    if not instance and split == "lite":
-        # FIXME:
-        return get_moatless_instance(instance_id, "verified")
     if not instance:
-        raise ValueError(f"Instance {instance_id} not found in {split} split.")
+        raise ValueError(f"Instance {instance_id} not found.")
 
     return instance
 

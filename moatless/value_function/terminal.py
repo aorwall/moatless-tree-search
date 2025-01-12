@@ -1,56 +1,58 @@
 import importlib
 import logging
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 from litellm.types.llms.openai import ChatCompletionUserMessage
-from pydantic import BaseModel, PrivateAttr, Field
+from pydantic import BaseModel, Field
 
 from moatless.actions.action import Action, RewardScaleEntry
-from moatless.completion.completion import CompletionModel, Message
+from moatless.completion.completion import CompletionModel
 from moatless.completion.model import Completion, StructuredOutput
-from moatless.message_history import MessageHistoryGenerator
-from moatless.node import Node, generate_ascii_tree
+from moatless.node import Node
 from moatless.value_function.base import ValueFunction
 from moatless.value_function.model import Reward
 
 logger = logging.getLogger(__name__)
 
+
 class ProvideReward(StructuredOutput):
     """Provide a reward value and explanation for a finished solution."""
 
     explanation: str = Field(
-        ..., 
-        description="Provide a detailed analysis of how well the solution solves the original task. Consider functionality, correctness, and completeness. Focus on evaluating the end result rather than the process."
+        ...,
+        description="Provide a detailed analysis of how well the solution solves the original task. Consider functionality, correctness, and completeness. Focus on evaluating the end result rather than the process.",
     )
-    
+
     value: int = Field(
         ...,
         description="A single integer value based on how well the solution addresses the original requirements",
         ge=-100,
-        le=100
+        le=100,
     )
+
 
 class ProvideRewardWithFeedback(ProvideReward):
     """Provide a reward value, explanation, and feedback for a finished solution."""
-    
+
     feedback: str = Field(
-        ..., 
-        description="Write a direct message to a new AI agent that will attempt to solve this task from scratch. The agent has no knowledge of the current solution. Suggest high-level approaches and strategies they should consider. Focus on conceptual guidance rather than specific implementation details. This feedback will be used as initial strategic guidance for their completely fresh attempt."
+        ...,
+        description="Write a direct message to a new AI agent that will attempt to solve this task from scratch. The agent has no knowledge of the current solution. Suggest high-level approaches and strategies they should consider. Focus on conceptual guidance rather than specific implementation details. This feedback will be used as initial strategic guidance for their completely fresh attempt.",
     )
+
 
 class TerminalValueFunction(BaseModel):
     """Value function for evaluating finished solutions.
-    
+
     This class evaluates complete solutions to determine how well they solve the original task.
     It provides:
     - A numerical reward value (-100 to 100)
     - An explanation analyzing the solution quality
     - Feedback suggesting alternative approaches for future attempts
-    
+
     The feedback is designed to guide completely new solution attempts from scratch,
     focusing on high-level strategies rather than specific implementation details.
     This helps explore different approaches to solving the same task.
-    
+
     Note: This value function can only evaluate nodes with a "Finish" action.
     For evaluating intermediate steps, use the base ValueFunction instead.
     """
@@ -58,7 +60,7 @@ class TerminalValueFunction(BaseModel):
     completion_model: CompletionModel = Field(
         ..., description="Completion model to be used for generating completions"
     )
-    
+
     include_node_suggestions: bool = Field(
         False, description="Whether to include node suggestions in the prompt"
     )
@@ -76,12 +78,15 @@ class TerminalValueFunction(BaseModel):
     )
 
     include_feedback: bool = Field(
-        False, description="Whether to include feedback in the reward. If True, uses ProvideRewardWithFeedback, otherwise uses ProvideReward."
+        False,
+        description="Whether to include feedback in the reward. If True, uses ProvideRewardWithFeedback, otherwise uses ProvideReward.",
     )
 
     def get_reward(self, node: Node) -> Tuple[Optional[Reward], Optional[Completion]]:
         if node.action.name != "Finish":
-            logger.warning(f"TerminalValueFunction can only evaluate finished solutions, but got action {node.action.name}")
+            logger.warning(
+                f"TerminalValueFunction can only evaluate finished solutions, but got action {node.action.name}"
+            )
             return None, None
 
         user_message = self._create_message(node)
@@ -89,11 +94,13 @@ class TerminalValueFunction(BaseModel):
         system_prompt = self._build_system_prompt(node)
 
         try:
-            response_model = ProvideRewardWithFeedback if self.include_feedback else ProvideReward
+            response_model = (
+                ProvideRewardWithFeedback if self.include_feedback else ProvideReward
+            )
             completion_response = self.completion_model.create_completion(
-                messages=messages, 
-                system_prompt=system_prompt, 
-                response_model=response_model
+                messages=messages,
+                system_prompt=system_prompt,
+                response_model=response_model,
             )
 
             if completion_response.structured_output:
@@ -101,9 +108,9 @@ class TerminalValueFunction(BaseModel):
                 reward = Reward(
                     value=output.value,
                     explanation=output.explanation,
-                    feedback=output.feedback if self.include_feedback else None
+                    feedback=output.feedback if self.include_feedback else None,
                 )
-            
+
                 return reward, completion_response.completion
             else:
                 logger.error("No structured output found in completion response")
@@ -117,26 +124,27 @@ class TerminalValueFunction(BaseModel):
         """Format existing solutions with node IDs below current. Returns True if any solutions were found."""
         root_node = node.get_root()
         leaf_nodes = root_node.get_leaf_nodes()
-        
+
         # Filter for finished nodes with lower IDs
         existing_solutions = [
-            n for n in leaf_nodes 
-            if n.is_finished() and n.node_id < node.node_id
+            n for n in leaf_nodes if n.is_finished() and n.node_id < node.node_id
         ]
-        
+
         if not existing_solutions:
             return False
-            
+
         attempts_message = "\n# Previous Solution Attempts\n"
         for i, solution_node in enumerate(existing_solutions, 1):
             attempts_message += f"\n## Attempt {i} (Node{solution_node.node_id})\n"
-            
+
             # Show reward if exists
             if solution_node.reward:
                 attempts_message += f"\nReward: {solution_node.reward.value}/100\n"
                 if solution_node.reward.explanation:
-                    attempts_message += f"Explanation: {solution_node.reward.explanation}\n"
-            
+                    attempts_message += (
+                        f"Explanation: {solution_node.reward.explanation}\n"
+                    )
+
             # Show feedback if exists
             trajectory = solution_node.get_trajectory()
             latest_feedback = None
@@ -147,34 +155,44 @@ class TerminalValueFunction(BaseModel):
             if latest_feedback:
                 attempts_message += "\nPrevious Feedback:\n"
                 attempts_message += latest_feedback + "\n"
-            
+
             # Show code context if exists
-            if self.show_file_context and solution_node.file_context and not solution_node.file_context.is_empty():
+            if (
+                self.show_file_context
+                and solution_node.file_context
+                and not solution_node.file_context.is_empty()
+            ):
                 attempts_message += "\nFinal Code State:\n"
-                attempts_message += "Code identified as relevant and modified in this attempt\n"
+                attempts_message += (
+                    "Code identified as relevant and modified in this attempt\n"
+                )
                 attempts_message += "<file_context>\n"
                 attempts_message += solution_node.file_context.create_prompt(
                     show_outcommented_code=True,
                     exclude_comments=True,
-                    outcomment_code_comment="... code not in context for this attempt"
+                    outcomment_code_comment="... code not in context for this attempt",
                 )
                 attempts_message += "\n</file_context>\n"
-            
+
             # Show changes if any
-            patch = solution_node.file_context.generate_git_patch() if solution_node.file_context else ""
+            patch = (
+                solution_node.file_context.generate_git_patch()
+                if solution_node.file_context
+                else ""
+            )
             if patch.strip():
                 attempts_message += "\nChanges Made:\n"
                 attempts_message += "<git_patch>\n"
                 attempts_message += patch
                 attempts_message += "\n</git_patch>\n"
-            
+
             # Show test results if any
             if solution_node.file_context and solution_node.file_context.test_files:
                 attempts_message += "\nTest Results:\n"
                 attempts_message += solution_node.file_context.get_test_summary() + "\n"
-            
+
             attempts_message += "-" * 80 + "\n"
-            
+
         return attempts_message
 
     def _create_message(self, node: Node) -> ChatCompletionUserMessage:
@@ -200,7 +218,9 @@ class TerminalValueFunction(BaseModel):
                         )
                         formatted_history.append(formatted_state)
                     else:
-                        logger.warning(f"No output found for Node{previous_node.node_id}")
+                        logger.warning(
+                            f"No output found for Node{previous_node.node_id}"
+                        )
 
             if formatted_history:
                 message += "\n\nBelow is the history of previously executed actions and their outputs that led up to the finished solution.\n"
@@ -213,8 +233,10 @@ class TerminalValueFunction(BaseModel):
             # First check if there are any previous solutions
             root_node = node.get_root()
             leaf_nodes = root_node.get_leaf_nodes()
-            has_previous = any(n.is_finished() and n.node_id < node.node_id for n in leaf_nodes)
-            
+            has_previous = any(
+                n.is_finished() and n.node_id < node.node_id for n in leaf_nodes
+            )
+
             if has_previous:
                 existing_solutions = self._show_existing_solutions(node)
                 if existing_solutions:
@@ -272,7 +294,9 @@ The user message contains the following sections:
 - <task>: The original task description"""
 
         if self.show_history:
-            prompt += "\n- <history>: Actions and outputs that led to the CURRENT solution"
+            prompt += (
+                "\n- <history>: Actions and outputs that led to the CURRENT solution"
+            )
 
         if self.show_previous_solutions:
             prompt += """
@@ -301,8 +325,12 @@ Important:
         reward_scale_list = action.get_reward_scale(trajectory_length)
         min_value, max_value = action.get_reward_range(trajectory_length)
 
-        evaluation_criteria_text = ValueFunction._format_evaluation_criteria(criteria_list)
-        reward_scale_text = ValueFunction._format_reward_scale(reward_scale_list, min_value, max_value)
+        evaluation_criteria_text = ValueFunction._format_evaluation_criteria(
+            criteria_list
+        )
+        reward_scale_text = ValueFunction._format_reward_scale(
+            reward_scale_list, min_value, max_value
+        )
 
         prompt += evaluation_criteria_text + reward_scale_text
 
@@ -341,7 +369,9 @@ Important:
             f"{self.__class__.__module__}.{self.__class__.__name__}"
         )
         if self.coding_value_function:
-            dump["coding_value_function"] = self.coding_value_function.model_dump(**kwargs)
+            dump["coding_value_function"] = self.coding_value_function.model_dump(
+                **kwargs
+            )
         return dump
 
     @classmethod
@@ -352,7 +382,9 @@ Important:
             value_function_class_path = obj.pop("value_function_class", None)
 
             if completion_data:
-                obj["completion_model"] = CompletionModel.model_validate(completion_data)
+                obj["completion_model"] = CompletionModel.model_validate(
+                    completion_data
+                )
             else:
                 obj["completion_model"] = None
 

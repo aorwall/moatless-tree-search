@@ -1,33 +1,34 @@
 import logging
-from json import JSONDecodeError
-from typing import List, Dict, Optional, Any
-import json
 import os
 from datetime import datetime
+from typing import List, Dict, Optional, Any
 
 from litellm.types.llms.openai import ChatCompletionUserMessage
-from pydantic import Field, BaseModel
+from pydantic import Field
 
 from moatless.actions.action import Action
 from moatless.completion.completion import CompletionModel
-from moatless.completion.model import Completion, Usage, StructuredOutput
+from moatless.completion.model import StructuredOutput
 from moatless.feedback import FeedbackGenerator
+from moatless.message_history import MessageHistoryGenerator
 from moatless.node import Node, generate_ascii_tree, FeedbackData
 from moatless.schema import MessageHistoryType
-from moatless.message_history import MessageHistoryGenerator
-from moatless.utils.parse import parse_node_id
 
 logger = logging.getLogger(__name__)
 
 
 class FeedbackResponse(StructuredOutput):
     """Schema for feedback response"""
+
     name: str = "provide_feedback"
-    
+
     analysis: str = Field(
-        ..., description="Brief analysis of parent state and lessons from alternative attempts"
+        ...,
+        description="Brief analysis of parent state and lessons from alternative attempts",
     )
-    feedback: str = Field(..., description="Clear, actionable guidance for your next action")
+    feedback: str = Field(
+        ..., description="Clear, actionable guidance for your next action"
+    )
     suggested_node_id: Optional[int] = Field(
         None, description="ID of the node that should be expanded next (optional)"
     )
@@ -44,31 +45,36 @@ class FeedbackResponse(StructuredOutput):
                 "properties": {
                     "analysis": {
                         "type": "string",
-                        "description": "Brief analysis of parent state and lessons from alternative attempts"
+                        "description": "Brief analysis of parent state and lessons from alternative attempts",
                     },
                     "feedback": {
-                        "type": "string", 
-                        "description": "Clear, actionable guidance for your next action"
+                        "type": "string",
+                        "description": "Clear, actionable guidance for your next action",
                     },
                     "suggested_node_id": {
                         "type": ["integer", "null"],
-                        "description": "ID of the node that should be expanded next (optional)"
-                    }
+                        "description": "ID of the node that should be expanded next (optional)",
+                    },
                 },
-                "required": ["analysis", "feedback"]
-            }
+                "required": ["analysis", "feedback"],
+            },
         }
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert Message objects to dictionaries"""
         return {
             "role": self.role if hasattr(self, "role") else "assistant",
-            "content": self.content if hasattr(self, "content") else str(self)
+            "content": self.content if hasattr(self, "content") else str(self),
         }
 
+
 class FeedbackAgent(FeedbackGenerator):
-    completion_model: CompletionModel = Field(..., description="The completion model to use")
-    instance_dir: str | None = Field(None, description="Base directory for the instance")
+    completion_model: CompletionModel = Field(
+        ..., description="The completion model to use"
+    )
+    instance_dir: str | None = Field(
+        None, description="Base directory for the instance"
+    )
     feedback_file: str | None = Field(None, description="Path to the feedback file")
 
     include_parent_info: bool = Field(True)
@@ -76,15 +82,14 @@ class FeedbackAgent(FeedbackGenerator):
     include_tree: bool = Field(True)
     include_node_suggestion: bool = Field(True)
 
-
     def model_post_init(self, __context) -> None:
         """Initialize feedback file after model initialization"""
         super().model_post_init(__context)
-        
+
         # Set instance directory if not provided
         if not self.instance_dir:
             self.instance_dir = os.getcwd()
-        
+
         # Set feedback file path
         if not self.feedback_file:
             # Create instance directory if it doesn't exist
@@ -95,9 +100,7 @@ class FeedbackAgent(FeedbackGenerator):
         arbitrary_types_allowed = True
 
     def generate_feedback(
-        self, 
-        node: Node, 
-        actions: List[Action] | None = None
+        self, node: Node, actions: List[Action] | None = None
     ) -> FeedbackData | None:
         if not node.parent:
             logger.info(
@@ -105,19 +108,16 @@ class FeedbackAgent(FeedbackGenerator):
             )
             return None
 
-
         messages = self._create_analysis_messages(
-            node, 
+            node,
         )
-        system_prompt = self._create_system_prompt(
-            actions
-        )
+        system_prompt = self._create_system_prompt(actions)
 
         try:
             completion_response = self.completion_model.create_completion(
                 messages=messages,
                 system_prompt=system_prompt,
-                response_model=FeedbackResponse
+                response_model=FeedbackResponse,
             )
 
             # Store the completion in the node
@@ -149,17 +149,17 @@ class FeedbackAgent(FeedbackGenerator):
                     feedback=FeedbackResponse(
                         analysis=feedback_response.analysis,
                         feedback=feedback_response.feedback,
-                        suggested_node_id=feedback_response.suggested_node_id
+                        suggested_node_id=feedback_response.suggested_node_id,
                     ),
                     system_prompt=system_prompt,
                     messages=messages,
-                    raw_completion=completion_response.completion
+                    raw_completion=completion_response.completion,
                 )
 
             return FeedbackData(
                 analysis=feedback_response.analysis,
                 feedback=feedback_message,
-                suggested_node_id=feedback_response.suggested_node_id
+                suggested_node_id=feedback_response.suggested_node_id,
             )
 
         except Exception as e:
@@ -167,13 +167,14 @@ class FeedbackAgent(FeedbackGenerator):
             return None
 
     def _create_analysis_messages(
-        self, 
-        current_node: Node
+        self, current_node: Node
     ) -> List[ChatCompletionUserMessage]:
         messages = []
 
         # Only get siblings that have been run (have actions set)
-        sibling_nodes = [s for s in current_node.get_sibling_nodes() if s.action is not None]
+        sibling_nodes = [
+            s for s in current_node.get_sibling_nodes() if s.action is not None
+        ]
 
         # Format tree visualization section
         if self.include_tree:
@@ -187,20 +188,28 @@ class FeedbackAgent(FeedbackGenerator):
                 include_diffs=True,
                 include_action_details=False,
                 include_file_context=False,
-                show_trajectory=True
+                show_trajectory=True,
             )
             tree_message += "\n</search_tree>\n\n"
-            messages.append(ChatCompletionUserMessage(role="user", content=tree_message))
+            messages.append(
+                ChatCompletionUserMessage(role="user", content=tree_message)
+            )
 
         # Format node relationships section
         relationship_message = "# Node Relationships\n"
         relationship_message += "<relationships>\n"
         relationship_message += f"Current Node: {current_node.node_id}\n"
         relationship_message += f"Parent Node: {current_node.parent.node_id if current_node.parent else 'None'}\n"
-        relationship_message += f"Sibling Nodes: {[n.node_id for n in current_node.get_sibling_nodes()]}\n"
-        relationship_message += f"Child Nodes: {[n.node_id for n in current_node.children]}\n"
+        relationship_message += (
+            f"Sibling Nodes: {[n.node_id for n in current_node.get_sibling_nodes()]}\n"
+        )
+        relationship_message += (
+            f"Child Nodes: {[n.node_id for n in current_node.children]}\n"
+        )
         relationship_message += "</relationships>\n\n"
-        messages.append(ChatCompletionUserMessage(role="user", content=relationship_message))
+        messages.append(
+            ChatCompletionUserMessage(role="user", content=relationship_message)
+        )
 
         # Format root task section
         root_node = current_node.get_root()
@@ -213,12 +222,15 @@ class FeedbackAgent(FeedbackGenerator):
             message_history_type=MessageHistoryType.SUMMARY,
             include_file_context=True,
             include_git_patch=True,
-            include_root_node=False
+            include_root_node=False,
         )
         history_messages = message_generator.generate(current_node)
 
         if history_messages:
-            history_messages[0]["content"] = "Below is the history of previously executed actions and their observations before the current node.\n\n" + history_messages[0]["content"]
+            history_messages[0]["content"] = (
+                "Below is the history of previously executed actions and their observations before the current node.\n\n"
+                + history_messages[0]["content"]
+            )
             messages.extend(history_messages)
 
         # Format alternative attempts section
@@ -248,15 +260,19 @@ class FeedbackAgent(FeedbackGenerator):
                 analysis_message += "<warning>\n"
                 analysis_message += "FINISH ACTION HAS ALREADY BEEN ATTEMPTED!\n"
                 analysis_message += "- Trying to finish again would be ineffective\n"
-                analysis_message += "- Focus on exploring alternative solutions instead\n"
+                analysis_message += (
+                    "- Focus on exploring alternative solutions instead\n"
+                )
                 analysis_message += "</warning>\n"
 
-            messages.append(ChatCompletionUserMessage(role="user", content=analysis_message))
+            messages.append(
+                ChatCompletionUserMessage(role="user", content=analysis_message)
+            )
 
         return messages
 
     def _create_system_prompt(
-        self, 
+        self,
         actions: List[Action],
     ) -> str:
         start_num = 1
@@ -408,7 +424,7 @@ We could try:
         feedback: FeedbackResponse,
         system_prompt: str | None = None,
         messages: List | None = None,
-        raw_completion: str | None = None
+        raw_completion: str | None = None,
     ) -> None:
         """Save raw prompts and responses to feedback file"""
         # Setup file path
@@ -419,7 +435,7 @@ We could try:
             os.makedirs(save_dir, exist_ok=True)
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
+
         feedback_entry = [
             "=" * 80,
             f"Node {node.node_id} - {timestamp}",
@@ -434,24 +450,25 @@ We could try:
         ]
 
         for i, msg in enumerate(messages, 1):
-            feedback_entry.extend([
-                f"[Message {i} - {msg['role']}]",
-                msg['content'],
-                "-" * 40,
-                ""
-            ])
+            feedback_entry.extend(
+                [f"[Message {i} - {msg['role']}]", msg["content"], "-" * 40, ""]
+            )
 
-        feedback_entry.extend([
-            "COMPLETION",
-            "-" * 80,
-            raw_completion if raw_completion else "No raw completion provided",
-            "",
-            "=" * 80,
-            ""  # Final newline
-        ])
+        feedback_entry.extend(
+            [
+                "COMPLETION",
+                "-" * 80,
+                raw_completion if raw_completion else "No raw completion provided",
+                "",
+                "=" * 80,
+                "",  # Final newline
+            ]
+        )
 
         # Write to file in append mode
         with open(self.feedback_file, "a") as f:
             f.write("\n".join(feedback_entry))
-        
-        logger.info(f"Saved prompts and completion for node {node.node_id} to {self.feedback_file}")
+
+        logger.info(
+            f"Saved prompts and completion for node {node.node_id} to {self.feedback_file}"
+        )

@@ -6,7 +6,6 @@ from datetime import datetime
 from typing import List
 
 from moatless.exceptions import RuntimeError
-from moatless.index.code_index import is_test
 from moatless.repository import GitRepository
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
@@ -25,7 +24,6 @@ class TestbedEnvironment(RuntimeEnvironment):
         repository: Repository,
         testbed_sdk: TestbedSDK | None = None,
         instance: dict | None = None,
-        dataset_name="princeton-nlp/SWE-bench_Lite",
         log_dir: str | None = None,
         enable_cache: bool = False,
         run_id: str = "default",
@@ -33,7 +31,6 @@ class TestbedEnvironment(RuntimeEnvironment):
         self.testbed_sdk = testbed_sdk or TestbedSDK(enable_cache=enable_cache)
         self.repository = repository
         self.instance = instance
-        self.dataset_name = dataset_name
         self.tests_to_ignore = []
         self.log_dir = log_dir
         self._test_cache = {} if enable_cache else None
@@ -65,11 +62,11 @@ class TestbedEnvironment(RuntimeEnvironment):
     ) -> List[TestResult]:
         """
         Filter out tests that fail without any changes to isolate patch-specific failures.
-        
+
         This function serves two purposes:
-        1. When no patch is provided (baseline run), it identifies and caches tests that fail 
+        1. When no patch is provided (baseline run), it identifies and caches tests that fail
            due to environment issues, dependencies, or pre-existing bugs
-        2. When a patch is provided, it filters out these known failing tests to focus on 
+        2. When a patch is provided, it filters out these known failing tests to focus on
            failures caused by the patch itself
 
         Args:
@@ -81,7 +78,7 @@ class TestbedEnvironment(RuntimeEnvironment):
         """
         # Check if there are any failures or errors
         has_failures = any(
-            test.status in [TestStatus.ERROR, TestStatus.FAILED] 
+            test.status in [TestStatus.ERROR, TestStatus.FAILED]
             for test in test_results
         )
 
@@ -95,17 +92,19 @@ class TestbedEnvironment(RuntimeEnvironment):
             if self.tests_to_ignore and self.log_dir:
                 with open(f"{self.log_dir}/ignored_tests.json", "w") as f:
                     json.dump(self.tests_to_ignore, f)
-                logger.info(f"Baseline run: Found {len(self.tests_to_ignore)} failing tests that will be ignored in future runs")
-        
+                logger.info(
+                    f"Baseline run: Found {len(self.tests_to_ignore)} failing tests that will be ignored in future runs"
+                )
+
         # Filter out ignored tests
         filtered_results = [
-            test
-            for test in test_results
-            if test.name not in self.tests_to_ignore
+            test for test in test_results if test.name not in self.tests_to_ignore
         ]
-        
+
         if patch and self.tests_to_ignore:
-            logger.info(f"Using cached baseline failures: Filtered out {len(test_results) - len(filtered_results)} known failing tests")
+            logger.info(
+                f"Using cached baseline failures: Filtered out {len(test_results) - len(filtered_results)} known failing tests"
+            )
 
         return filtered_results
 
@@ -130,9 +129,8 @@ class TestbedEnvironment(RuntimeEnvironment):
         try:
             with self.testbed_sdk.create_client(
                 instance_id=self.instance["instance_id"],
-                dataset_name=self.dataset_name,
                 log_dir=self.log_dir,
-                #run_id=self.run_id,
+                # run_id=self.run_id,
             ) as testbed:
                 response = testbed.run_tests(
                     test_files=test_files, patch=patch, timeout=600
@@ -149,7 +147,9 @@ class TestbedEnvironment(RuntimeEnvironment):
                     log_content += f"```json\n{test_results_json}\n```"
 
             # Filter using cached tests first
-            test_results = self._filter_failing_tests(response.test_results, patch=patch)
+            test_results = self._filter_failing_tests(
+                response.test_results, patch=patch
+            )
 
             # Now check for failures only in the filtered results
             if patch and any(
@@ -160,23 +160,25 @@ class TestbedEnvironment(RuntimeEnvironment):
                 if not self.tests_to_ignore:
                     # Get list of failing test files
                     failing_test_files = {
-                        test.file_path for test in test_results 
+                        test.file_path
+                        for test in test_results
                         if test.status in [TestStatus.ERROR, TestStatus.FAILED]
                     }
-                    
+
                     with self.testbed_sdk.create_client(
-                            instance_id=self.instance["instance_id"],
-                            dataset_name=self.dataset_name,
-                            log_dir=self.log_dir,
+                        instance_id=self.instance["instance_id"],
+                        log_dir=self.log_dir,
                     ) as testbed:
                         baseline_response = testbed.run_tests(
-                            test_files=list(failing_test_files),
-                            patch=None, 
-                            timeout=600
+                            test_files=list(failing_test_files), patch=None, timeout=600
                         )
-                        self._filter_failing_tests(baseline_response.test_results, patch=None)
+                        self._filter_failing_tests(
+                            baseline_response.test_results, patch=None
+                        )
                         # Re-filter the results with any newly cached tests
-                        test_results = self._filter_failing_tests(response.test_results, patch=patch)
+                        test_results = self._filter_failing_tests(
+                            response.test_results, patch=patch
+                        )
 
             mapped_results = self._map_test_results_to_issues(test_results)
 
@@ -224,7 +226,8 @@ class TestbedEnvironment(RuntimeEnvironment):
 
         try:
             with self.testbed_sdk.create_client(
-                instance_id=self.instance["instance_id"], dataset_name=self.dataset_name, log_dir=self.log_dir,
+                instance_id=self.instance["instance_id"],
+                log_dir=self.log_dir,
             ) as testbed:
                 if not patch.endswith("\n"):
                     patch += "\n"
@@ -268,6 +271,7 @@ class TestbedEnvironment(RuntimeEnvironment):
             return None
 
         return block
+
     def _relevant_files_from_trace(
         self, trace_items: List[TraceItem]
     ) -> List[RankedFileSpan]:
@@ -326,7 +330,6 @@ class TestbedEnvironment(RuntimeEnvironment):
 
         mapped_results = []
         for test_result in test_results:
-
             trace_items = test_result.stacktrace
 
             test_status = TestStatus(test_result.status)
@@ -369,7 +372,9 @@ class TestbedEnvironment(RuntimeEnvironment):
                 test_output = None
             else:
                 # Add log to see failure output
-                logger.info(f"Test failure output for {test_result.file_path}: {test_result.failure_output[:200]}...")
+                logger.info(
+                    f"Test failure output for {test_result.file_path}: {test_result.failure_output[:200]}..."
+                )
                 failure_sections = test_result.failure_output.split(
                     "_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _"
                 )
@@ -493,7 +498,9 @@ class TestbedEnvironment(RuntimeEnvironment):
         if ignored_tests:
             logger.info(f"Ignored {ignored_tests} tests with redundant root cause")
 
-        logger.info(f"Finished mapping {len(test_results)} results to {len(mapped_results)} issues")
+        logger.info(
+            f"Finished mapping {len(test_results)} results to {len(mapped_results)} issues"
+        )
         return mapped_results
 
     def clear_cache(self):

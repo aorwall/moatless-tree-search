@@ -1,25 +1,31 @@
-from typing import List
 import logging
 import random
+from typing import List
+
 from pydantic import BaseModel, Field
 
 from moatless.agent.settings import AgentSettings
 from moatless.node import Node
 
-
 logger = logging.getLogger(__name__)
 
-class Expander(BaseModel):
 
-    random_settings: bool = Field(False, description="Whether to select agent settings randomly")
-    max_expansions: int = Field(1, description="The maximum number of children to create for each node")
+class Expander(BaseModel):
+    random_settings: bool = Field(
+        False, description="Whether to select agent settings randomly"
+    )
+    max_expansions: int = Field(
+        1, description="The maximum number of children to create for each node"
+    )
 
     agent_settings: List[AgentSettings] = Field(
         [],
         description="The settings for the agent model",
     )
 
-    def expand(self, node: Node, search_tree, force_expansion: bool = False) -> None | Node:
+    def expand(
+        self, node: Node, search_tree, force_expansion: bool = False
+    ) -> None | Node:
         """Handle all node expansion logic in one place"""
         if not force_expansion and node.is_fully_expanded():
             return None
@@ -27,7 +33,9 @@ class Expander(BaseModel):
         # Return the first unexecuted child if one exists
         for child in node.children:
             if not child.observation:
-                logger.info(f"Found unexecuted child {child.node_id} for node {node.node_id}")
+                logger.info(
+                    f"Found unexecuted child {child.node_id} for node {node.node_id}"
+                )
                 return child
 
         num_expansions = node.max_expansions or self.max_expansions
@@ -54,18 +62,20 @@ class Expander(BaseModel):
         """Get agent settings for a single expansion."""
         if not self.agent_settings:
             return []
-        
+
         if self.random_settings:
             used_settings = {
-                child.agent_settings for child in node.children 
+                child.agent_settings
+                for child in node.children
                 if child.agent_settings is not None
             }
-            
+
             available_settings = [
-                setting for setting in self.agent_settings 
+                setting
+                for setting in self.agent_settings
                 if setting not in used_settings
             ]
-            
+
             settings_pool = available_settings or self.agent_settings
             return [random.choice(settings_pool)]
         else:
@@ -74,6 +84,3 @@ class Expander(BaseModel):
 
     def _generate_unique_id(self, node: Node):
         return len(node.get_root().get_all_nodes())
-
-
-

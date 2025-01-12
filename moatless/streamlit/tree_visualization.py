@@ -2,26 +2,19 @@ import json
 import logging
 import os
 import time
-from io import BytesIO
-from typing import Optional, List
+from typing import Optional
 
-import matplotlib.pyplot as plt
 import networkx as nx
 import plotly.graph_objs as go
 import streamlit as st
-from matplotlib.backends.backend_pdf import PdfPages
 from plotly.subplots import make_subplots
 
-from moatless.agent.code_agent import create_edit_code_actions
 from moatless.benchmark.report import analyse_file_context
-from moatless.benchmark.swebench import create_repository, create_index
 from moatless.benchmark.utils import get_moatless_instance
 from moatless.node import Node
-from moatless.runtime.testbed import TestbedEnvironment
 from moatless.search_tree import SearchTree
 from moatless.streamlit.list_visualization import create_linear_table
 from moatless.streamlit.shared import show_completion
-from moatless.utils.tokenizer import count_tokens
 
 # Add this near the top of the file, after other imports
 
@@ -45,7 +38,6 @@ def decide_badge(node_info):
     if node_info.get("warning"):
         return ("circle", "yellow")
 
-
     if node_info.get("context_status") in ["found_spans"]:
         if node_info.get("patch_status") == "wrong_files":
             return ("circle", "yellow")
@@ -65,7 +57,7 @@ def build_graph(
     root_node: Node, eval_result: dict | None = None, instance: dict | None = None
 ):
     G = nx.DiGraph()
-    
+
     # Determine if this is a linear trajectory
 
     # Add debug logging
@@ -82,7 +74,7 @@ def build_graph(
 
     def add_node_to_graph(node: Node, parent_id: str | None = None):
         node_id = f"Node{node.node_id}"
-        
+
         # Debug logging
         if parent_id:
             logger.info(f"Processing node {node_id} with parent {parent_id}")
@@ -95,9 +87,13 @@ def build_graph(
         # Sanitize node attributes to avoid Graphviz syntax errors
         if node.action:
             if node.action.name == "str_replace_editor":
-                action_name = str(node.action.command).replace('"', '\\"').replace('\\', '\\\\')
+                action_name = (
+                    str(node.action.command).replace('"', '\\"').replace("\\", "\\\\")
+                )
             else:
-                action_name = str(node.action.name).replace('"', '\\"').replace('\\', '\\\\')
+                action_name = (
+                    str(node.action.name).replace('"', '\\"').replace("\\", "\\\\")
+                )
         else:
             action_name = ""
 
@@ -117,7 +113,11 @@ def build_graph(
                 if failed_test_count > 0:
                     warning = f"{failed_test_count} failed tests"
             if "fail_reason" in node.observation.properties:
-                error = str(node.observation.properties["fail_reason"]).replace('"', '\\"').replace('\\', '\\\\')
+                error = (
+                    str(node.observation.properties["fail_reason"])
+                    .replace('"', '\\"')
+                    .replace("\\", "\\\\")
+                )
 
         if node.observation and node.observation.expect_correction:
             warning += f"\nExpected correction"
@@ -125,31 +125,49 @@ def build_graph(
         resolved = is_resolved(node.node_id) if eval_result else None
 
         # Add feedback data to node attributes if it exists
-        feedback_data = getattr(node, 'feedback_data', None)
+        feedback_data = getattr(node, "feedback_data", None)
         if feedback_data:
-            node_attrs.update({
-                "feedback_analysis": str(feedback_data.analysis).replace('"', '\\"').replace('\\', '\\\\') if feedback_data.analysis else "",
-                "feedback_text": str(feedback_data.feedback).replace('"', '\\"').replace('\\', '\\\\') if feedback_data.feedback else "",
-                "feedback_suggested_node": feedback_data.suggested_node_id
-            })
+            node_attrs.update(
+                {
+                    "feedback_analysis": str(feedback_data.analysis)
+                    .replace('"', '\\"')
+                    .replace("\\", "\\\\")
+                    if feedback_data.analysis
+                    else "",
+                    "feedback_text": str(feedback_data.feedback)
+                    .replace('"', '\\"')
+                    .replace("\\", "\\\\")
+                    if feedback_data.feedback
+                    else "",
+                    "feedback_suggested_node": feedback_data.suggested_node_id,
+                }
+            )
 
         # Only add the node if it doesn't exist
         if not G.has_node(node_id):
             # Add base attributes
-            node_attrs.update({
-                "name": action_name,
-                "type": "node",
-                "visits": node.visits or 1,
-                "duplicate": node.is_duplicate,
-                "avg_reward": node.value / node.visits if node.visits else 0,
-                "reward": node.reward.value if node.reward else 0,
-                "warning": warning.replace('"', '\\"').replace('\\', '\\\\'),
-                "error": error,
-                "resolved": resolved,
-                "context_status": context_stats.status if context_stats else None,
-                "patch_status": context_stats.patch_status if context_stats else None,
-                "explanation": str(node.reward.explanation).replace('"', '\\"').replace('\\', '\\\\') if node.reward else "",
-            })
+            node_attrs.update(
+                {
+                    "name": action_name,
+                    "type": "node",
+                    "visits": node.visits or 1,
+                    "duplicate": node.is_duplicate,
+                    "avg_reward": node.value / node.visits if node.visits else 0,
+                    "reward": node.reward.value if node.reward else 0,
+                    "warning": warning.replace('"', '\\"').replace("\\", "\\\\"),
+                    "error": error,
+                    "resolved": resolved,
+                    "context_status": context_stats.status if context_stats else None,
+                    "patch_status": context_stats.patch_status
+                    if context_stats
+                    else None,
+                    "explanation": str(node.reward.explanation)
+                    .replace('"', '\\"')
+                    .replace("\\", "\\\\")
+                    if node.reward
+                    else "",
+                }
+            )
 
             # Remove None values to avoid Graphviz issues
             node_attrs = {k: v for k, v in node_attrs.items() if v is not None}
@@ -169,20 +187,20 @@ def build_graph(
 
     # Start from root with no parent
     add_node_to_graph(root_node)
-    
+
     # Verify tree structure
     for node in G.nodes():
         in_edges = list(G.in_edges(node))
         if len(in_edges) > 1:
             logger.error(f"Node {node} has multiple parents: {in_edges}")
-    
+
     G.graph["graph"] = {
         "rankdir": "TB",
         "ranksep": "1.5",
         "nodesep": "1.0",
         "splines": "ortho",  # Changed from polyline for simpler layout
     }
-    
+
     return G
 
 
@@ -371,18 +389,20 @@ def create_graph_figure(G_subset, G, pos, is_linear=False):
                 tickmode="array",
                 tickvals=[-100, 0, 50, 75, 100],
                 ticktext=["-100", "0", "50", "75", "100"],
-                tickfont=dict(color='black'),
-                titlefont=dict(color='black')
+                tickfont=dict(color="black"),
+                titlefont=dict(color="black"),
             ),
             cmin=-100,
             cmax=100,
             line=dict(width=node_line_widths, color=node_line_colors),
         ),
-        text=[f'<span style="color: black">{label}</span>' for label in node_labels],  # Force black text using HTML
+        text=[
+            f'<span style="color: black">{label}</span>' for label in node_labels
+        ],  # Force black text using HTML
         hovertext=node_text,
         textposition="middle center",
-        textfont=dict(size=14, color='black'),
-        hoverlabel=dict(font=dict(color='black')),
+        textfont=dict(size=14, color="black"),
+        hoverlabel=dict(font=dict(color="black")),
     )
     fig.add_trace(node_trace)
 
@@ -405,16 +425,16 @@ def create_graph_figure(G_subset, G, pos, is_linear=False):
 
     # Use dot layout with strict mode
     pos = nx.nx_agraph.graphviz_layout(
-        G, 
+        G,
         prog="dot",
-        args="-Gstart=5 -Gdpi=300 -Gnodesep=2"  # Additional layout arguments
+        args="-Gstart=5 -Gdpi=300 -Gnodesep=2",  # Additional layout arguments
     )
 
     # Adjust position scaling
     x_values, y_values = zip(*pos.values())
     x_min, x_max = min(x_values), max(x_values)
     y_min, y_max = min(y_values), max(y_values)
-    
+
     # More aggressive position normalization
     for node in pos:
         x, y = pos[node]
@@ -443,43 +463,39 @@ def create_graph_figure(G_subset, G, pos, is_linear=False):
 
     # Update layout settings with tighter margins and auto-sizing
     fig.update_layout(
-        title=dict(
-            text="Search Tree",
-            font=dict(size=20, color='black')
-        ),
-        hoverlabel=dict(font_size=16, font_color='black'),
+        title=dict(text="Search Tree", font=dict(size=20, color="black")),
+        hoverlabel=dict(font_size=16, font_color="black"),
         showlegend=False,
         hovermode="closest",
         margin=dict(b=20, l=20, r=20, t=40),  # Reduced margins
         xaxis=dict(
-            showgrid=False, 
-            zeroline=False, 
+            showgrid=False,
+            zeroline=False,
             showticklabels=False,
-            range=[-0.1, 1.1]  # Tighter x-axis range
+            range=[-0.1, 1.1],  # Tighter x-axis range
         ),
         yaxis=dict(
-            showgrid=False, 
-            zeroline=False, 
+            showgrid=False,
+            zeroline=False,
             showticklabels=False,
             scaleanchor="x",
-            scaleratio=1
+            scaleratio=1,
         ),
         width=1000,  # Reduced default width
         height=800 * (max(1, len(G_subset.nodes()) / 15)),  # Adjusted height scaling
-        plot_bgcolor='rgba(0,0,0,0)',
-        autosize=True  # Enable auto-sizing
+        plot_bgcolor="rgba(0,0,0,0)",
+        autosize=True,  # Enable auto-sizing
     )
 
     return fig
 
 
-
 def update_visualization(
-    container, 
-    search_tree: SearchTree, 
-    selected_tree_path: str, 
-    instance: Optional[dict] = None, 
-    force_linear: bool = False
+    container,
+    search_tree: SearchTree,
+    selected_tree_path: str,
+    instance: Optional[dict] = None,
+    force_linear: bool = False,
 ):
     eval_result = None
     logger.info(f"Selected tree path: {selected_tree_path}")
@@ -491,7 +507,6 @@ def update_visualization(
 
     if not instance and search_tree.metadata.get("instance_id"):
         instance = get_moatless_instance(search_tree.metadata["instance_id"])
-
 
     # Initialize session state for step-by-step visualization
     if "total_nodes" not in st.session_state:
@@ -521,13 +536,15 @@ def update_visualization(
         nodes_to_show = get_nodes_up_to_id(
             search_tree.root, st.session_state.max_node_id
         )
-        
+
         is_linear = force_linear or getattr(search_tree.root, "max_expansions", 1) == 1
 
         if is_linear:
             # Use the new table visualization for linear trajectories
             nodes = search_tree.root.get_all_nodes()
-            create_linear_table(nodes, st.session_state.max_node_id, eval_result, instance)
+            create_linear_table(
+                nodes, st.session_state.max_node_id, eval_result, instance
+            )
         else:
             graph_col, info_col = st.columns([6, 3])
             with graph_col:
@@ -535,7 +552,7 @@ def update_visualization(
                 nodes_to_show = get_nodes_up_to_id(
                     search_tree.root, st.session_state.max_node_id
                 )
-                
+
                 # Original graph visualization code
                 G = build_graph(search_tree.root, eval_result, instance)
                 G_subset = G.subgraph([f"Node{node.node_id}" for node in nodes_to_show])
@@ -554,12 +571,18 @@ def update_visualization(
 
                 # Calculate the scaling factor based on the number of nodes
                 num_nodes = len(G.nodes())
-                height_scale = max(1, num_nodes / 20)  # Increase height as nodes increase
+                height_scale = max(
+                    1, num_nodes / 20
+                )  # Increase height as nodes increase
 
                 for node in pos:
                     x, y = pos[node]
-                    normalized_x = 0.5 if x_max == x_min else (x - x_min) / (x_max - x_min)
-                    normalized_y = 0.5 if y_max == y_min else (y - y_min) / (y_max - y_min)
+                    normalized_x = (
+                        0.5 if x_max == x_min else (x - x_min) / (x_max - x_min)
+                    )
+                    normalized_y = (
+                        0.5 if y_max == y_min else (y - y_min) / (y_max - y_min)
+                    )
                     pos[node] = (normalized_x, normalized_y * height_scale)
 
                 fig = create_graph_figure(G_subset, G, pos, is_linear=is_linear)
@@ -571,7 +594,8 @@ def update_visualization(
                         on_click=lambda: setattr(st.session_state, "max_node_id", 0)
                         or setattr(st.session_state, "selected_node_id", 0),
                         disabled=(
-                            st.session_state.max_node_id == 0 or st.session_state.auto_play
+                            st.session_state.max_node_id == 0
+                            or st.session_state.auto_play
                         ),
                     )
                 with col2:
@@ -603,7 +627,8 @@ def update_visualization(
                             st.session_state.max_node_id,
                         ),
                         disabled=(
-                            st.session_state.max_node_id >= st.session_state.total_nodes - 1
+                            st.session_state.max_node_id
+                            >= st.session_state.total_nodes - 1
                         ),
                     )
                 with col4:
@@ -620,7 +645,8 @@ def update_visualization(
                             st.session_state.max_node_id,
                         ),
                         disabled=(
-                            st.session_state.max_node_id == st.session_state.total_nodes - 1
+                            st.session_state.max_node_id
+                            == st.session_state.total_nodes - 1
                         ),
                     )
                 with col5:
@@ -666,7 +692,9 @@ def update_visualization(
                 selected_node_option = st.selectbox(
                     "Select Node",
                     node_options,
-                    index=node_options.index(f"Node{st.session_state.selected_node_id}"),
+                    index=node_options.index(
+                        f"Node{st.session_state.selected_node_id}"
+                    ),
                     key="selected_node_option",
                 )
                 if selected_node_option:
@@ -681,22 +709,30 @@ def update_visualization(
 
                     # Define available tabs
                     tabs = ["Summary"]
-                    
+
                     # Only add tabs if we have a valid selected node
                     if selected_node:
                         if selected_node.file_context:
                             tabs.append("FileContext")
 
-                        if selected_node.action and selected_node.completions.get("build_action"):
+                        if selected_node.action and selected_node.completions.get(
+                            "build_action"
+                        ):
                             tabs.append("Build")
 
-                        if selected_node.action and (selected_node.completions.get("execute_action") or (selected_node.observation and selected_node.observation.execution_completion)):
+                        if selected_node.action and (
+                            selected_node.completions.get("execute_action")
+                            or (
+                                selected_node.observation
+                                and selected_node.observation.execution_completion
+                            )
+                        ):
                             tabs.append("Execution")
 
                         # Check for selector completion
-                        has_selector = (
-                            "selector" in selected_node.completions or 
-                            (selected_node.parent and "selector" in selected_node.parent.completions)
+                        has_selector = "selector" in selected_node.completions or (
+                            selected_node.parent
+                            and "selector" in selected_node.parent.completions
                         )
                         if has_selector:
                             tabs.append("Selector")
@@ -749,7 +785,9 @@ def update_visualization(
 
                                 st.subheader(f"Action: {selected_node.action.name}")
                                 st.json(
-                                    selected_node.action.model_dump(exclude={"thoughts"})
+                                    selected_node.action.model_dump(
+                                        exclude={"thoughts"}
+                                    )
                                 )
 
                                 if selected_node.observation:
@@ -763,22 +801,31 @@ def update_visualization(
 
                         if "Build" in tabs:
                             with tab_contents[tabs.index("Build")]:
-                                completion = selected_node.completions.get("build_action")
+                                completion = selected_node.completions.get(
+                                    "build_action"
+                                )
                                 show_completion(completion)
 
                         if "Execution" in tabs:
                             with tab_contents[tabs.index("Execution")]:
                                 if selected_node.observation.execution_completion:
-                                    completion = selected_node.observation.execution_completion
+                                    completion = (
+                                        selected_node.observation.execution_completion
+                                    )
                                 else:
-                                    completion = selected_node.completions.get("execute_action")
+                                    completion = selected_node.completions.get(
+                                        "execute_action"
+                                    )
                                 show_completion(completion)
 
                         if "Selector" in tabs:
                             with tab_contents[tabs.index("Selector")]:
-                                selector_completion = (
-                                    selected_node.completions.get("selector") or 
-                                    (selected_node.parent.completions.get("selector") if selected_node.parent else None)
+                                selector_completion = selected_node.completions.get(
+                                    "selector"
+                                ) or (
+                                    selected_node.parent.completions.get("selector")
+                                    if selected_node.parent
+                                    else None
                                 )
                                 if selector_completion:
                                     show_completion(selector_completion)
@@ -786,17 +833,29 @@ def update_visualization(
                         if "Reward" in tabs:
                             with tab_contents[tabs.index("Reward")]:
                                 if selected_node.reward:
-                                    st.subheader(f"Reward: {selected_node.reward.value}")
+                                    st.subheader(
+                                        f"Reward: {selected_node.reward.value}"
+                                    )
                                     st.write(selected_node.reward.explanation)
-                                show_completion(selected_node.completions.get("value_function"))
+                                show_completion(
+                                    selected_node.completions.get("value_function")
+                                )
 
                         if "JSON" in tabs:
                             with tab_contents[tabs.index("JSON")]:
-                                st.json(selected_node.model_dump(exclude={"parent", "children"}))
+                                st.json(
+                                    selected_node.model_dump(
+                                        exclude={"parent", "children"}
+                                    )
+                                )
 
                         if "Rerun" in tabs:
                             with tab_contents[tabs.index("Rerun")]:
-                                rerun_node(selected_node.node_id, search_tree.persist_path, instance)
+                                rerun_node(
+                                    selected_node.node_id,
+                                    search_tree.persist_path,
+                                    instance,
+                                )
 
                         if "Instance" in tabs:
                             with tab_contents[tabs.index("Instance")]:
@@ -804,7 +863,6 @@ def update_visualization(
 
                         if "Feedback" in tabs:
                             with tab_contents[tabs.index("Feedback")]:
-
                                 # Display feedback summary
                                 st.subheader("Feedback")
                                 st.markdown("**Analysis**")
@@ -813,24 +871,29 @@ def update_visualization(
                                 st.markdown(selected_node.feedback_data.feedback)
 
                                 # Access the feedback completion from the completions dictionary
-                                feedback_completion = selected_node.completions.get("feedback")
+                                feedback_completion = selected_node.completions.get(
+                                    "feedback"
+                                )
                                 if feedback_completion:
-
                                     # Debug logging
-                                    logger.debug(f"Feedback completion type: {type(feedback_completion)}")
+                                    logger.debug(
+                                        f"Feedback completion type: {type(feedback_completion)}"
+                                    )
 
                                     # Convert the completion to a dictionary first
                                     completion_data = (
                                         feedback_completion.model_dump()
-                                        if hasattr(feedback_completion, 'model_dump')
+                                        if hasattr(feedback_completion, "model_dump")
                                         else feedback_completion
                                     )
 
-                                    response_data = completion_data.get('response', {})
+                                    response_data = completion_data.get("response", {})
 
                                     # System Prompt
                                     with st.expander("System Prompt"):
-                                        system_prompt = response_data.get('system_prompt')
+                                        system_prompt = response_data.get(
+                                            "system_prompt"
+                                        )
                                         if system_prompt:
                                             st.code(system_prompt)
                                         else:
@@ -839,64 +902,91 @@ def update_visualization(
                                     # Raw Messages
                                     with st.expander("Raw Messages"):
                                         # Get messages from the completion data
-                                        messages = completion_data.get('input', [])
+                                        messages = completion_data.get("input", [])
                                         if messages:
                                             for msg in messages:
                                                 try:
                                                     # Debug logging
-                                                    logger.debug(f"Message type: {type(msg)}")
-                                                    logger.debug(f"Message content: {msg}")
+                                                    logger.debug(
+                                                        f"Message type: {type(msg)}"
+                                                    )
+                                                    logger.debug(
+                                                        f"Message content: {msg}"
+                                                    )
 
                                                     # Ensure we're working with a dictionary
                                                     msg_dict = (
-                                                        msg.model_dump() if hasattr(msg, 'model_dump')
-                                                        else msg if isinstance(msg, dict)
-                                                        else {'role': 'unknown', 'content': str(msg)}
+                                                        msg.model_dump()
+                                                        if hasattr(msg, "model_dump")
+                                                        else msg
+                                                        if isinstance(msg, dict)
+                                                        else {
+                                                            "role": "unknown",
+                                                            "content": str(msg),
+                                                        }
                                                     )
 
-                                                    role = msg_dict.get('role', 'unknown')
-                                                    content = msg_dict.get('content', '')
+                                                    role = msg_dict.get(
+                                                        "role", "unknown"
+                                                    )
+                                                    content = msg_dict.get(
+                                                        "content", ""
+                                                    )
 
                                                     st.markdown(f"**{role}**")
                                                     st.text(content)
                                                     st.markdown("---")
                                                 except Exception as msg_error:
-                                                    logger.exception(f"Error processing message: {msg_error}")
-                                                    st.error(f"Error displaying message: {msg_error}")
+                                                    logger.exception(
+                                                        f"Error processing message: {msg_error}"
+                                                    )
+                                                    st.error(
+                                                        f"Error displaying message: {msg_error}"
+                                                    )
                                         else:
                                             st.text("No input messages available")
 
                                     # Raw Completion
                                     with st.expander("Raw Completion"):
-                                        raw_completion = completion_data.get('response')
+                                        raw_completion = completion_data.get("response")
                                         if raw_completion:
                                             st.json(raw_completion)
                                         else:
                                             st.text("No raw completion available")
 
                                     # Usage Information
-                                    usage_data = completion_data.get('usage', {})
+                                    usage_data = completion_data.get("usage", {})
                                     if usage_data:
                                         st.subheader("Usage Information")
                                         col1, col2 = st.columns(2)
                                         with col1:
-                                            st.metric("Completion Cost",
-                                                    f"${usage_data.get('completion_cost', 0):.4f}")
-                                            st.metric("Completion Tokens",
-                                                    usage_data.get('completion_tokens', 0))
+                                            st.metric(
+                                                "Completion Cost",
+                                                f"${usage_data.get('completion_cost', 0):.4f}",
+                                            )
+                                            st.metric(
+                                                "Completion Tokens",
+                                                usage_data.get("completion_tokens", 0),
+                                            )
                                         with col2:
-                                            st.metric("Prompt Tokens",
-                                                    usage_data.get('prompt_tokens', 0))
-                                            st.metric("Cached Tokens",
-                                                    usage_data.get('cached_tokens', 0))
+                                            st.metric(
+                                                "Prompt Tokens",
+                                                usage_data.get("prompt_tokens", 0),
+                                            )
+                                            st.metric(
+                                                "Cached Tokens",
+                                                usage_data.get("cached_tokens", 0),
+                                            )
 
                                     # Timestamp if available
-                                    timestamp = response_data.get('timestamp')
+                                    timestamp = response_data.get("timestamp")
                                     if timestamp:
                                         st.caption(f"Generated at: {timestamp}")
 
                     else:
-                        st.info("Select a node in the graph or from the dropdown to view details")
+                        st.info(
+                            "Select a node in the graph or from the dropdown to view details"
+                        )
 
             # Auto-play logic
             if (

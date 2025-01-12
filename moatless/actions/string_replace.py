@@ -11,7 +11,6 @@ from moatless.actions.model import (
     ActionArguments,
     Observation,
     FewShotExample,
-    RetryException,
 )
 from moatless.file_context import FileContext
 from moatless.index.code_index import CodeIndex
@@ -62,23 +61,23 @@ class StringReplaceArgs(ActionArguments):
             lines = text.split("\n")
             # Pattern to match: digits followed by exactly one tab, then any spaces
             line_number_pattern = r"^\s*(\d+)\t*"
-            
+
             # First verify all lines start with a number and tab
             if not all(re.match(line_number_pattern, line) for line in lines):
                 return text
-                
+
             # Remove line numbers and tab while preserving remaining indentation
             cleaned_lines = []
             for line in lines:
                 # Remove numbers and tab but keep remaining spaces
                 cleaned_line = re.sub(line_number_pattern, "", line)
                 cleaned_lines.append(cleaned_line)
-            
+
             return "\n".join(cleaned_lines)
 
         # Remove trailing newlines and line numbers
-        self.old_str = remove_line_numbers(self.old_str.rstrip('\n'))
-        self.new_str = remove_line_numbers(self.new_str.rstrip('\n'))
+        self.old_str = remove_line_numbers(self.old_str.rstrip("\n"))
+        self.new_str = remove_line_numbers(self.new_str.rstrip("\n"))
 
         return self
 
@@ -96,20 +95,21 @@ class StringReplaceArgs(ActionArguments):
 
     @classmethod
     def format_schema_for_llm(cls) -> str:
-        return cls.format_xml_schema({
-            "path": "file/path.py",
-            "old_str": "\nexact code to replace\n",
-            "new_str": "\nreplacement code\n"
-        })
-    
+        return cls.format_xml_schema(
+            {
+                "path": "file/path.py",
+                "old_str": "\nexact code to replace\n",
+                "new_str": "\nreplacement code\n",
+            }
+        )
+
     def _short_str(self, str: str):
         str_split = str.split("\n")
         return str_split[0][:20]
 
     def short_summary(self) -> str:
-        param_str = f"path=\"{self.path}\""
+        param_str = f'path="{self.path}"'
         return f"{self.name}({param_str})"
-
 
 
 class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
@@ -138,7 +138,10 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
         object.__setattr__(self, "_repository", repository)
 
     def execute(
-        self, args: StringReplaceArgs, file_context: FileContext | None = None, workspace: Workspace | None = None
+        self,
+        args: StringReplaceArgs,
+        file_context: FileContext | None = None,
+        workspace: Workspace | None = None,
     ) -> Observation:
         path_str = self.normalize_path(args.path)
         path, error = self.validate_file_access(path_str, file_context)
@@ -163,36 +166,45 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
 
         # Filter matches to only those in context
         in_context_exact_matches = [
-            match for match in exact_matches 
-            if context_file.lines_is_in_context(match['start_line'], match['end_line'])
+            match
+            for match in exact_matches
+            if context_file.lines_is_in_context(match["start_line"], match["end_line"])
         ]
 
         # Set flag if we have exactly one in-context match but more total matches
         properties = {}
-        if len(in_context_exact_matches) == 1 and len(exact_matches) > len(in_context_exact_matches):
+        if len(in_context_exact_matches) == 1 and len(exact_matches) > len(
+            in_context_exact_matches
+        ):
             properties["flags"] = ["targeted_in_context_replacement"]
             exact_matches = in_context_exact_matches
 
         if len(exact_matches) == 0:
-            potential_matches = find_match_when_ignoring_indentation(old_str, file_content)
-            
+            potential_matches = find_match_when_ignoring_indentation(
+                old_str, file_content
+            )
+
             if len(potential_matches) > 0:
                 in_context_potential_matches = [
-                    match for match in potential_matches 
-                    if context_file.lines_is_in_context(match['start_line'], match['end_line'])
+                    match
+                    for match in potential_matches
+                    if context_file.lines_is_in_context(
+                        match["start_line"], match["end_line"]
+                    )
                 ]
 
                 if len(in_context_potential_matches) == 1:
                     potential_matches = in_context_potential_matches
 
             # Handle auto-correction if enabled
-            if (self.auto_correct_indentation and 
-                len(potential_matches) == 1 and 
-                potential_matches[0].get("can_auto_correct")):
-                
+            if (
+                self.auto_correct_indentation
+                and len(potential_matches) == 1
+                and potential_matches[0].get("can_auto_correct")
+            ):
                 exact_matches = potential_matches
                 indent_diff = potential_matches[0]["uniform_indent_diff"]
-                
+
                 # Adjust indentation in new_str
                 new_str_lines = new_str.splitlines()
                 adjusted_lines = []
@@ -206,27 +218,32 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                         # Add indentation
                         adjusted_lines.append(" " * indent_diff + line)
                 new_str = "\n".join(adjusted_lines)
-                
+
                 # Use the matched content as old_str
                 old_str = exact_matches[0]["content"]
 
                 # Fix argument for correct message history
                 args.old_str = old_str
                 args.new_str = new_str
-                
+
                 properties["flags"] = ["auto_corrected_indentation"]
             else:
-
                 if not potential_matches:
                     potential_matches = find_potential_matches(old_str, file_content)
 
                 # Filter potential matches to only those in context
                 in_context_potential_matches = [
-                    match for match in potential_matches
-                    if context_file.lines_is_in_context(match['start_line'], match['end_line'])
+                    match
+                    for match in potential_matches
+                    if context_file.lines_is_in_context(
+                        match["start_line"], match["end_line"]
+                    )
                 ]
 
-                if len(potential_matches) > 0 and len(in_context_potential_matches) == 1:
+                if (
+                    len(potential_matches) > 0
+                    and len(in_context_potential_matches) == 1
+                ):
                     potential_matches = in_context_potential_matches
 
                 if len(potential_matches) == 1:
@@ -241,7 +258,9 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                     )
 
                     if match["diff_reason"] == "indentation_differs":
-                        differences_msg = "\n".join(f"- {diff}" for diff in match.get("differences", []))
+                        differences_msg = "\n".join(
+                            f"- {diff}" for diff in match.get("differences", [])
+                        )
                         message += (
                             f"The content matches but the indentation is different.\n"
                             f"{differences_msg}\n\n"
@@ -278,7 +297,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                 return Observation(
                     message=f"String '{old_str}' not found in {path}.\n\nRemember to write out the exact string you want to replace with the same indentation and no placeholders.",
                     properties={"fail_reason": "string_not_found"},
-                    expect_correction=True
+                    expect_correction=True,
                 )
         elif len(exact_matches) > 1:
             matches_info = "\n".join(
@@ -305,17 +324,21 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
             match = in_context_exact_matches[0]
             # Count newlines up to the start of the match to find its position
             start_pos = 0
-            for _ in range(match['start_line'] - 1):
-                start_pos = file_content.find('\n', start_pos) + 1
+            for _ in range(match["start_line"] - 1):
+                start_pos = file_content.find("\n", start_pos) + 1
             # Find the exact position of this occurrence
             start_pos = file_content.find(old_str, start_pos)
             # Replace only this occurrence
             logger.info(f"Do targeted replacement on line {start_pos}")
-            
-            new_file_content = file_content[:start_pos] + new_str + file_content[start_pos + len(old_str):]
+
+            new_file_content = (
+                file_content[:start_pos]
+                + new_str
+                + file_content[start_pos + len(old_str) :]
+            )
         else:
             new_file_content = file_content.replace(args.old_str, args.new_str)
-        
+
         # Generate diff and apply changes
         diff = do_diff(str(path), file_content, new_file_content)
         context_file.apply_changes(new_file_content)
@@ -479,21 +502,22 @@ def normalize_for_comparison(s):
     Preserves backslashes, parentheses, curly braces, and % operator for string formatting.
     """
     # First, normalize line endings and remove empty lines
-    s = '\n'.join(line.strip() for line in s.splitlines() if line.strip())
-    
+    s = "\n".join(line.strip() for line in s.splitlines() if line.strip())
+
     # Store removed characters for difference checking
     normalize_chars = r'["\'\s_=+,;]'
     removed_chars = set(re.findall(normalize_chars, s))
-    
+
     # Normalize string by:
     # 1. Removing all whitespace and specified chars
     # 2. Converting to lowercase to make comparison case-insensitive
     # 3. Preserve backslashes, parentheses, curly braces and % operator
     normalized = s.lower()
-    normalized = re.sub(r'\s+', '', normalized)
-    normalized = re.sub(r'["\'\s_=+,;]', '', normalized)
-    
+    normalized = re.sub(r"\s+", "", normalized)
+    normalized = re.sub(r'["\'\s_=+,;]', "", normalized)
+
     return normalized, removed_chars
+
 
 def find_match_when_ignoring_indentation(old_str, content):
     old_str_lines = old_str.splitlines()
@@ -502,7 +526,7 @@ def find_match_when_ignoring_indentation(old_str, content):
 
     window_size = len(old_str_lines)
     indentation_matches = []
-    
+
     for start_idx in range(len(content_lines) - window_size + 1):
         window = "\n".join(content_lines[start_idx : start_idx + window_size])
         window_no_indent = normalize_indentation(window)
@@ -511,15 +535,19 @@ def find_match_when_ignoring_indentation(old_str, content):
             # Calculate indentation differences for each line
             differences = []
             indentation_diffs = set()
-            
-            for i, (old_line, window_line) in enumerate(zip(old_str_lines, content_lines[start_idx:start_idx + window_size])):
+
+            for i, (old_line, window_line) in enumerate(
+                zip(old_str_lines, content_lines[start_idx : start_idx + window_size])
+            ):
                 old_indent = len(old_line) - len(old_line.lstrip())
                 window_indent = len(window_line) - len(window_line.lstrip())
                 indent_diff = window_indent - old_indent
                 indentation_diffs.add(indent_diff)
-                
+
                 if old_indent != window_indent:
-                    differences.append(f"Line {i+1}: expected {old_indent} spaces, found {window_indent} spaces")
+                    differences.append(
+                        f"Line {i+1}: expected {old_indent} spaces, found {window_indent} spaces"
+                    )
 
             match_data = {
                 "start_line": start_idx + 1,
@@ -528,25 +556,26 @@ def find_match_when_ignoring_indentation(old_str, content):
                 "diff_reason": "indentation_differs",
                 "differences": differences,
             }
-            
+
             # If all lines have the same indentation difference, include it
             if len(indentation_diffs) == 1:
                 match_data["uniform_indent_diff"] = indentation_diffs.pop()
                 match_data["can_auto_correct"] = True
-            
+
             indentation_matches.append(match_data)
 
     return indentation_matches
+
 
 def find_potential_matches(old_str, new_content):
     matches = []
     content_lines = new_content.splitlines()
     if not content_lines:
         return matches
-    
+
     # Pre-compute normalized versions of old_str
     old_str_normalized, old_str_chars = normalize_for_comparison(old_str)
-    
+
     # Track processed lines to avoid overlapping matches
     processed_lines = set()
 
@@ -558,17 +587,21 @@ def find_potential_matches(old_str, new_content):
 
         # Check if this line could start our match
         line_normalized, _ = normalize_for_comparison(content_lines[start_idx])
-        if not line_normalized.strip() or not old_str_normalized.startswith(line_normalized):
+        if not line_normalized.strip() or not old_str_normalized.startswith(
+            line_normalized
+        ):
             start_idx += 1
             continue
 
         # Try increasing window sizes until we find a match
         for window_size in range(1, min(50, len(content_lines) - start_idx + 1)):
             # Skip if any line in the window was already processed
-            if any(i in processed_lines for i in range(start_idx, start_idx + window_size)):
+            if any(
+                i in processed_lines for i in range(start_idx, start_idx + window_size)
+            ):
                 continue
 
-            window = "\n".join(content_lines[start_idx:start_idx + window_size])
+            window = "\n".join(content_lines[start_idx : start_idx + window_size])
             window_normalized, window_chars = normalize_for_comparison(window)
 
             if old_str_normalized in window_normalized:
@@ -577,7 +610,7 @@ def find_potential_matches(old_str, new_content):
                     processed_lines.add(i)
 
                 differences = []
-                if window.count('\n') != old_str.count('\n'):
+                if window.count("\n") != old_str.count("\n"):
                     differences.append(
                         f"Line break count differs: found {window.count('\n') + 1} lines, "
                         f"expected {old_str.count('\n') + 1} lines"
@@ -587,21 +620,27 @@ def find_potential_matches(old_str, new_content):
                 added = window_chars - old_str_chars
                 removed = old_str_chars - window_chars
                 if added:
-                    differences.append(f"Additional characters found: {', '.join(sorted(added))}")
+                    differences.append(
+                        f"Additional characters found: {', '.join(sorted(added))}"
+                    )
                 if removed:
-                    differences.append(f"Missing characters: {', '.join(sorted(removed))}")
+                    differences.append(
+                        f"Missing characters: {', '.join(sorted(removed))}"
+                    )
 
-                matches.append({
-                    "start_line": start_idx + 1,
-                    "end_line": start_idx + window_size,
-                    "content": window,
-                    "diff_reason": "line_breaks_differ",
-                    "differences": differences
-                })
+                matches.append(
+                    {
+                        "start_line": start_idx + 1,
+                        "end_line": start_idx + window_size,
+                        "content": window,
+                        "diff_reason": "line_breaks_differ",
+                        "differences": differences,
+                    }
+                )
                 # Jump to next unprocessed line
                 start_idx = start_idx + window_size
                 break
-            
+
         else:
             # No match found with any window size, move to next line
             start_idx += 1
@@ -611,15 +650,17 @@ def find_potential_matches(old_str, new_content):
         for i, line in enumerate(content_lines):
             if i in processed_lines:
                 continue
-                
+
             if normalize_indentation(line) == normalize_indentation(old_str):
                 processed_lines.add(i)
-                matches.append({
-                    "start_line": i + 1,
-                    "end_line": i + 1,
-                    "content": line,
-                    "diff_reason": "indentation_differs"
-                })
+                matches.append(
+                    {
+                        "start_line": i + 1,
+                        "end_line": i + 1,
+                        "content": line,
+                        "diff_reason": "indentation_differs",
+                    }
+                )
 
     return matches
 
@@ -636,15 +677,17 @@ def find_exact_matches(old_str: str, file_content: str) -> list[dict]:
             break
 
         # Count newlines before the match to get line number
-        start_line = file_content.count('\n', 0, start_pos) + 1
-        end_line = start_line + old_str.count('\n')
+        start_line = file_content.count("\n", 0, start_pos) + 1
+        end_line = start_line + old_str.count("\n")
 
-        matches.append({
-            "start_line": start_line,
-            "end_line": end_line,
-            "content": old_str,
-            "diff_reason": "exact_match"
-        })
+        matches.append(
+            {
+                "start_line": start_line,
+                "end_line": end_line,
+                "content": old_str,
+                "diff_reason": "exact_match",
+            }
+        )
 
         # Move start_pos forward to find subsequent matches
         start_pos += len(old_str)

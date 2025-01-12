@@ -18,9 +18,13 @@ class FinishArgs(ActionArguments):
     """Indicate that the task is fully completed and verified with new tests."""
 
     thoughts: str = Field(
-        ..., description="Your reasoning about why the task is complete and verified with new tests."
+        ...,
+        description="Your reasoning about why the task is complete and verified with new tests.",
     )
-    finish_reason: str = Field(..., description="Explain why the task is complete and how it's verified with new tests.")
+    finish_reason: str = Field(
+        ...,
+        description="Explain why the task is complete and how it's verified with new tests.",
+    )
 
     class Config:
         title = "Finish"
@@ -35,15 +39,32 @@ class FinishArgs(ActionArguments):
 class Finish(Action):
     args_schema: ClassVar[Type[ActionArguments]] = FinishArgs
 
-    enforce_patch: bool = Field(default=False, description="Whether to enforce that the file context has a patch")
-    enforce_test_patch: bool = Field(default=False, description="Whether to enforce that the file context has a test patch")
+    enforce_patch: bool = Field(
+        default=False,
+        description="Whether to enforce that the file context has a patch",
+    )
+    enforce_test_patch: bool = Field(
+        default=False,
+        description="Whether to enforce that the file context has a test patch",
+    )
 
-    def execute(self, args: FinishArgs, file_context: FileContext | None = None, workspace: Workspace | None = None):
+    def execute(
+        self,
+        args: FinishArgs,
+        file_context: FileContext | None = None,
+        workspace: Workspace | None = None,
+    ):
         if self.enforce_patch and not file_context.has_patch():
-            return Observation(message="No files was updated, you cannot finish unless you have made changes to the files", terminal=False)
+            return Observation(
+                message="No files was updated, you cannot finish unless you have made changes to the files",
+                terminal=False,
+            )
         if self.enforce_test_patch and not file_context.has_test_patch():
-            return Observation(message="No test files was updated, you cannot finish unless you have updated existing tests or added new tests", terminal=False)
-        
+            return Observation(
+                message="No test files was updated, you cannot finish unless you have updated existing tests or added new tests",
+                terminal=False,
+            )
+
         return Observation(message=args.finish_reason, terminal=True)
 
     @classmethod

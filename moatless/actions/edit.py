@@ -18,8 +18,6 @@ from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.file import do_diff
 from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment
-from moatless.utils.tokenizer import count_tokens
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -70,7 +68,9 @@ class EditActionArguments(ActionArguments):
     @classmethod
     def validate_new_str(cls, v, info):
         if info.data.get("command") == "str_replace" and v is None:
-            raise ValueError("Parameter `new_str` cannot be null for command: str_replace. Return an empty string if your intention was to remove old_str.")
+            raise ValueError(
+                "Parameter `new_str` cannot be null for command: str_replace. Return an empty string if your intention was to remove old_str."
+            )
         if info.data.get("command") == "insert" and v is None:
             raise ValueError("Parameter `new_str` is required for command: insert")
         return v
@@ -145,12 +145,14 @@ class ClaudeEditTool(Action, CodeModificationMixin):
             repository=self._repository,
         )
         self._view_code = ViewCode(
-            repository=self._repository,
-            completion_model=completion_model
+            repository=self._repository, completion_model=completion_model
         )
 
     def execute(
-        self, args: EditActionArguments, file_context: FileContext | None = None, workspace: Workspace | None = None
+        self,
+        args: EditActionArguments,
+        file_context: FileContext | None = None,
+        workspace: Workspace | None = None,
     ) -> Observation:
         # Claude tends to add /repo in the start of the file path.
         # TODO: Maybe we should add /repo as default on all paths?
@@ -264,10 +266,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         if view_range:
             codespan.start_line, codespan.end_line = view_range
 
-        view_code_args = ViewCodeArgs(
-            thoughts=args.thoughts,
-            files=[codespan]
-        )
+        view_code_args = ViewCodeArgs(thoughts=args.thoughts, files=[codespan])
         return self._view_code.execute(view_code_args, file_context=file_context)
 
     def _create(

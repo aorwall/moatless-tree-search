@@ -1,20 +1,21 @@
-from dataclasses import dataclass
 import json
-from pydantic import BaseModel, Field, ConfigDict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional, Any, Dict
-import os
+from typing import Optional, Any, List
+
+from pydantic import BaseModel, Field, ConfigDict
 
 from moatless.agent.settings import AgentSettings
+from moatless.benchmark.report import BenchmarkResult
 from moatless.completion.completion import CompletionModel
 from moatless.completion.model import Usage
 from moatless.discriminator import Discriminator
 from moatless.feedback.feedback import FeedbackGenerator
+from moatless.schema import MessageHistoryType
 from moatless.selector.selector import Selector
 from moatless.value_function.base import ValueFunction
-from moatless.benchmark.report import BenchmarkResult
-from moatless.schema import MessageHistoryType
+
 
 class DateTimeEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -25,6 +26,7 @@ class DateTimeEncoder(json.JSONEncoder):
         if isinstance(obj, Enum):
             return obj.value
         return super().default(obj)
+
 
 class TreeSearchSettings(BaseModel):
     max_expansions: int = Field(
@@ -68,11 +70,12 @@ class TreeSearchSettings(BaseModel):
     )
 
     agent_settings: AgentSettings = Field(
-        ...,
-        description="Settings for creating the agent"
+        ..., description="Settings for creating the agent"
     )
 
-    selector: Optional[Selector] = Field(default=None, description="Custom selector for tree search")
+    selector: Optional[Selector] = Field(
+        default=None, description="Custom selector for tree search"
+    )
 
     value_function: Optional[ValueFunction] = Field(
         None,
@@ -82,7 +85,7 @@ class TreeSearchSettings(BaseModel):
     discriminator: Optional[Discriminator] = Field(
         None,
         description="The discriminator to use for the tree search.",
-    )   
+    )
 
     feedback_generator: Optional[FeedbackGenerator] = Field(
         None,
@@ -96,18 +99,22 @@ class InstanceStatus(str, Enum):
     COMPLETED = "completed"
     ERROR = "error"
 
+
 class EvaluationStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
     ERROR = "error"
 
+
 @dataclass
 class EvaluationEvent:
     """Event emitted by the evaluation process"""
+
     evaluation_name: str
     event_type: str
     data: Any
+
 
 class EvaluationInstance(BaseModel):
     model_config = ConfigDict(
@@ -118,24 +125,45 @@ class EvaluationInstance(BaseModel):
     )
 
     instance_id: str = Field(description="Unique identifier for the instance")
-    status: InstanceStatus = Field(default=InstanceStatus.PENDING, description="Current status of the instance")
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="When the instance was created")
-    started_at: Optional[datetime] = Field(default=None, description="When evaluation started")
-    completed_at: Optional[datetime] = Field(default=None, description="When evaluation completed")
+    status: InstanceStatus = Field(
+        default=InstanceStatus.PENDING, description="Current status of the instance"
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="When the instance was created",
+    )
+    started_at: Optional[datetime] = Field(
+        default=None, description="When evaluation started"
+    )
+    completed_at: Optional[datetime] = Field(
+        default=None, description="When evaluation completed"
+    )
     submission: Optional[str] = Field(default=None, description="The submitted patch")
-    error: Optional[str] = Field(default=None, description="Error message if evaluation failed")
-    resolved: Optional[bool] = Field(default=None, description="Whether the instance was resolved")
+    error: Optional[str] = Field(
+        default=None, description="Error message if evaluation failed"
+    )
+    resolved: Optional[bool] = Field(
+        default=None, description="Whether the instance was resolved"
+    )
     iterations: Optional[int] = Field(default=None, description="Number of iterations")
-    usage: Optional[Usage] = Field(default=None, description="Total cost of the instance")
-    
-    duration: Optional[float] = Field(default=None, description="Time taken to evaluate in seconds")
-    benchmark_result: Optional[BenchmarkResult] = Field(default=None, description="Benchmark result for this instance")
+    usage: Optional[Usage] = Field(
+        default=None, description="Total cost of the instance"
+    )
+
+    duration: Optional[float] = Field(
+        default=None, description="Time taken to evaluate in seconds"
+    )
 
     def start(self):
         self.status = InstanceStatus.STARTED
         self.started_at = datetime.now(timezone.utc)
 
-    def complete(self, submission: Optional[str] = None, resolved: Optional[bool] = None, benchmark_result: Optional[BenchmarkResult] = None):
+    def complete(
+        self,
+        submission: Optional[str] = None,
+        resolved: Optional[bool] = None,
+        benchmark_result: Optional[BenchmarkResult] = None,
+    ):
         self.status = InstanceStatus.COMPLETED
         self.completed_at = datetime.now(timezone.utc)
         self.submission = submission
@@ -164,9 +192,23 @@ class Evaluation(BaseModel):
     evaluations_dir: str = Field(description="Directory where evaluations are stored")
     evaluation_name: str = Field(description="Name of the evaluation")
     settings: TreeSearchSettings = Field(description="Tree search settings")
-    start_time: Optional[datetime] = Field(default=None, description="When the evaluation started")
-    finish_time: Optional[datetime] = Field(default=None, description="When the evaluation finished")
-    status: EvaluationStatus = Field(default=EvaluationStatus.PENDING, description="Current status of the evaluation")
+    start_time: Optional[datetime] = Field(
+        default=None, description="When the evaluation started"
+    )
+    finish_time: Optional[datetime] = Field(
+        default=None, description="When the evaluation finished"
+    )
+    status: EvaluationStatus = Field(
+        default=EvaluationStatus.PENDING, description="Current status of the evaluation"
+    )
+    instances: List[EvaluationInstance] = Field(default_factory=list)
+
+    def get_instance(self, instance_id: str) -> EvaluationInstance | None:
+        return next(
+            instance
+            for instance in self.instances
+            if instance.instance_id == instance_id
+        )
 
 
 class EvaluationDatasetSplit(BaseModel):
@@ -177,7 +219,10 @@ class EvaluationDatasetSplit(BaseModel):
         }
     )
 
-    name: str = Field(description="Name of the evaluation split (e.g., 'train', 'test', 'validation')")
+    name: str = Field(
+        description="Name of the evaluation split (e.g., 'train', 'test', 'validation')"
+    )
     description: str = Field(description="Description of what this split represents")
-    instance_ids: list[str] = Field(description="List of instance IDs that belong to this split")
-
+    instance_ids: list[str] = Field(
+        description="List of instance IDs that belong to this split"
+    )

@@ -56,7 +56,7 @@ def clone_and_checkout(repo_url, repo_dir, commit):
         try:
             # Check if the commit exists in the repo
             result = subprocess.run(
-                ['git', 'cat-file', '-e', commit],
+                ["git", "cat-file", "-e", commit],
                 cwd=repo_dir,
                 check=True,
                 text=True,
@@ -73,7 +73,9 @@ def clone_and_checkout(repo_url, repo_dir, commit):
             logger.info(f"Found existing repo with commit {commit} at {repo_dir}")
             return
         except subprocess.CalledProcessError:
-            logger.warning(f"Existing repo at {repo_dir} doesn't have commit {commit}, recloning")
+            logger.warning(
+                f"Existing repo at {repo_dir} doesn't have commit {commit}, recloning"
+            )
             subprocess.run(
                 ["rm", "-rf", repo_dir],
                 check=True,

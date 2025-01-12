@@ -1,19 +1,21 @@
-import re
 import logging
+import re
 from typing import Optional
+
 logger = logging.getLogger(__name__)
 
-def parse_explanation(response_content, keyword='feedback') -> str:
-    explanation_pattern = r'<{keyword}>\s*(.*?)\s*(?:</{keyword}>|<Feedback_to_Alternative_Branch>|<Reward>|$)'
+
+def parse_explanation(response_content, keyword="feedback") -> str:
+    explanation_pattern = r"<{keyword}>\s*(.*?)\s*(?:</{keyword}>|<Feedback_to_Alternative_Branch>|<Reward>|$)"
     match = re.search(explanation_pattern, response_content, re.DOTALL | re.IGNORECASE)
-    
+
     if match:
         return match.group(1).strip()
     else:
         return response_content
 
 
-def parse_value(response_content, keyword='reward', allowed_values=None):
+def parse_value(response_content, keyword="reward", allowed_values=None):
     """
     Parse the value associated with a given keyword from the LLM response content.
 
@@ -26,19 +28,19 @@ def parse_value(response_content, keyword='reward', allowed_values=None):
     int: The parsed integer value, or None if not found, not an integer, or not in allowed_values.
     """
     value_patterns = [
-        fr'<\s*{keyword}\s*>\s*:?\s*(?:[Nn]ode[_\s-]?)?(-?\d+)',
-        fr'<\s*{keyword}\s*>(?:[Nn]ode[_\s-]?)?(-?\d+)',
-        fr'{keyword}:\s*(?:[Nn]ode[_\s-]?)?(-?\d+)',
-        fr'\*\*{keyword}\*\*\s*:?\s*(?:[Nn]ode[_\s-]?)?(-?\d+)',
-        fr'\*\*{keyword.capitalize()}\*\*\s*:?\s*(?:[Nn]ode[_\s-]?)?(-?\d+)',
-        fr'{keyword.capitalize()}:\s*(?:[Nn]ode[_\s-]?)?(-?\d+)',
-        fr'<\s*{keyword.capitalize()}\s*>\s*:?\s*(?:[Nn]ode[_\s-]?)?(-?\d+)',
-        fr'\*\*<\s*{keyword.capitalize()}\s*>\*\*:\s*(?:[Nn]ode[_\s-]?)?(-?\d+)',
-        fr'\*\*{keyword.capitalize()}:\*\*\s*(?:[Nn]ode[_\s-]?)?(-?\d+)',
-        fr'<\s*{keyword}\s*>\s*(?:[Nn]ode[_\s-]?)?(-?\d+)\s*</\s*{keyword}\s*>',
-        fr'<\s*{keyword}\s*>\s*(?:[Nn]ode[_\s-]?)?(-?\d+)',
-        fr'<\s*{keyword}\s*>\s*:?\s*(-?\d+)',
-        fr'{keyword}\s*:?\s*(-?\d+)',
+        rf"<\s*{keyword}\s*>\s*:?\s*(?:[Nn]ode[_\s-]?)?(-?\d+)",
+        rf"<\s*{keyword}\s*>(?:[Nn]ode[_\s-]?)?(-?\d+)",
+        rf"{keyword}:\s*(?:[Nn]ode[_\s-]?)?(-?\d+)",
+        rf"\*\*{keyword}\*\*\s*:?\s*(?:[Nn]ode[_\s-]?)?(-?\d+)",
+        rf"\*\*{keyword.capitalize()}\*\*\s*:?\s*(?:[Nn]ode[_\s-]?)?(-?\d+)",
+        rf"{keyword.capitalize()}:\s*(?:[Nn]ode[_\s-]?)?(-?\d+)",
+        rf"<\s*{keyword.capitalize()}\s*>\s*:?\s*(?:[Nn]ode[_\s-]?)?(-?\d+)",
+        rf"\*\*<\s*{keyword.capitalize()}\s*>\*\*:\s*(?:[Nn]ode[_\s-]?)?(-?\d+)",
+        rf"\*\*{keyword.capitalize()}:\*\*\s*(?:[Nn]ode[_\s-]?)?(-?\d+)",
+        rf"<\s*{keyword}\s*>\s*(?:[Nn]ode[_\s-]?)?(-?\d+)\s*</\s*{keyword}\s*>",
+        rf"<\s*{keyword}\s*>\s*(?:[Nn]ode[_\s-]?)?(-?\d+)",
+        rf"<\s*{keyword}\s*>\s*:?\s*(-?\d+)",
+        rf"{keyword}\s*:?\s*(-?\d+)",
     ]
 
     matched_value = None
@@ -53,7 +55,7 @@ def parse_value(response_content, keyword='reward', allowed_values=None):
                     return value
 
         # If no pattern matches, look for any number after the keyword
-        general_pattern = fr'{keyword}\s*:?\s*(?:[Nn]ode[_\s-]?)?(-?\d+)'
+        general_pattern = rf"{keyword}\s*:?\s*(?:[Nn]ode[_\s-]?)?(-?\d+)"
         match = re.search(general_pattern, response_content, re.IGNORECASE | re.DOTALL)
         if match:
             matched_value = match.group(1).strip()
@@ -66,11 +68,14 @@ def parse_value(response_content, keyword='reward', allowed_values=None):
         logger.warning(f"Response content: {response_content}")
         return None
     except ValueError:
-        logger.warning(f"Found value {matched_value} at {keyword}, but it's not a valid integer.")
+        logger.warning(
+            f"Found value {matched_value} at {keyword}, but it's not a valid integer."
+        )
         return None
     except Exception as e:
         logger.error(f"Error parsing {keyword}: {e}")
         return None
+
 
 def parse_node_id(response_content) -> Optional[int]:
     """
@@ -81,21 +86,21 @@ def parse_node_id(response_content) -> Optional[int]:
     - "Node ID: 5"
     - "suggested node: 5"
     - Or any JSON structure containing node_id or suggested_node_id
-    
+
     Args:
     response_content (str): The content of the LLM response.
-    
+
     Returns:
     int: The parsed node ID, or None if not found or not a valid integer.
     """
     node_patterns = [
-        r'expand\s*node\s*(\d+)',
-        r'node_id\s*:?\s*(\d+)',
-        r'node\s*id\s*:?\s*(\d+)',
-        r'suggested\s*node\s*:?\s*(\d+)',
-        r'suggested_node_id\s*:?\s*(\d+)',
-        r'expand\s*node\s*#?(\d+)',
-        r'node\s*#?(\d+)',
+        r"expand\s*node\s*(\d+)",
+        r"node_id\s*:?\s*(\d+)",
+        r"node\s*id\s*:?\s*(\d+)",
+        r"suggested\s*node\s*:?\s*(\d+)",
+        r"suggested_node_id\s*:?\s*(\d+)",
+        r"expand\s*node\s*#?(\d+)",
+        r"node\s*#?(\d+)",
         # JSON-like patterns
         r'"node_id"\s*:\s*(\d+)',
         r'"suggested_node_id"\s*:\s*(\d+)',
@@ -113,9 +118,11 @@ def parse_node_id(response_content) -> Optional[int]:
         # If no match found
         logger.debug("No valid node ID found in the response content.")
         return None
-        
+
     except ValueError:
-        logger.warning(f"Found value {matched_value}, but it's not a valid integer node ID.")
+        logger.warning(
+            f"Found value {matched_value}, but it's not a valid integer node ID."
+        )
         return None
     except Exception as e:
         logger.error(f"Error parsing node ID: {e}")

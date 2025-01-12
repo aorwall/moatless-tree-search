@@ -1,19 +1,17 @@
-import fnmatch
 import json
 import logging
 import mimetypes
 import os
 import shutil
 import tempfile
-from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
 import requests
 from rapidfuzz import fuzz
 
 from moatless.codeblocks import CodeBlock, CodeBlockType
-
 from moatless.index.settings import IndexSettings
+from moatless.index.simple_faiss import SimpleFaissVectorStore
 from moatless.index.types import (
     CodeSnippet,
     SearchCodeHit,
@@ -24,15 +22,11 @@ from moatless.repository.repository import Repository
 from moatless.schema import FileWithSpans
 from moatless.utils.file import is_test
 from moatless.utils.tokenizer import count_tokens
-from llama_index.core.storage.docstore import SimpleDocumentStore
-from moatless.index.simple_faiss import SimpleFaissVectorStore
 
 if TYPE_CHECKING:
     from llama_index.core import SimpleDirectoryReader
-    from llama_index.core.base.embeddings.base import BaseEmbedding
     from llama_index.core.ingestion import DocstoreStrategy, IngestionPipeline
-    from llama_index.core.storage.docstore import DocumentStore, SimpleDocumentStore
-    from llama_index.core.vector_stores.types import BasePydanticVectorStore, VectorStoreQuery
+    from llama_index.core.storage.docstore import SimpleDocumentStore
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +48,9 @@ class CodeIndex:
         self,
         file_repo: Repository,
         index_name: Optional[str] = None,
-        vector_store: 'BasePydanticVectorStore | None' = None,
-        docstore: 'DocumentStore | None' = None,
-        embed_model: 'BaseEmbedding | None' = None,
+        vector_store: "BasePydanticVectorStore | None" = None,
+        docstore: "DocumentStore | None" = None,
+        embed_model: "BaseEmbedding | None" = None,
         blocks_by_class_name: Optional[dict] = None,
         blocks_by_function_name: Optional[dict] = None,
         settings: IndexSettings | None = None,
@@ -64,8 +58,6 @@ class CodeIndex:
         max_hits_without_exact_match: int = 100,
         max_exact_results: int = 5,
     ):
-        from moatless.index.simple_faiss import SimpleFaissVectorStore
-
         self._index_name = index_name
         self._settings = settings or IndexSettings()
 
@@ -77,8 +69,9 @@ class CodeIndex:
 
         self._blocks_by_class_name = blocks_by_class_name or {}
         self._blocks_by_function_name = blocks_by_function_name or {}
-        
+
         from moatless.index.embed_model import get_embed_model
+
         self._embed_model = embed_model or get_embed_model(self._settings.embed_model)
         self._vector_store = vector_store or default_vector_store(self._settings)
         self._docstore = docstore or SimpleDocumentStore()
@@ -93,7 +86,8 @@ class CodeIndex:
 
     @classmethod
     def from_persist_dir(cls, persist_dir: str, file_repo: Repository, **kwargs):
-        
+        from moatless.index.simple_faiss import SimpleFaissVectorStore
+        from llama_index.core.storage.docstore import SimpleDocumentStore
         vector_store = SimpleFaissVectorStore.from_persist_dir(persist_dir)
         docstore = SimpleDocumentStore.from_persist_dir(persist_dir)
 
@@ -805,7 +799,6 @@ class CodeIndex:
         # Import llama_index components only when needed
         from llama_index.core import SimpleDirectoryReader
         from llama_index.core.ingestion import DocstoreStrategy, IngestionPipeline
-        from llama_index.core.storage import docstore
 
         repo_path = repo_path or self._file_repo.path
 
@@ -880,6 +873,7 @@ class CodeIndex:
                 )
 
         from moatless.index.epic_split import EpicSplitter
+
         splitter = EpicSplitter(
             language=self._settings.language,
             min_chunk_size=self._settings.min_chunk_size,
@@ -932,7 +926,6 @@ class CodeIndex:
 
         with open(os.path.join(persist_dir, "blocks_by_function_name.json"), "w") as f:
             f.write(json.dumps(self._blocks_by_function_name, indent=2))
-
 
 
 def _rerank_files(file_paths: list[str], file_pattern: str):

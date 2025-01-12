@@ -20,6 +20,7 @@ class MessageArgs(ActionArguments):
     def equals(self, other: "ActionArguments") -> bool:
         return other.message == self.message
 
+
 class MessageAction(Action):
     """
     Action to just send a response to the user.
@@ -27,5 +28,10 @@ class MessageAction(Action):
 
     args_schema = MessageArgs
 
-    def execute(self, args: MessageArgs, file_context: FileContext | None = None, workspace: Workspace | None = None) -> Observation:
+    def execute(
+        self,
+        args: MessageArgs,
+        file_context: FileContext | None = None,
+        workspace: Workspace | None = None,
+    ) -> Observation:
         return Observation()
