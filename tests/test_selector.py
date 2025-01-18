@@ -1,8 +1,8 @@
 import pytest
 
-from moatless.actions.model import Observation, ActionArguments
+from moatless.actions.schema import Observation, ActionArguments
 from moatless.node import Node, Reward
-from moatless.selector import Selector, BestFirstSelector, SoftmaxSelector
+from swesearch.selector import Selector, BestFirstSelector, SoftmaxSelector
 
 
 @pytest.fixture

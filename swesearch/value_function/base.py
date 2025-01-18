@@ -66,7 +66,7 @@ class ValueFunction(BaseValueFunction):
         if self.coding_value_function:
             coding_reward, _ = self.coding_value_function.get_reward(node)
 
-        messages = self.message_generator.generate(node)
+        messages = self.message_generator.generate_messages(node)
         if messages is None:
             messages = []  # Ensure we have a valid list
 

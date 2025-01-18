@@ -1,6 +1,6 @@
 import streamlit as st
 
-from swesearch.search_tree import SearchTree
+from moatless.search_tree import SearchTree
 from swesearch.streamlit.shared import show_completion
 
 

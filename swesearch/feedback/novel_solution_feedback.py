@@ -1,63 +1,112 @@
 import logging
+import traceback
 from typing import List, Optional
 
 from litellm.types.llms.openai import ChatCompletionUserMessage
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from moatless.actions.action import Action
 from moatless.completion import BaseCompletionModel
+from moatless.completion.model import Completion
 from moatless.completion.schema import ResponseSchema
+from moatless.exceptions import CompletionError, CompletionRejectError
 from swesearch.feedback import FeedbackGenerator
 from swesearch.feedback.feedback_agent import FeedbackData
 from moatless.node import Node
+from swesearch.feedback.solution_message import format_single_solution, format_task_and_context
 
 logger = logging.getLogger(__name__)
 
 
-class ImplementationGuidance(BaseModel):
-    focus: str = Field(..., description="Area that needs attention")
-    consideration: str = Field(..., description="What to keep in mind")
-    why: str = Field(..., description="Why this aspect is important")
-
-
-class TestRequirement(BaseModel):
-    scenario: str = Field(..., description="What to verify")
-    criteria: str = Field(..., description="How to know it works")
-
-
-class NovelSolutionFeedback(ResponseSchema):
-    """Provide novel solution feedback to the coding agent."""
-
-    implementation_guidance: ImplementationGuidance = Field(
-        ...,
-        description="A focused suggestion highlighting the most important aspect to consider",
+class CodeDiscoveryPlan(BaseModel):
+    """Plan for discovering relevant code and patterns."""
+    target_area: str = Field(
+        ..., 
+        description="What code areas or functionality to locate (e.g., 'value calculation logic', 'test helper functions')"
     )
-    test_requirements: List[TestRequirement] = Field(
-        ...,
-        description="2 specific scenarios or conditions that demonstrate success",
-        min_items=2,
-        max_items=2,
+    search_strategy: str = Field(
+        ..., 
+        description="How to find the relevant code (e.g., 'Look for classes implementing X interface', 'Search for utility functions handling Y')"
+    )
+    rationale: str = Field(
+        ..., 
+        description="Why this code is important for the solution and what patterns to look for in it"
     )
 
 
-class NovelSolutionFeedbackAgent(FeedbackGenerator):
+class ValidationPlan(BaseModel):
+    """Plan for validating the solution."""
+    scenario: str = Field(
+        ..., 
+        description="Specific scenario or edge case to verify"
+    )
+    required_context: str = Field(
+        ..., 
+        description="What test utilities, helper functions, or patterns to look for to implement this test"
+    )
+    success_criteria: str = Field(
+        ..., 
+        description="How to verify this scenario works correctly"
+    )
+
+
+class NovelSolutionPlan(ResponseSchema):
+    """Plan for creating a novel solution by discovering and modifying relevant code."""
+
+    solution_reasoning: str = Field(
+        ...,
+        description="Step-by-step reasoning process for arriving at this solution plan. This should include:\n"
+                   "1. Analysis of what worked/didn't work in previous solutions\n"
+                   "2. Identification of patterns that could be improved\n"
+                   "3. Reasoning about alternative approaches\n"
+                   "4. Justification for the chosen strategy\n"
+                   "This field is for internal reasoning and won't be shown in the feedback."
+    )
+    discovery_plan: CodeDiscoveryPlan = Field(
+        ...,
+        description="Plan for finding the code that needs to be modified or referenced",
+    )
+    modification_approach: str = Field(
+        ...,
+        description="High-level approach for modifying the discovered code (e.g., 'Extend the base class with new validation', 'Add error handling around the core logic')"
+    )
+    potential_challenges: str = Field(
+        ...,
+        description="What difficulties might arise and what patterns to look for to handle them"
+    )
+    validation_plan: List[ValidationPlan] = Field(
+        ...,
+        description="Plan for verifying the solution works correctly",
+    )
+
+
+class NovelSolutionPlanner(FeedbackGenerator):
+    """Generates plans for creating novel solutions by analyzing previous attempts."""
+
     completion_model: BaseCompletionModel = Field(
         ..., description="The completion model to use"
     )
 
+    @model_validator(mode="after")
+    def validate_completion_model(self):
+        if not isinstance(self.completion_model, BaseCompletionModel):
+            raise ValueError("completion_model must be a BaseCompletionModel")
+        
+        system_prompt = self._create_system_prompt()
+        self.completion_model.initialize(system_prompt=system_prompt, response_schema=NovelSolutionPlan)
+        return self
+    
+
     def generate_feedback(
         self, node: Node, actions: List[Action] | None = None
     ) -> Optional[FeedbackData]:
-        """Generate guidance-focused feedback for solution implementation."""
+        """Generate a plan for implementing a novel solution."""
 
         messages = self._create_analysis_messages(node)
-        system_prompt = self._create_system_prompt()
 
         try:
             completion_response = self.completion_model.create_completion(
                 messages=messages,
-                system_prompt=system_prompt,
-                response_model=NovelSolutionFeedback,
             )
 
             node.completions["feedback"] = completion_response.completion
@@ -66,30 +115,47 @@ class NovelSolutionFeedbackAgent(FeedbackGenerator):
                 logger.error("No structured output in completion response")
                 return None
 
-            feedback_response = completion_response.structured_output
+            plan = completion_response.structured_output
 
-            feedback_message = "Consider this aspect in your implementation:\n\n"
+            plan_message = "Here's a plan for implementing a solution:\n\n"
 
-            feedback_message += "**Key Focus**:\n"
-            feedback_message += (
-                f" - What: {feedback_response.implementation_guidance.focus}\n"
-            )
-            feedback_message += f" - Consider: {feedback_response.implementation_guidance.consideration}\n"
-            feedback_message += (
-                f" - Why: {feedback_response.implementation_guidance.why}\n\n"
-            )
+            plan_message += "**Code Discovery**:\n"
+            plan_message += f"- Target Area: {plan.discovery_plan.target_area}\n"
+            plan_message += f"- How to Find It: {plan.discovery_plan.search_strategy}\n"
+            plan_message += f"- Why Important: {plan.discovery_plan.rationale}\n\n"
 
-            feedback_message += "\nValidate your solution against these scenarios:\n\n"
-            for i, test in enumerate(feedback_response.test_requirements, 1):
-                feedback_message += f"**Test Scenario {i}**:\n"
-                feedback_message += f" - Scenario: {test.scenario}\n"
-                feedback_message += f" - Success Criteria: {test.criteria}\n\n"
+            plan_message += f"**Modification Approach**:\n{plan.modification_approach}\n\n"
+            
+            plan_message += f"**Potential Challenges**:\n{plan.potential_challenges}\n\n"
+
+            plan_message += "**Validation Plan**:\n"
+            for i, test in enumerate(plan.validation_plan, 1):
+                plan_message += f"\nTest Scenario {i}:\n"
+                plan_message += f"- What to Test: {test.scenario}\n"
+                plan_message += f"- Required Context: {test.required_context}\n"
+                plan_message += f"- Success Criteria: {test.success_criteria}\n"
 
             return FeedbackData(
-                analysis=completion_response.text_response,
-                feedback=feedback_message,
-                suggested_node_id=None,
+                feedback=plan_message,
             )
+        except CompletionError as e:
+            node.error = traceback.format_exc()
+            if e.last_completion:
+                logger.error(f"Node{node.node_id}: Generate feedback failed with completion error: {e}")
+
+                node.completions["feedback"] = Completion.from_llm_completion(
+                    input_messages=e.messages if hasattr(e, "messages") else [],
+                    completion_response=e.last_completion,
+                    model=self.completion.model,
+                    usage=e.accumulated_usage if hasattr(e, "accumulated_usage") else None,
+                )
+            else:
+                logger.error(f"Node{node.node_id}: Build action failed with error: {e}")
+
+            if isinstance(e, CompletionRejectError):
+                return
+            else:
+                raise e
 
         except Exception as e:
             logger.exception(f"Error generating novel solution feedback: {e}")
@@ -100,138 +166,115 @@ class NovelSolutionFeedbackAgent(FeedbackGenerator):
     ) -> List[ChatCompletionUserMessage]:
         messages = []
 
+        # Get root node and all previous solutions
         root_node = current_node.get_root()
-        task_message = "# Original Task\n"
-        task_message += root_node.message
+        leaf_nodes = [n for n in root_node.get_leaf_nodes() if n != current_node]
+
+        # Start with task and complete context from all solutions
+        task_message = format_task_and_context(root_node, show_file_context=True)
         messages.append(ChatCompletionUserMessage(role="user", content=task_message))
 
-        leaf_nodes = root_node.get_leaf_nodes()
-
+        # Add previous solutions if they exist
         if leaf_nodes:
-            attempts_message = "# Previous Solution Attempts\n"
-            for i, node in enumerate(leaf_nodes):
-                if node.node_id == current_node.node_id:
-                    continue
-
-                attempts_message += f"\n## Attempt {i+1}\n"
-
-                if node.is_finished():
-                    attempts_message += "\nStatus: Finished"
-                else:
-                    attempts_message += "\nStatus: Abandoned"
-
-                trajectory = node.get_trajectory()
-                latest_feedback = None
-                for n in trajectory:
-                    if n.feedback_data:
-                        latest_feedback = n.feedback_data.feedback
-                        break
-
-                if latest_feedback:
-                    attempts_message += "\n\n### Previous Feedback:\n"
-                    attempts_message += latest_feedback
-
-                if node.file_context and not node.file_context.is_empty():
-                    attempts_message += "\n\n### Final Code State:\n"
-                    attempts_message += (
-                        "Code identified as relevant and modified in this attempt\n"
-                    )
-                    attempts_message += "<file_context>\n"
-                    attempts_message += node.file_context.create_prompt(
-                        show_outcommented_code=True,
-                        exclude_comments=True,
-                        outcomment_code_comment="... code not in context for this attempt",
-                    )
-                    attempts_message += "\n</file_context>"
-
-                patch = (
-                    node.file_context.generate_git_patch() if node.file_context else ""
+            solution_message = "\nPrevious solution attempts:\n"
+            for i, node in enumerate(leaf_nodes, 1):
+                solution_message += f"\n# Solution {i} (Node{node.node_id})\n"
+                solution_message += format_single_solution(
+                    node=node,
+                    show_history=True,
+                    show_file_context=True
                 )
-                if patch.strip():
-                    attempts_message += "\n\n### Changes Made:\n"
-                    attempts_message += "<git_patch>\n"
-                    attempts_message += patch
-                    attempts_message += "\n</git_patch>"
-
-                if node.file_context and node.file_context.test_files:
-                    attempts_message += "\n\n### Test results:\n"
-                    attempts_message += node.file_context.get_test_summary()
-
-                if node.reward:
-                    attempts_message += f"\n\n### Reward: {node.reward.value}/100\n"
-                    if node.reward.explanation:
-                        attempts_message += (
-                            f"Reward Explanation: {node.reward.explanation}\n"
-                        )
-
-            messages.append(
-                ChatCompletionUserMessage(role="user", content=attempts_message)
-            )
+            messages.append(ChatCompletionUserMessage(role="user", content=solution_message))
 
         return messages
 
     def _create_system_prompt(self) -> str:
-        return """You are a feedback agent that generates solution guidance for an AI assistant. 
-Your role is to provide insights that guide toward successful novel solutions without being 
-prescriptive about specific implementations.
+        return """You are a solution planner that creates strategies for implementing novel solutions.
+Your role is to analyze previous attempts and create a plan for a fundamentally different approach,
+deliberately moving away from patterns seen in past solutions to explore innovative alternatives.
 
-You will receive:
+You will receive and analyze:
 
-1. Original Task Specification
-   - The initial problem or feature request to be implemented
+1. Original Task Specification and Code Context
+   - The initial problem or feature request
+   - Code context identified as relevant by previous attempts
+   Use this to understand what types of code and patterns will be important.
 
 2. Previous Solution Attempts, each containing:
-   - Status: Whether the attempt was Finished or Abandoned
-   - Previous Feedback: Any guidance provided in earlier attempts
-   - Code Context: Files and changes identified as relevant by the AI
-     Note: <file_context> sections show only the code that the AI identified 
-     as relevant and modified in that attempt
-   - Test Results: Outcomes of any tests run on the changes
-   - Reward Score: An automated evaluation score (-100 to 100) from a value function assessing the solution
-   - Reward Explanation: Detailed analysis of why the solution received its score
+   - Changes made and their outcomes
+   - Test results and coverage
+   - Reward scores and explanations
+   Use this to identify patterns to deliberately avoid and opportunities for innovation.
 
-Analyze the provided context with special attention to:
-- Corner cases and edge conditions that might be overlooked
-- Missing or incomplete test coverage
-- Opportunities for simpler, more maintainable solutions
-- Consistency with existing codebase patterns and practices
-- Code areas that might be relevant but weren't examined in previous attempts
-- Patterns in what led to higher or lower reward scores
+First, you should reason through a novel solution step by step:
+1. Analyze what worked and didn't work in previous solutions
+2. Identify recurring patterns across previous solutions that indicate a "conventional" approach
+3. Brainstorm radically different approaches that haven't been tried
+4. Consider unconventional but promising strategies that could work better
+5. Justify why your novel approach could succeed where others haven't
+Document this innovative reasoning process in the solution_reasoning field.
 
-Important: Before generating new guidance:
-1. Analyze patterns in previous solution approaches
-2. Review focus areas from previous feedback
-3. Identify unexplored aspects of the problem
-4. Look for entirely different angles to approach the task
+Your goal is to break away from incremental improvements and explore fundamentally different approaches:
+- Look for unused but relevant parts of the codebase
+- Consider alternative architectural patterns
+- Think about solving the problem from a completely different angle
+- Challenge assumptions made in previous solutions
+- Explore more robust or elegant approaches
 
-Actively avoid:
-- Similar focus areas as previous feedback
-- Guidance that would lead to similar implementations
-- Testing scenarios that were previously suggested
-- Problem decomposition patterns used before
+Then create a plan that guides an agent to:
+1. Find different code areas to modify than previous solutions
+2. Implement changes in a novel way
+3. Test the changes more comprehensively
 
-Seek novel perspectives by:
-- Considering different aspects of the problem
-- Looking at the task from a new angle
-- Focusing on unexplored system interactions
-- Thinking about alternative ways to validate success
+The plan should focus on:
+- What unexplored code could be leveraged
+- How to find promising alternative implementation paths
+- What patterns from other parts of the codebase could be adapted
+- How to modify the code in ways previous solutions haven't attempted
+- What new challenges this approach might face
+- How to verify it works more robustly
 
-Provide guidance that:
-- Highlights potential edge cases and error conditions
-- Encourages comprehensive test coverage
-- Favors simple, proven approaches over complex solutions
-- Maintains alignment with established code patterns
-- Suggests exploration of potentially relevant code areas not yet examined
+Important aspects to consider:
+1. Novel Code Discovery
+   - What unexplored functionality could be useful
+   - Where to look for alternative approaches
+   - What patterns indicate promising new directions
+   - Why this different approach could be better
 
-Structure your response with:
-1. A focused implementation suggestion highlighting:
-   - Focus area to consider
-   - Key considerations (emphasizing simplicity and robustness)
-   - Why this aspect is important
+2. Innovative Modification Strategy
+   - How to implement changes differently than before
+   - What new patterns to introduce
+   - How to avoid pitfalls of previous approaches
 
-2. Two validation scenarios, each including:
-   - Specific scenario to verify (including edge cases)
-   - Clear success criteria
+3. Enhanced Validation Approach
+   - What scenarios previous solutions missed
+   - What additional test coverage is needed
+   - How to verify the solution is more robust
 
-Keep guidance general enough to allow for creative solutions while ensuring 
-critical aspects aren't overlooked. Favor simplicity and consistency over clever solutions."""
+Your plan should be:
+- Clearly different from previous attempts
+- Specific about new directions to explore
+- Explicit about innovative patterns to introduce
+- Detailed about comprehensive validation
+
+Structure your response as:
+1. Code Discovery Plan:
+   - What novel code areas/functionality to leverage
+   - How to find unexplored implementation paths
+   - Why this different approach could work better
+
+2. Modification Approach:
+   - Innovative strategy for changes
+   - New patterns to introduce
+
+3. Potential Challenges:
+   - What new difficulties might arise
+   - How to handle them differently than before
+
+4. Validation Plan (2 scenarios):
+   - What edge cases previous solutions missed
+   - What new test approaches are needed
+   - How to verify more comprehensive coverage
+
+Focus on making the plan novel and innovative, helping the agent
+explore fundamentally different approaches to the problem."""

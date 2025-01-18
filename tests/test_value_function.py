@@ -3,16 +3,16 @@ from unittest.mock import Mock, patch
 import pytest
 
 from moatless.actions.finish import Finish, FinishArgs
-from moatless.actions.model import RewardScaleEntry
-from moatless.completion.completion import CompletionModel
+from moatless.actions.action import RewardScaleEntry
+from moatless.completion import BaseCompletionModel
 from moatless.file_context import FileContext
 from moatless.node import Node
-from moatless.value_function.base import ValueFunction
+from swesearch.value_function.base import ValueFunction
 
 
 @pytest.fixture
 def value_function():
-    return ValueFunction(completion=CompletionModel(model="gpt"))
+    return ValueFunction(completion=BaseCompletionModel(model="gpt"))
 
 
 @pytest.fixture
@@ -80,10 +80,10 @@ def test_model_dump(value_function):
 
 
 def test_model_validate():
-    mock_completion = Mock(spec=CompletionModel)
+    mock_completion = Mock(spec=BaseCompletionModel)
     mock_completion.model_dump.return_value = {"type": "mock"}
     data = {"completion": {"type": "mock"}}
-    with patch.object(CompletionModel, 'model_validate', return_value=mock_completion):
+    with patch.object(BaseCompletionModel, 'model_validate', return_value=mock_completion):
         validated = ValueFunction.model_validate(data)
     assert isinstance(validated, ValueFunction)
     assert validated._completion == mock_completion

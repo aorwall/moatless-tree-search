@@ -1,10 +1,8 @@
 import argparse
-import asyncio
 import json
 import logging
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional
 
@@ -12,45 +10,58 @@ import litellm
 from dotenv import load_dotenv
 from litellm import InMemoryCache
 
-import swesearch.benchmark.evaluation_config as eval_config
 from moatless.agent.settings import AgentSettings
 from swesearch.benchmark.evaluation_factory import (
     create_evaluation,
     create_evaluation_name,
 )
 from swesearch.benchmark.evaluation_runner import EvaluationRunner
-from swesearch.benchmark.repository import EvaluationFileRepository
-from swesearch.benchmark.schema import (
+from moatless.benchmark.repository import EvaluationFileRepository
+from moatless.benchmark.schema import (
     EvaluationDatasetSplit,
     InstanceStatus,
     TreeSearchSettings,
 )
-from moatless.completion import BaseCompletionModel, LLMResponseFormat
+from moatless.completion.base import BaseCompletionModel, LLMResponseFormat
 from moatless.completion.log_handler import LogHandler
-from moatless.message_history import MessageHistoryType
+from moatless.schema import MessageHistoryType
+from swesearch.evaluation_setups import create_evaluation_setup
+from moatless.model_config import MODEL_CONFIGS
 
 # Load environment variables
 load_dotenv()
-
-# Automatically get all uppercase configs from evaluation_config
-CONFIG_MAP = {
-    name.lower().replace("_config", ""): getattr(eval_config, name)
-    for name in dir(eval_config)
-    if name.isupper()
-    and name.endswith("_CONFIG")
-    and isinstance(getattr(eval_config, name), dict)
+litellm.drop_params = True
+# Default evaluation settings
+DEFAULT_CONFIG = {
+    # Dataset settings
+    "split": "lite_and_verified_solvable",
+    "instance_ids": None,
+    # Tree search settings
+    "max_iterations": 20,
+    "max_expansions": 1,
+    "max_cost": 1.0,
+    # Runner settings
+    "num_workers": 10,
+    # Evaluation settings
+    "evaluation_name": None,
+    "rerun_errors": False,
 }
 
+# Automatically get all model configs from model_config.py
+CONFIG_MAP = {
+    model_name.lower().replace("-", "_"): {**DEFAULT_CONFIG, **config} 
+    for model_name, config in MODEL_CONFIGS.items()
+}
 
 def setup_loggers(logs_dir: str):
     """Setup console and file loggers"""
 
     # Setup console logger (only for this script)
-    console_logger = logging.getLogger("scripts.run_evaluation_simple")
+    console_logger = logging.getLogger("scripts.run_evaluation")
     console_logger.setLevel(logging.INFO)
     console_logger.propagate = False  # Don't propagate to root logger
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(logging.Formatter("%(message)s"))
+    console_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
     console_logger.addHandler(console_handler)
 
     # Setup file logger (for all logs)
@@ -59,28 +70,22 @@ def setup_loggers(logs_dir: str):
     # Main log file (INFO and above)
     file_logger = logging.getLogger()  # Root logger
     file_logger.setLevel(logging.INFO)
-    file_handler = logging.FileHandler(
-        os.path.join(logs_dir, f"evaluation_{timestamp}.log")
-    )
-    file_handler.setFormatter(
-        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    )
+    file_handler = logging.FileHandler(os.path.join(logs_dir, f"evaluation_{timestamp}.log"))
+    file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
     file_logger.addHandler(file_handler)
 
     # Error log file (ERROR and above)
-    error_handler = logging.FileHandler(
-        os.path.join(logs_dir, f"evaluation_errors_{timestamp}.log")
-    )
+    error_handler = logging.FileHandler(os.path.join(logs_dir, f"evaluation_errors_{timestamp}.log"))
     error_handler.setFormatter(
-        logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s\n%(pathname)s:%(lineno)d\n"
-        )
+        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s\n%(pathname)s:%(lineno)d\n")
     )
     error_handler.setLevel(logging.ERROR)
     file_logger.addHandler(error_handler)
 
     # Suppress other loggers from console output
-    logging.getLogger("moatless").setLevel(logging.INFO)  # Set level for moatless logs
+    logging.getLogger("moatless").setLevel(logging.INFO) 
+    logging.getLogger("LiteLLM").setLevel(logging.WARNING)  
+
     for logger_name in logging.root.manager.loggerDict:
         if logger_name != "scripts.run_evaluation_simple":
             logger = logging.getLogger(logger_name)
@@ -88,6 +93,7 @@ def setup_loggers(logs_dir: str):
             logger.addHandler(logging.NullHandler())  # Prevent output to console
 
     return console_logger, file_logger
+
 
 def load_dataset_split(dataset_name: str) -> Optional[EvaluationDatasetSplit]:
     """Load a dataset split from the datasets directory."""
@@ -104,6 +110,7 @@ def load_dataset_split(dataset_name: str) -> Optional[EvaluationDatasetSplit]:
         data = json.load(f)
         return EvaluationDatasetSplit(**data)
 
+
 class SimpleEvaluationMonitor:
     def __init__(self, repository, evaluation, console_logger, file_logger):
         self.repository = repository
@@ -115,171 +122,97 @@ class SimpleEvaluationMonitor:
         self.console = console_logger
         self.logger = file_logger
 
-        # Load initial instances
-        for instance in self.evaluation.instances:
-            self.instances_data[instance.instance_id] = instance
 
-        self._log_settings()
-
-        self.console.info(f"Starting evaluation: {evaluation.evaluation_name}")
-        self.console.info(f"Found {len(self.instances_data)} instances in evaluation")
-        self.logger.info(
-            f"[SimpleEvaluationMonitor] Starting evaluation: {evaluation.evaluation_name}"
-        )
-        self.logger.info(
-            f"[SimpleEvaluationMonitor] Found {len(self.instances_data)} instances in evaluation"
-        )
-
-    def _log_settings(self):
-        """Log evaluation configuration and settings"""
-        eval_dir = os.path.join(
-            self.repository.evaluations_dir, self.evaluation.evaluation_name
-        )
-        settings = self.evaluation.settings
-
-        # Evaluation info
-        info_lines = [
-            "\nEvaluation Settings:",
-            f"Directory: {eval_dir}",
-            "\nModel Settings:",
-            f"  Model: {settings.model.model}",
-            f"  Temperature: {settings.model.temperature}",
-            f"  Response Format: {settings.model.response_format.value if settings.model.response_format else 'default'}",
-            f"  Thoughts in Action: {settings.model.thoughts_in_action}",
-            "\nTree Search Settings:",
-            f"  Max Iterations: {settings.max_iterations}",
-            f"  Max Expansions: {settings.max_expansions}",
-            f"  Max Cost: ${settings.max_cost}",
-            "\nAgent Settings:",
-            f"  Message History: {settings.agent_settings.message_history_type.value}",
-            f"  System Prompt: {'custom' if settings.agent_settings.system_prompt else 'default'}",
-            f"  Thoughts in Action: {settings.agent_settings.thoughts_in_action}",
-        ]
-
-        for line in info_lines:
-            self.console.info(line)
-            self.logger.info(line)
-
+        print(f"Starting evaluation: {evaluation.evaluation_name}")
+        print(f"Found {len(evaluation.instances)} instances in evaluation")
 
 
     def handle_event(self, event):
         """Handle evaluation events by logging them"""
         event_type = event.event_type
         data = event.data if event.data else {}
-
         instance_id = data.get("instance_id")
-
-        if event_type == "evaluation_started":
-            self.console.info("Evaluation started")
-            self.logger.info("Evaluation started")
-            return
-
-        if instance_id:
+        
+        # Format log message based on event type
+        log_msg = None
+    
+        if event_type == "instance_started":
+            log_msg = f"{instance_id}: Started processing"
+            
+        elif event_type == "instance_completed":
+            resolved = data.get("resolved")
+            status = "✓" if resolved is True else "✗" if resolved is False else "-"
             instance = self.evaluation.get_instance(instance_id)
-            self.instances_data[instance_id] = instance
+            log_msg = f"\n{instance_id}: ✨ Completed [{status}] - Iterations: {instance.iterations}"
+            self.log_eval_summary()
 
-            if event_type == "instance_started":
-                self.console.info(f"Started instance: {instance_id}")
-                self.logger.info(f"Started instance: {instance_id}")
-            elif event_type == "instance_completed":
-                status = "✓" if instance.resolved else "✗"
-                self.console.info(f"Completed {instance_id} ({status})")
-                self.logger.info(
-                    f"Completed {instance_id} (resolved: {instance.resolved})"
-                )
-                self._log_instance_summary(instance)
-            elif event_type == "instance_error":
-                error_msg = f"Error in instance {instance_id}: {instance.error}"
-                self.console.error(error_msg)
-                self.logger.error(error_msg)
-            elif event_type == "tree_progress":
-                self.console.info(f"Tree progress: {instance_id}")
-                self.logger.info(f"Tree progress: {instance_id}")
-            else:
-                self.console.info(f"Unknown event: {event_type}: {data}")
-                self.logger.info(f"Unknown event: {event_type}: {data}")
-        else:
-            self.console.info(f"Unknown event: {event_type}: {data}")
-            self.logger.info(f"Unknown event: {event_type}: {data}")
+        elif event_type == "instance_error":
+            error = data.get("error", "Unknown error")
+            log_msg = f"{instance_id}: Error - {error}"
+            self.log_eval_summary()
+            
+        elif event_type == "tree_started":
+            log_msg = f"{instance_id}: Started tree search"
+            
+        elif event_type == "tree_iteration":
+            action = data.get("action", "Unknown")
+            node_id = data.get("current_node_id", 0)
+            finished_nodes = data.get("finished_nodes", 0)
+            total_nodes = data.get("total_nodes", 0)
+            best_reward = data.get("best_reward", 0)
+            log_msg = f"{instance_id}: → Node{node_id} - {action} (Finished: {finished_nodes}/{total_nodes}, Best: {best_reward:.2f})"
+            
+        elif event_type == "tree_completed":
+            total_iterations = data.get("total_iterations", 0)
+            finished_nodes = data.get("finished_nodes", 0)
+            best_node_id = data.get("best_node_id")
+            log_msg = f"{instance_id}: Completed tree search with {finished_nodes} finished nodes, best node: {best_node_id}"
+            
+        elif event_type == "instance_evaluation_started":
+            log_msg = f"{instance_id}: Started evaluation"
+            
+        elif event_type == "instance_evaluation_result":
+            resolved = data.get("resolved")
+            status = "✓" if resolved is True else "✗" if resolved is False else "-"
+            node_id = data.get("node_id")
+            log_msg = f"\n{instance_id}: 🎯 Evaluated node {node_id} [{status}] - Duration: {data.get('duration', 0):.1f}s"
+            
+        elif event_type == "instance_evaluation_error":
+            error = data.get("error", "Unknown error")
+            node_id = data.get("node_id")
+            log_msg = f"{instance_id}: Evaluation error on node {node_id} - {error}"
 
-    def _log_instance_summary(self, instance):
-        """Log summary for a completed instance"""
-        cost = 0.0
-        tokens = 0
-        if instance.usage:
-            cost = instance.usage.completion_cost
-            tokens = (
-                instance.usage.prompt_tokens
-                + instance.usage.completion_tokens
-                + instance.usage.cached_tokens
-            )
-            self.total_cost += cost
-            self.total_tokens += tokens
+        elif event_type == "reward_generated":
+            node_id = data.get("node_id")
+            reward = data.get("reward", 0)
+            depth = data.get("depth", 0)
+            log_msg = f"{instance_id}: 💎 Node{node_id} received reward {reward:.2f}"
 
-        summary = (
-            f"Instance {instance.instance_id} summary:\n"
-            f"  - Resolved: {instance.resolved}\n"
-            f"  - Duration: {instance.duration}s\n"
-            f"  - Iterations: {instance.iterations}\n"
-            f"  - Cost: ${cost:.2f}\n"
-            f"  - Tokens: {tokens:,}"
-        )
-
-        self.console.info(summary)
-        self.logger.info(summary)
-
-        self.log_eval_summary()
+        elif event_type == "feedback_generated":
+            node_id = data.get("node_id")
+            parent_id = data.get("parent_id")
+            feedback = data.get("feedback", {})
+            action = data.get("action", "unknown")
+            depth = data.get("depth", 0)
+            feedback_str = str(feedback)[:100] + "..." if len(str(feedback)) > 100 else str(feedback)
+            log_msg = f"{instance_id}: 💭 Node{node_id} (parent: Node{parent_id}) received feedback for {action} at depth {depth}: {feedback_str}"
+        
+        if log_msg:
+            self.console.info(log_msg)
+            self.logger.info(log_msg)
 
     def log_eval_summary(self):
         """Log total instances, completed, errors and resolved instances"""
-        total = len(self.instances_data)
-        completed = sum(
-            1
-            for i in self.instances_data.values()
-            if i.status == InstanceStatus.COMPLETED
-        )
-        errors = sum(
-            1 for i in self.instances_data.values() if i.status == InstanceStatus.ERROR
-        )
-        resolved = sum(1 for i in self.instances_data.values() if i.resolved is True)
-        summary = (
-            f"Evaluation progress summary:\n"
-            f"  - Total Instances: {total}\n"
-            f"  - Completed: {completed}\n"
-            f"  - Errors: {errors}\n"
-            f"  - Resolved: {resolved}"
-        )
+        total = len(self.evaluation.instances)
+        completed = sum(1 for i in self.evaluation.instances if i.status == InstanceStatus.COMPLETED)
+        errors = sum(1 for i in self.evaluation.instances if i.status == InstanceStatus.ERROR)
+        resolved = sum(1 for i in self.evaluation.instances if i.resolved is True)
+        resolved_rate = (resolved / (completed + errors)) * 100 if completed + errors > 0 else 0
+        summary = f"""
+📊 Evaluation Progress:
+Total = {total} | Completed = {completed} ({completed/total*100:.1f}%) | Errors = {errors} ({errors/total*100:.1f}%) | Resolved = {resolved} ({resolved_rate:.1f}%)"""
         self.console.info(summary)
         self.logger.info(summary)
-
-    def log_final_summary(self):
-        """Log final evaluation summary"""
-        duration = datetime.now() - self.start_time
-        completed = sum(
-            1
-            for i in self.instances_data.values()
-            if i.status == InstanceStatus.COMPLETED
-        )
-        errors = sum(
-            1 for i in self.instances_data.values() if i.status == InstanceStatus.ERROR
-        )
-        resolved = sum(1 for i in self.instances_data.values() if i.resolved is True)
-        total = len(self.instances_data)
-
-        summary_lines = [
-            "\nFinal Evaluation Summary:",
-            f"Total Instances: {total}",
-            f"Completed: {completed}",
-            f"Errors: {errors}",
-            f"Success Rate: {(resolved/total*100 if total > 0 else 0):.1f}%",
-            f"Total Cost: ${self.total_cost:.2f}",
-            f"Total Tokens: {self.total_tokens:,}",
-            f"Total Duration: {duration}",
-        ]
-
-        for line in summary_lines:
-            self.console.info(line)
-            self.logger.info(line)
 
 
 def print_config(config: dict, console_logger: logging.Logger):
@@ -300,6 +233,9 @@ def print_config(config: dict, console_logger: logging.Logger):
             ("Max Iterations", "max_iterations"),
             ("Max Expansions", "max_expansions"),
             ("Max Cost", "max_cost"),
+            ("Value Function", "value_function"),
+            ("Selector", "selector"),
+            ("Feedback Generator", "feedback_generator"),
         ],
         "Runner Settings": [
             ("Number of Workers", "num_workers"),
@@ -310,19 +246,19 @@ def print_config(config: dict, console_logger: logging.Logger):
             ("Rerun Errors", "rerun_errors"),
         ],
         "Environment Settings": [
-            ("Repository Dir", "REPO_DIR"),
+            ("Repository Dir", "MOATLESS_REPO_DIR"),
             ("Index Store Dir", "INDEX_STORE_DIR"),
             ("Index Store URL", "INDEX_STORE_URL"),
             ("Moatless Dir", "MOATLESS_DIR"),
         ],
     }
 
-    console_logger.info("\nConfiguration Settings:")
-    console_logger.info("=" * 50)
+    print("\nConfiguration Settings:")
+    print("=" * 50)
 
     for section, settings in config_sections.items():
-        console_logger.info(f"\n{section}:")
-        console_logger.info("-" * 50)
+        print(f"\n{section}:")
+        print("-" * 50)
         for label, key in settings:
             if section == "Environment Settings":
                 value = os.getenv(key)
@@ -332,21 +268,26 @@ def print_config(config: dict, console_logger: logging.Logger):
             if value is not None:
                 if isinstance(value, list) and len(value) > 3:
                     value = f"{value[:3]} ... ({len(value)} items)"
-                console_logger.info(f"{label:20}: {value}")
+                print(f"{label:20}: {value}")
+            else:
+                print(f"{label:20}: N/A")
 
-    console_logger.info("\n" + "=" * 50 + "\n")
+    print("\n" + "=" * 50 + "\n")
+
 
 def run_evaluation(config: dict):
     """Run evaluation using provided configuration"""
 
     evaluations_dir = os.getenv("MOATLESS_DIR", "./evals")
 
-    if "model" not in config:
-        raise ValueError("No model specified")
-
     if config.get("evaluation_name"):
         evaluation_name = config["evaluation_name"]
     else:
+        # Convert message_history string to enum if it's a string
+        message_history = config.get("message_history")
+        if isinstance(message_history, str):
+            message_history = MessageHistoryType(message_history)
+
         # Create evaluation name using the same logic as run_evaluation.py
         evaluation_name = create_evaluation_name(
             model=config["model"],
@@ -354,12 +295,8 @@ def run_evaluation(config: dict):
             date=datetime.now().strftime("%Y%m%d"),
             max_iterations=config["max_iterations"],
             max_expansions=config["max_expansions"],
-            response_format=LLMResponseFormat(config["response_format"])
-            if config.get("response_format")
-            else None,
-            message_history=MessageHistoryType(config["message_history"])
-            if config.get("message_history")
-            else None,
+            response_format=LLMResponseFormat(config["response_format"]) if config.get("response_format") else None,
+            message_history=message_history,
             thoughts_in_action=config.get("thoughts_in_action", False),
         )
 
@@ -399,51 +336,24 @@ def run_evaluation(config: dict):
     if not instance_ids:
         raise ValueError("No instance IDs provided")
 
-    model_settings = BaseCompletionModel(
-        model=config["model"],
-        temperature=0.0,
-        max_tokens=3000,
-        api_key=config.get("api_key"),
-        base_url=config.get("base_url"),
-        response_format=LLMResponseFormat(config["response_format"])
-        if config.get("response_format")
-        else None,
-        thoughts_in_action=config.get("thoughts_in_action", False),
-    )
-
-    agent_settings = AgentSettings(
-        completion_model=model_settings,
-        message_history_type=MessageHistoryType(config["message_history"])
-        if config.get("message_history")
-        else MessageHistoryType.MESSAGES,
-        system_prompt=None,
-        thoughts_in_action=config.get("thoughts_in_action", False),
-    )
-
-    tree_search_settings = TreeSearchSettings(
-        max_iterations=config["max_iterations"],
-        max_expansions=config["max_expansions"],
-        max_cost=config["max_cost"],
-        model=model_settings,
-        agent_settings=agent_settings,
-    )
+    # Create tree search settings using the evaluation setup function
+    tree_search_settings = create_evaluation_setup(config)
 
     evaluation = create_evaluation(
         repository=repository,
         evaluation_name=evaluation_name,
-        settings=tree_search_settings,
         instance_ids=instance_ids,
     )
 
     # Create monitor with both loggers
-    monitor = SimpleEvaluationMonitor(
-        repository, evaluation, console_logger, file_logger
-    )
+    monitor = SimpleEvaluationMonitor(repository, evaluation, console_logger, file_logger)
 
     # Create runner with event handler
     runner = EvaluationRunner(
         evaluation=evaluation,
+        tree_search_settings=tree_search_settings,
         num_workers=config["num_workers"],
+        repo_base_dir=os.getenv("MOATLESS_REPO_DIR", "./repos"),
         use_testbed=True,
         rerun_errors=config.get("rerun_errors", False),
     )
@@ -452,82 +362,98 @@ def run_evaluation(config: dict):
     runner.add_event_handler(monitor.handle_event)
 
     # TODO: Just testing to disable cache...
-    litellm.in_memory_llm_clients_cache = InMemoryCache(
-        max_size_in_memory=-1, default_ttl=-1
-    )
+    litellm.in_memory_llm_clients_cache = InMemoryCache(max_size_in_memory=-1, default_ttl=-1)
 
     try:
         # Run evaluation
         runner.run_evaluation(instance_ids=instance_ids)
-        
+
         # Log final summary
-        monitor.log_final_summary()
+        monitor.log_eval_summary()
     except Exception as e:
         error_msg = f"Fatal error in evaluation: {str(e)}"
         console_logger.error(error_msg)
         file_logger.error(error_msg, exc_info=True)
-        raise e 
-        
+        raise e
+
 
 def parse_args():
     """Parse command line arguments"""
-    parser = argparse.ArgumentParser(
-        description="Run evaluation with specified configuration"
-    )
-    
-    # Base config selection
+    parser = argparse.ArgumentParser(description="Run evaluation with specified configuration")
+
+    # Model selection
     parser.add_argument(
-        "--config",
-        choices=list(CONFIG_MAP.keys()),
-        default="default",
-        help="Configuration preset to use",
+        "--model",
+        choices=list(MODEL_CONFIGS.keys()),
+        help="Model to evaluate (e.g., 'claude-3-5-sonnet-20241022')",
     )
-    
+
     # Model settings
-    parser.add_argument("--model", help="Model to use (overrides config)")
     parser.add_argument("--api-key", help="API key for the model")
     parser.add_argument("--base-url", help="Base URL for the model API")
     parser.add_argument("--response-format", choices=["tool_call", "react"], help="Response format for the model")
     parser.add_argument("--thoughts-in-action", action="store_true", help="Enable thoughts in action")
     parser.add_argument("--temperature", type=float, help="Temperature for model sampling")
-    
+
     # Dataset settings
     parser.add_argument("--split", help="Dataset split to use (overrides config)")
     parser.add_argument("--instance-ids", nargs="+", help="Specific instance IDs to evaluate (overrides split)")
-    
+
     # Tree search settings
     parser.add_argument("--max-iterations", type=int, help="Max iterations (overrides config)")
     parser.add_argument("--max-expansions", type=int, help="Max expansions (overrides config)")
     parser.add_argument("--max-cost", type=float, help="Max cost in dollars (overrides config)")
-    
+
     # Runner settings
     parser.add_argument("--num-workers", type=int, help="Number of workers (overrides config)")
-    parser.add_argument("--message-history", choices=["messages", "summary", "react"], help="Message history type")
-    
+    parser.add_argument(
+        "--message-history",
+        choices=["messages", "summary", "react", "messages_compact", "instruct"],
+        help="Message history type",
+    )
+
     # Evaluation settings
     parser.add_argument("--evaluation-name", help="Name for this evaluation run (overrides config)")
     parser.add_argument("--rerun-errors", action="store_true", help="Rerun instances that previously errored")
-    
+
     return parser.parse_args()
 
 
 def get_config_from_args(args):
     """Get configuration based on command line arguments"""
-    config = CONFIG_MAP[args.config].copy()
+    # Start with default config
+    config = DEFAULT_CONFIG.copy()
+
+    # If model specified, update with model config
+    if args.model:
+        if args.model not in MODEL_CONFIGS:
+            print(f"Error: Model '{args.model}' not found in supported models.")
+            print("\nAvailable models and their configurations:")
+            for model, cfg in MODEL_CONFIGS.items():
+                print(f"\n{model}:")
+                for key, value in cfg.items():
+                    print(f"  {key}: {value}")
+            sys.exit(1)
+        config.update(MODEL_CONFIGS[args.model])
+    else:
+        print("\nNo model specified. Available models and their configurations:")
+        for model, cfg in MODEL_CONFIGS.items():
+            print(f"\n{model}:")
+            for key, value in cfg.items():
+                print(f"  {key}: {value}")
+        sys.exit(1)
 
     # Override with command line arguments if provided
     if args.split:
         config["split"] = args.split
     if args.instance_ids:
         config["instance_ids"] = args.instance_ids
-    if args.model:
-        config["model"] = args.model
     if args.api_key:
         config["api_key"] = args.api_key
     if args.base_url:
         config["base_url"] = args.base_url
     if args.response_format:
-        config["response_format"] = args.response_format
+        config["response_format"] = LLMResponseFormat(args.response_format)
     if args.thoughts_in_action:
         config["thoughts_in_action"] = True
     if args.temperature is not None:
@@ -541,7 +467,7 @@ def get_config_from_args(args):
     if args.max_cost is not None:
         config["max_cost"] = args.max_cost
     if args.message_history:
-        config["message_history"] = args.message_history
+        config["message_history_type"] = MessageHistoryType(args.message_history)
     if args.evaluation_name:
         config["evaluation_name"] = args.evaluation_name
     if args.rerun_errors:
@@ -553,6 +479,7 @@ def get_config_from_args(args):
 if __name__ == "__main__":
     # Parse command line arguments
     args = parse_args()
+    load_dotenv()
 
     # Get configuration
     config = get_config_from_args(args)

@@ -10,9 +10,9 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from swesearch.benchmark.report import analyse_file_context
-from swesearch.benchmark.utils import get_moatless_instance
+from moatless.benchmark.utils import get_moatless_instance
 from moatless.node import Node
-from swesearch.search_tree import SearchTree
+from moatless.search_tree import SearchTree
 from swesearch.streamlit.list_visualization import create_linear_table
 from swesearch.streamlit.shared import show_completion
 
@@ -760,16 +760,6 @@ def update_visualization(
                     if selected_node:  # Only process tabs if we have a valid node
                         # Summary tab is always first
                         with tab_contents[0]:  # Summary tab
-                            # Show feedback if it exists
-                            if selected_node and selected_node.feedback_data:
-                                st.subheader("Feedback")
-                                st.markdown(selected_node.feedback_data.feedback)
-
-                            # Show reward information
-                            if selected_node.reward:
-                                st.subheader(f"Reward: {selected_node.reward.value}")
-                                st.write(selected_node.reward.explanation)
-
                             # Show existing summary information
                             if selected_node.action:
                                 if selected_node.message:

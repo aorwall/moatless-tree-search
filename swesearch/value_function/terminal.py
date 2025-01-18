@@ -11,6 +11,7 @@ from moatless.completion.model import Completion
 from moatless.node import Node, Reward
 
 from moatless.completion.schema import ResponseSchema
+from moatless.value_function.base import BaseValueFunction
 from swesearch.value_function.base import ValueFunction
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ class ProvideRewardWithFeedback(ProvideReward):
     )
 
 
-class TerminalValueFunction(BaseModel):
+class TerminalValueFunction(BaseValueFunction):
     """Value function for evaluating finished solutions.
 
     This class evaluates complete solutions to determine how well they solve the original task.
@@ -53,9 +54,6 @@ class TerminalValueFunction(BaseModel):
     The feedback is designed to guide completely new solution attempts from scratch,
     focusing on high-level strategies rather than specific implementation details.
     This helps explore different approaches to solving the same task.
-
-    Note: This value function can only evaluate nodes with a "Finish" action.
-    For evaluating intermediate steps, use the base ValueFunction instead.
     """
 
     completion_model: BaseCompletionModel = Field(
@@ -84,24 +82,18 @@ class TerminalValueFunction(BaseModel):
     )
 
     def get_reward(self, node: Node) -> Tuple[Optional[Reward], Optional[Completion]]:
-        if node.action.name != "Finish":
-            logger.warning(
-                f"TerminalValueFunction can only evaluate finished solutions, but got action {node.action.name}"
-            )
-            return None, None
-
+        
         user_message = self._create_message(node)
         messages = [user_message]
         system_prompt = self._build_system_prompt(node)
+        self.completion_model.initialize(system_prompt=system_prompt, response_schema=ProvideRewardWithFeedback)
 
         try:
             response_model = (
                 ProvideRewardWithFeedback if self.include_feedback else ProvideReward
             )
             completion_response = self.completion_model.create_completion(
-                messages=messages,
-                system_prompt=system_prompt,
-                response_schema=response_model,
+                messages=messages
             )
 
             if completion_response.structured_output:
@@ -244,7 +236,10 @@ class TerminalValueFunction(BaseModel):
                     message += existing_solutions
 
         message += "<reasoning_for_completion>\n"
-        message += node.action.finish_reason
+        if node.action.name != "Finish":
+            message += "Solution was never finished."
+        else:
+            message += node.action.finish_reason
         message += "</reasoning_for_completion>\n"
 
         # Add file context if enabled

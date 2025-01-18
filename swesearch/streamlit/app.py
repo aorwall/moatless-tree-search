@@ -7,8 +7,8 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from swesearch.benchmark.report import generate_report
-from swesearch.benchmark.utils import get_moatless_instance
-from swesearch.search_tree import SearchTree
+from moatless.benchmark.utils import get_moatless_instance
+from moatless.search_tree import SearchTree
 from swesearch.streamlit.investigate_node import investigate_node
 from swesearch.streamlit.shared import trajectory_table
 from swesearch.streamlit.tree_visualization import update_visualization

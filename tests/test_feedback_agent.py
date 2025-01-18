@@ -2,17 +2,17 @@ import unittest
 from unittest.mock import Mock, patch
 import json
 import os
-from moatless.feedback.feedback_agent import FeedbackAgent
+from swesearch.feedback.feedback_agent import FeedbackAgent
 from moatless.node import Node
 from moatless.actions.action import Action
-from moatless.completion.completion import CompletionModel
-from moatless.search_tree import SearchTree
-from moatless.completion.completion import LLMResponseFormat
+from moatless.completion import BaseCompletionModel
+from swesearch.search_tree import SearchTree
+from moatless.completion import LLMResponseFormat
 
 class TestFeedbackAgent(unittest.TestCase):
     def setUp(self):
         # Create a proper mock of CompletionModel with all required attributes
-        self.mock_completion_model = Mock(spec=CompletionModel)
+        self.mock_completion_model = Mock(spec=BaseCompletionModel)
         
         # Set all required attributes from CompletionModel class
         self.mock_completion_model.model = "test-model"

@@ -5,8 +5,8 @@ import random
 from datetime import datetime
 from typing import Optional, List
 
-from swesearch.benchmark.repository import EvaluationFileRepository
-from swesearch.benchmark.schema import Evaluation, EvaluationInstance, TreeSearchSettings
+from moatless.benchmark.repository import EvaluationFileRepository
+from moatless.benchmark.schema import Evaluation, EvaluationInstance, TreeSearchSettings
 from moatless.completion import LLMResponseFormat
 from moatless.schema import MessageHistoryType
 
@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 def create_evaluation(
     repository: EvaluationFileRepository,
     evaluation_name: str,
-    settings: TreeSearchSettings,
     split: str = "lite",
     instance_ids: List[str] | None = None,
     exclude_instance_ids: List[str] | None = None,
@@ -145,7 +144,7 @@ def create_evaluation(
     evaluation = Evaluation(
         evaluations_dir=repository.evaluations_dir,
         evaluation_name=evaluation_name,
-        settings=settings,
+        
     )
 
     # Save evaluation first

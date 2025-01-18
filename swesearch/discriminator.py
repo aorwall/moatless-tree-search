@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 from litellm.types.llms.openai import ChatCompletionUserMessage
 from pydantic import Field, BaseModel, ConfigDict
@@ -11,13 +11,6 @@ from swesearch.debate import MultiAgentDebate
 from moatless.node import Node
 
 logger = logging.getLogger(__name__)
-
-
-class Discriminator(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    def select(self, nodes: List[Node]) -> Optional[Node]:
-        raise NotImplementedError
 
 
 class MeanAwardDiscriminator(BaseDiscriminator):
@@ -50,7 +43,7 @@ class MeanAwardDiscriminator(BaseDiscriminator):
             return None
 
 
-class BestRewardDiscriminator(Discriminator):
+class BestRewardDiscriminator(BaseDiscriminator):
     def select(self, nodes: List[Node]) -> Node | None:
         best_finish_node: Node | None = None
 
@@ -78,7 +71,7 @@ class AgentDiscriminatorChoice(ResponseSchema):
     EXPLANATION: str
 
 
-class AgentDiscriminator(Discriminator):
+class AgentDiscriminator(BaseDiscriminator):
     completion: BaseCompletionModel = Field()
     debate: MultiAgentDebate = Field()
 

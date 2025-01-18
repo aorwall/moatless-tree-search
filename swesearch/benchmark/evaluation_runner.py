@@ -10,11 +10,12 @@ from datetime import datetime, timezone
 from typing import Any, Union, Callable, List
 
 from moatless.agent.code_agent import CodingAgent
+from moatless.completion.base import BaseCompletionModel
 from swesearch.benchmark.report import (
     create_sha256_hash,
     to_result,
 )
-from swesearch.benchmark.schema import (
+from moatless.benchmark.schema import (
     TreeSearchSettings,
     Evaluation,
     EvaluationInstance,
@@ -55,6 +56,7 @@ class EvaluationRunner:
     def __init__(
         self,
         evaluation: Evaluation,
+        tree_search_settings: TreeSearchSettings,
         repo_base_dir: Union[str, None] = None,
         evaluations_dir: Union[str, None] = None,
         num_workers: int = 1,
@@ -64,7 +66,7 @@ class EvaluationRunner:
         self._event_handlers: List[Callable[[EvaluationEvent], None]] = []
 
         self.evaluation = evaluation
-
+        self.tree_search_settings = tree_search_settings
         if evaluations_dir:
             self.evaluations_dir = evaluations_dir
         else:
@@ -160,20 +162,6 @@ class EvaluationRunner:
             moatless_instance = get_moatless_instance(instance_id=instance_id)
             problem_statement = f"<task>\nSolve the following reported issue in the {moatless_instance['repo']} repository:\n\n{moatless_instance['problem_statement']}\n</task>"
 
-            eval_result = {
-                "node_results": {},
-                "status": "started",
-                "start_time": datetime.now(timezone.utc).isoformat(),
-            }
-
-            if os.path.exists(eval_result_path):
-                try:
-                    with open(eval_result_path) as f:
-                        logger.info(f"Loading eval_result from {eval_result_path}")
-                        eval_result = json.load(f)
-                except json.JSONDecodeError:
-                    pass
-
             search_tree = self.create_and_run_search_tree(
                 problem_statement=problem_statement,
                 instance=instance,
@@ -189,35 +177,25 @@ class EvaluationRunner:
                         instance_id=instance_id,
                         instance=moatless_instance,
                         search_tree=search_tree,
-                        eval_result=eval_result,
+                        eval_result_path=eval_result_path,
                     )
             except RuntimeError as e:
                 raise e
-
             except Exception as e:
-                eval_result["status"] = "error"
-                eval_result["error"] = traceback.format_exc()
-                eval_result["duration"] = time.time() - start_time
-                logger.exception(
-                    f"Error when evaluating nodes for instance {instance_id}"
-                )
+                logger.exception(f"Error when evaluating nodes for instance {instance_id}")
+                raise e
 
             benchmark_result = to_result(search_tree, eval_report=eval_result)
-
-            # Complete instance with result
-            instance.complete(
-                resolved=benchmark_result.resolved, benchmark_result=benchmark_result
-            )
+            instance.complete(resolved=benchmark_result.resolved, benchmark_result=benchmark_result)
             self.emit_event(
                 "instance_completed",
                 {
                     "instance_id": instance_id,
                     "resolved": instance.resolved,
-                    "benchmark_result": benchmark_result.dict()
-                    if benchmark_result
-                    else None,
+                    "benchmark_result": benchmark_result.dict() if benchmark_result else None,
                 },
             )
+
             return benchmark_result
 
         except Exception as e:
@@ -245,11 +223,40 @@ class EvaluationRunner:
         instance_id: str,
         instance: dict,
         search_tree: SearchTree,
-        eval_result: dict,
-    ):
+        eval_result_path: str,
+    ) -> dict:
         """Evaluate all leaf nodes using the testbed."""
         leaf_nodes = search_tree.get_leaf_nodes()
-        patch_results = {}
+
+        # Load existing eval results if any
+        eval_result = None
+        if os.path.exists(eval_result_path):
+            try:
+                with open(eval_result_path) as f:
+                    eval_result = json.load(f)
+                    logger.info(f"Loading eval_result from {eval_result_path}")
+                    if "node_results" not in eval_result:
+                        if len(eval_result) > 0:
+                            logger.info(f"Found node results with {eval_result.keys()} on root, fix format")
+                            eval_result = {
+                                "node_results": eval_result,
+                                "status": "started",
+                                "start_time": datetime.now(timezone.utc).isoformat(),
+                            }
+                        else:
+                            logger.info("No node_results found")
+                            eval_result = None
+                    else:
+                        logger.info(f"Found evaluated nodes {eval_result['node_results'].keys()}")
+            except json.JSONDecodeError:
+                pass
+
+        if not eval_result:
+            eval_result = {
+                "node_results": {},
+                "status": "started",
+                "start_time": datetime.now(timezone.utc).isoformat(),
+            }
 
         # Filter out already evaluated nodes
         unevaluated_nodes = [
@@ -268,11 +275,9 @@ class EvaluationRunner:
             f"Found {len(leaf_nodes) - len(unevaluated_nodes)} already evaluated nodes, "
             f"will evaluate remaining {len(unevaluated_nodes)} nodes for instance {instance_id}"
         )
+
         repository = create_repository(instance, repo_base_dir=self.repo_base_dir)
-        # TODO: Set run_id on testbed environment
-        run_id = hashlib.sha256(self.evaluation.evaluation_name.encode()).hexdigest()[
-            :8
-        ]
+        run_id = hashlib.sha256(self.evaluation.evaluation_name.encode()).hexdigest()[:8]
         runtime = TestbedEnvironment(
             repository=repository,
             instance=instance,
@@ -292,31 +297,24 @@ class EvaluationRunner:
 
             patch = leaf_node.file_context.generate_git_patch(ignore_tests=True)
             if patch and patch.strip():
-                patch_hash = create_sha256_hash(patch)
-
-                if patch_hash in patch_results:
-                    logger.info(
-                        f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} as patch has already been evaluated."
-                    )
-                    eval_result["node_results"][str(leaf_node.node_id)] = patch_results[
-                        patch_hash
-                    ]
-                else:
-                    start_time = time.time()
+                start_time = time.time()
+                try:
                     result = runtime.evaluate(patch=patch)
                     if not result:
                         logger.error(f"Error in evaluating patch for {instance_id}")
                         continue
 
-                    eval_result["node_results"][str(leaf_node.node_id)] = (
-                        result.model_dump()
-                    )
-                    patch_results[patch_hash] = eval_result["node_results"][
-                        str(leaf_node.node_id)
-                    ]
+                    eval_result["node_results"][str(leaf_node.node_id)] = result.model_dump()
                     logger.info(
                         f"Evaluated patch for node {leaf_node.node_id} in {time.time() - start_time} seconds (resolved: {result.resolved})"
                     )
+                except Exception as e:
+                    logger.error(f"Error in testbed evaluation for instance {instance_id}: {str(e)}")
+                    eval_result["error"] = traceback.format_exc()
+                finally:
+                    eval_result["duration"] = time.time() - start_time
+                    with open(eval_result_path, "w") as f:
+                        json.dump(eval_result, f, indent=2)
             else:
                 logger.info(
                     f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} with no patch."
@@ -391,9 +389,8 @@ class EvaluationRunner:
                 runtime=runtime,
                 code_index=code_index,
             )
-            completion_model = (
-                self.evaluation.settings.agent_settings.completion_model.clone()
-            )
+            completion_model = BaseCompletionModel.model_validate(self.tree_search_settings.agent_settings.completion_model.model_dump())
+
             completion_model.metadata = {"instance_id": instance.instance_id}
 
             search_tree.agent = CodingAgent.create(
@@ -401,13 +398,14 @@ class EvaluationRunner:
                 repository=repository,
                 code_index=code_index,
                 runtime=runtime,
-                message_history_type=self.evaluation.settings.agent_settings.message_history_type,
-                thoughts_in_action=self.evaluation.settings.agent_settings.thoughts_in_action,
+                message_history_type=self.tree_search_settings.agent_settings.message_history_type,
+                thoughts_in_action=self.tree_search_settings.agent_settings.thoughts_in_action,
             )
+            search_tree.value_function = self.tree_search_settings.value_function
+            search_tree.selector = self.tree_search_settings.selector
+            search_tree.feedback_generator = self.tree_search_settings.feedback_generator
         else:
-            completion_model = (
-                self.evaluation.settings.agent_settings.completion_model.clone()
-            )
+            completion_model = BaseCompletionModel.model_validate(self.tree_search_settings.agent_settings.completion_model.model_dump())
             completion_model.metadata = {"instance_id": instance.instance_id}
 
             agent = CodingAgent.create(
@@ -415,19 +413,24 @@ class EvaluationRunner:
                 repository=repository,
                 code_index=code_index,
                 runtime=runtime,
-                message_history_type=self.evaluation.settings.agent_settings.message_history_type,
-                thoughts_in_action=self.evaluation.settings.agent_settings.thoughts_in_action,
+                message_history_type=self.tree_search_settings.agent_settings.message_history_type,
+                thoughts_in_action=self.tree_search_settings.agent_settings.thoughts_in_action,
             )
             search_tree = SearchTree.create(
                 message=problem_statement,
                 repository=repository,
                 runtime=runtime,
-                selector=self.evaluation.settings.selector,
+                selector=self.tree_search_settings.selector,
                 agent=agent,
-                value_function=self.evaluation.settings.value_function,
-                max_iterations=self.evaluation.settings.max_iterations,
-                max_expansions=self.evaluation.settings.max_expansions,
-                max_cost=self.evaluation.settings.max_cost,
+                value_function=self.tree_search_settings.value_function,
+                feedback_generator=self.tree_search_settings.feedback_generator,
+                max_iterations=self.tree_search_settings.max_iterations,
+                max_expansions=self.tree_search_settings.max_expansions,
+                max_cost=self.tree_search_settings.max_cost,
+                max_depth=self.tree_search_settings.max_depth,
+                min_finished_nodes=self.tree_search_settings.min_finished_nodes,
+                max_finished_nodes=self.tree_search_settings.max_finished_nodes,
+                reward_threshold=self.tree_search_settings.reward_threshold,
                 persist_path=trajectory_path,
                 metadata=metadata,
             )
@@ -462,7 +465,11 @@ class EvaluationRunner:
                         "instance_id": instance.instance_id,
                     },
                 )
-
+            # Add instance_id to all tree events and propagate them
+            event_data = event.get("data", {})
+            event_data["instance_id"] = instance.instance_id
+            self.emit_event(event["event_type"], event_data)
+            
         instance.start()
         self.emit_event("instance_started", {"instance_id": instance.instance_id})
 

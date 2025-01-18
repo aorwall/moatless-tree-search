@@ -300,7 +300,7 @@ def create_trajectory_stats(
                     result.max_build_tokens,
                     node.completions["build_action"].usage.prompt_tokens
                     + node.completions["build_action"].usage.completion_tokens
-                    + node.completions["build_action"].usage.cached_tokens,
+                    + node.completions["build_action"].usage.cache_read_tokens,
                 )
 
                 if node.completions["build_action"].retries:
@@ -428,7 +428,7 @@ def to_result(
             total_cost=total_usage.completion_cost,
             prompt_tokens=total_usage.prompt_tokens,
             completion_tokens=total_usage.completion_tokens,
-            cached_tokens=total_usage.cached_tokens,
+            cached_tokens=total_usage.cache_read_tokens,
             resolved_by=len(instance.get("resolved_by", [])),
             llmonkeys_rate=instance.get("llm_monkeys", {}).get("resolved_rate", 0),
             transitions=len(best_node.get_trajectory()) if best_node else 0,
