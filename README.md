@@ -48,13 +48,7 @@ Follow these steps to set up the environment using Docker:
    git clone https://github.com/aorwall/moatless-tree-search.git
    ```
 
-2. Clone the Moatless API repository:
-   ```shell
-   git clone https://github.com/aorwall/moatless-api
-   cd moatless-api
-   ```
-
-3. Create a `.env` file in the moatless-api directory:
+2. Create a `.env` file in the moatless-api directory:
 
     ```shell
    cp .env.example .env
@@ -63,7 +57,7 @@ Follow these steps to set up the environment using Docker:
    ```shell
    # Point to this repository's swesearch directory to extend with SWE-Search components
    # Replace with your actual path to this repository
-   export MOATLESS_COMPONENTS_PATH="/path/to/your/swe-search-2/swesearch"
+   export MOATLESS_COMPONENTS_PATH="/path/to/moatless-tree-search"
    
    # Directory where configuration and trajectories will be saved
    # Can be set to the existing .moatless directory in this repo
@@ -84,49 +78,29 @@ Follow these steps to set up the environment using Docker:
 
    ```
 
-4. Run the server with Docker Compose:
+3. Run the server with Docker Compose:
    ```shell
-   cd moatless-api
+   cd moatless-tree-search
    docker-compose up -d
    ```
 
-5. Check if the server is running by visiting `http://localhost:8000` in your web browser. Go to `http://localhost:5173/settings/components` to verify that all expected components have been initialized.
+4. Check if the server is running by visiting `http://localhost:8000` in your web browser. Go to `http://localhost:5173/settings/components` to verify that all expected components have been initialized.
 
-6. Check logs:
+5. Check logs:
    ```shell
    docker-compose logs api
    ```
 
-7. To shut down the server:
+6. To shut down the server:
    ```shell
    docker-compose down
    ```
 
-
-## Streamlit
-
-To launch the Streamlit app, run:
-
-```shell
-# Launch with direct file loading
-moatless-streamlit path/to/trajectory.json
-
-# Launch interactive UI (file can be selected in browser)
-moatless-streamlit
-```
-
-The following badges are used to indicate the status of a node:
-
-| Badge | Shape | Color | Description |
-|-------|-------|-------|-------------|
-| ⭐ | Star | Green | Node is marked as resolved |
-| ❌ | X | Red | Invalid edits or failed tests |
-| 🟢 | Circle | Green | Correct code spans present in the context |
-| 🟡 | Circle | Yellow | Either:<br>• Found files but not spans<br>• Found spans but in wrong files<br>|
-
 ## Evaluation
 
 To run the evaluation script:
+
+**FIXME: Needs to be updated to new version**
 
 ```shell
 moatless-evaluate \
@@ -148,10 +122,10 @@ Use `--use_testbed` if you got access to a testbed environment. Otherwise, tests
 
 ## Development
 
-Install with Poetry:
+Install with UV:
 
 ```shell
-poetry install --with dev
+uv sync
 ```
 
 ### Apple Silicon
@@ -166,6 +140,8 @@ poetry install --with dev
 ```
 
 ## Examples
+
+**FIXME: Needs to be updated to new version**
 
 ### Example: Basic Flow
 

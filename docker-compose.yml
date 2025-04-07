@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    user: "${UID:-1000}:${GID:-1000}"
+
+  api:
+    image: ${DOCKER_IMAGE:-aorwall/moatless-tools-app:latest}
+    command: api
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount host directories into the container
+      - ${MOATLESS_DIR:-./data/moatless}:/data/moatless
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount moatless source directory for the API to use
+      - ${MOATLESS_SOURCE_DIR:-/dev/null}:/app/moatless
+      # Optional volume mounts for Docker runner
+      - ${MOATLESS_COMPONENTS_PATH:-/dev/null}:/opt/components
+    environment:
+      # Redis configuration
+      - REDIS_URL=redis://redis:6379
+
+      # INTERNAL paths (where files are mounted inside this container)
+      - MOATLESS_DIR=/data/moatless
+      - MOATLESS_COMPONENTS_PATH=/opt/components
+      - PYTHONPATH=/app
+
+      # Runner configuration
+      - MOATLESS_RUNNER=docker
+      - MOATLESS_STORAGE=file
+
+      # EXTERNAL paths (for Docker runner to use when spawning job containers)
+      # These are the host paths that will be mounted into job containers
+      - MOATLESS_HOST_DIR=${MOATLESS_DIR:-./data/moatless}
+      - MOATLESS_HOST_RUNNER_SOURCE_DIR=${MOATLESS_RUNNER_MOUNT_SOURCE_DIR}
+      - MOATLESS_HOST_COMPONENTS_PATH=${MOATLESS_HOST_COMPONENTS_PATH}
+
+      # API keys and other configuration
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - VOYAGE_API_KEY=${VOYAGE_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+
+      # If basic auth is enabled, the API will require a username and password
+      - MOATLESS_AUTH_ENABLED=${MOATLESS_AUTH_ENABLED}
+
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis-data:
