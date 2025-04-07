@@ -1,0 +1,73 @@
+[
+  {
+    "id": "simple_coding",
+    "description": "Simple coding flow",
+    "flow_type": "tree",
+    "max_iterations": 20,
+    "max_cost": 1.0,
+    "agent_id": "code_and_test_react",
+    "max_expansions": 1,
+    "max_depth": 20,
+    "min_finished_nodes": 1,
+    "max_finished_nodes": 1,
+    "reward_threshold": 0.0,
+    "selector": {
+      "selector_class": "moatless.selector.simple.SimpleSelector"
+    },
+    "expander": null,
+    "value_function": null,
+    "feedback_generator": null,
+    "discriminator": null
+  },
+  {
+    "id": "swesearch",
+    "description": "SWESearch",
+    "flow_type": "tree",
+    "max_iterations": 100,
+    "max_cost": 1.0,
+    "agent_id": "code_and_test_react",
+    "artifact_handlers": [],
+    "max_expansions": 3,
+    "max_depth": 30,
+    "min_finished_nodes": 2,
+    "max_finished_nodes": 3,
+    "reward_threshold": 90.0,
+    "selector": {
+      "type": "BestFirstSelector",
+      "exploitation_weight": 1.0,
+      "use_average_reward": false,
+      "exploration_weight": 1.0,
+      "depth_weight": 0.8,
+      "depth_bonus_factor": 0.0,
+      "high_value_threshold": 50.0,
+      "low_value_threshold": 0.0,
+      "very_high_value_threshold": 75.0,
+      "high_value_leaf_bonus_constant": 50.0,
+      "high_value_bad_children_bonus_constant": 20.0,
+      "high_value_child_penalty_constant": 5.0,
+      "finished_trajectory_penalty": 50.0,
+      "expect_correction_bonus": 50.0,
+      "check_for_bad_child_actions": [],
+      "diversity_weight": 100.0,
+      "duplicate_child_penalty_constant": 25.0,
+      "duplicate_action_penalty_constant": 50.0,
+      "max_trajectory_depth": 25,
+      "min_finished_states_ratio": 0.1,
+      "leaf_node_bonus": 100.0,
+      "root_exploration_bonus": 75.0,
+      "unfinished_trajectory_bonus": 50.0,
+      "selector_class": "swesearch.selector.mcts.BestFirstSelector"
+    },
+    "expander": null,
+    "value_function": {
+      "completion_model": null,
+      "message_generator": {},
+      "include_search_tree": false,
+      "value_function_class": "swesearch.value_function.swesearch.SweSearchValueFunction"
+    },
+    "feedback_generator": {
+      "feedback_generator_class": "swesearch.feedback.reward_feedback.RewardFeedbackGenerator"
+    },
+    "discriminator": null
+  }
+]

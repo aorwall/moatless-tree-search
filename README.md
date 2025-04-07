@@ -38,26 +38,37 @@ Before running the evaluation, you'll need:
 
 1. At least one LLM provider API key (e.g., OpenAI, Anthropic, etc.)
 2. A Voyage AI API key from [voyageai.com](https://voyageai.com) to use the pre-embedded vector stores for SWE-Bench instances.
-3. (Optional) Access to a testbed environment - see [moatless-testbeds](https://github.com/aorwall/moatless-testbeds) for setup instructions
 
-You can configure these settings by either:
+**Prerequisites: Docker installed**
 
-1. Create a `.env` file in the project root (copy from `.env.example`):
+Follow these steps to set up the environment using Docker:
 
+1. Clone this repository:
    ```shell
-   cp .env.example .env
-   # Edit .env with your values
+   git clone https://github.com/aorwall/moatless-tree-search.git
    ```
 
-2. Or export the variables directly:
-
+2. Clone the Moatless API repository:
    ```shell
-   # Directory for storing vector index store files  
-   export INDEX_STORE_DIR="/tmp/index_store"    
+   git clone https://github.com/aorwall/moatless-api
+   cd moatless-api
+   ```
 
-   # Directory for storing clonedrepositories 
-   export REPO_DIR="/tmp/repos"
+3. Create a `.env` file in the moatless-api directory:
 
+    ```shell
+   cp .env.example .env
+   ```
+   
+   ```shell
+   # Point to this repository's swesearch directory to extend with SWE-Search components
+   # Replace with your actual path to this repository
+   export MOATLESS_COMPONENTS_PATH="/path/to/your/swe-search-2/swesearch"
+   
+   # Directory where configuration and trajectories will be saved
+   # Can be set to the existing .moatless directory in this repo
+   export MOATLESS_DIR="/path/to/your/swe-search-2/.moatless"
+   
    # Required: At least one LLM provider API key
    export OPENAI_API_KEY="<your-key>"
    export ANTHROPIC_API_KEY="<your-key>"
@@ -71,10 +82,26 @@ You can configure these settings by either:
    # Required: API Key for Voyage Embeddings
    export VOYAGE_API_KEY="<your-key>"
 
-   # Optional: Configuration for testbed environment (https://github.com/aorwall/moatless-testbeds)
-   export TESTBED_API_KEY="<your-key>"
-   export TESTBED_BASE_URL="<your-base-url>"
    ```
+
+4. Run the server with Docker Compose:
+   ```shell
+   cd moatless-api
+   docker-compose up -d
+   ```
+
+5. Check if the server is running by visiting `http://localhost:8000` in your web browser. Go to `http://localhost:5173/settings/components` to verify that all expected components have been initialized.
+
+6. Check logs:
+   ```shell
+   docker-compose logs api
+   ```
+
+7. To shut down the server:
+   ```shell
+   docker-compose down
+   ```
+
 
 ## Streamlit
 
