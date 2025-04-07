@@ -40,9 +40,9 @@ services:
 
       # EXTERNAL paths (for Docker runner to use when spawning job containers)
       # These are the host paths that will be mounted into job containers
-      - MOATLESS_HOST_DIR=${MOATLESS_DIR:-./data/moatless}
+      - MOATLESS_HOST_DIR=${MOATLESS_DIR:-.moatless}
       - MOATLESS_HOST_RUNNER_SOURCE_DIR=${MOATLESS_RUNNER_MOUNT_SOURCE_DIR}
-      - MOATLESS_HOST_COMPONENTS_PATH=${MOATLESS_HOST_COMPONENTS_PATH}
+      - MOATLESS_HOST_COMPONENTS_PATH=${MOATLESS_COMPONENTS_PATH}
 
       # API keys and other configuration
       - OPENAI_API_KEY=${OPENAI_API_KEY}
