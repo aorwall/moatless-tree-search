@@ -19,6 +19,7 @@ Follow these steps to set up the environment using Docker:
    ```shell
    git clone https://github.com/aorwall/moatless-tree-search.git
    cd moatless-tree-search
+   git checkout moatless-tools
    ```
 
 ## 3. Set environment variables
