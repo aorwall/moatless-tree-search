@@ -55,22 +55,28 @@ class LogHandler(CustomLogger):
         if original_response:
             try:
                 # Replace escaped backslashes before parsing
-                cleaned_response = original_response.replace("\\\\", "\\")
-                original_response = json.loads(cleaned_response)
+                # FIXME: removed
+                # cleaned_response = original_response.replace("\\\\", "\\")
+                original_response = json.loads(original_response)
 
                 if (
                     "choices" in original_response
                     and "message" in original_response["choices"][0]
                     and "content" in original_response["choices"][0]["message"]
                 ):
-                    try:
-                        response_content = json.loads(
-                            original_response["choices"][0]["message"]["content"]
-                        )
-                    except Exception as e:
-                        response_content = original_response["choices"][0]["message"][
-                            "content"
-                        ]
+                    content = original_response["choices"][0]["message"]["content"]
+                    if content.strip().startswith("{"):
+                        content = content.strip()
+                        try:
+                            response_content = json.loads(
+                                original_response["choices"][0]["message"]["content"]
+                            )
+                        except Exception as e:
+                            # non-valid json, take string
+                            logger.error(f"Failed to parse content as JSON: {e}")
+                            response_content = content
+                    else:
+                        response_content = content
 
             except Exception as e:
                 original_response = str(original_response)

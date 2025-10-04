@@ -165,6 +165,10 @@ class SimpleEvaluationMonitor:
         """Handle evaluation events by logging them"""
         event_type = event.event_type
         data = event.data if event.data else {}
+        if isinstance(data, str):
+            # non-obj data
+            self.logger.info(f"event: {data}")
+            return
 
         instance_id = data.get("instance_id")
 
@@ -446,7 +450,7 @@ async def run_evaluation(config: dict):
     runner = EvaluationRunner(
         evaluation=evaluation,
         num_workers=config["num_workers"],
-        use_testbed=True,
+        use_testbed=False,
         rerun_errors=config.get("rerun_errors", False),
     )
 

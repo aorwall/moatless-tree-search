@@ -280,14 +280,14 @@ class CompletionModel(BaseModel):
         )
         def _do_completion():
             return litellm.completion(
-                model=self.model,
-                max_tokens=self.max_tokens,
+                model="openai/Qwen3-Coder-480B-A35B-Instruct-GGUF-Q2_K_XL",
+                max_tokens=131072,
                 temperature=self.temperature,
                 messages=messages,
                 metadata=self.metadata or {},
                 timeout=self.timeout,
-                api_base=self.model_base_url,
-                api_key=self.model_api_key,
+                api_base="http://localhost:8082/",
+                api_key="noop",
                 stop=self.stop_words,
                 tools=tools,
                 tool_choice=tool_choice,

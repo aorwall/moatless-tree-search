@@ -75,6 +75,17 @@ CLAUDE_35_SONNET_CONFIG = {
     "split": "lite_and_verified_solvable",
 }
 
+QWEN3_CONFIG = {
+    **DEFAULT_CONFIG,
+    # "base_url": "https://jupyter.idle.dev:59400/",
+    # "base_url": "http://localhost:8082/",
+    "api_key": "noop",
+    "model": "qwen3-coder-480b-a35b-instruct",
+    "response_format": "tool_call",
+    "message_history": "messages",
+    "thoughts_in_action": False,
+    "split": "lite_and_verified_solvable",
+}
 
 # Configuration for single instance runs
 def get_single_instance_config(
@@ -98,7 +109,7 @@ DJANGO_17051_GPT4 = get_single_instance_config(
 )
 
 # Active configuration - change this to switch between configs
-ACTIVE_CONFIG = DJANGO_17051_DEEPSEEK  # Change this to run different configurations
+ACTIVE_CONFIG = QWEN3_CONFIG  # Change this to run different configurations
 
 
 def get_config() -> dict:

@@ -48,7 +48,8 @@ def get_moatless_instance(instance_id: str, split: str | None = None):
     if not _moatless_instances:
         load_moatless_datasets(split)
 
-    instance = _moatless_instances.get(split).get(instance_id)
+    instance = _moatless_instances.get(instance_id)
+    # instance = _moatless_instances.get(split).get(instance_id)
     if not instance:
         raise ValueError(f"Instance {instance_id} not found.")
 

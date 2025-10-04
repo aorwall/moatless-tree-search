@@ -113,9 +113,10 @@ class EvaluationFileRepository(EvaluationRepository):
 
         evaluation = self.load_evaluation(evaluation_name)
         return next(
-            instance
+            (instance
             for instance in evaluation.instances
-            if instance.instance_id == instance_id
+            if instance.instance_id == instance_id),
+            None
         )
 
     def delete_instance(self, evaluation_name: str, instance_id: str) -> None:

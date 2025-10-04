@@ -92,33 +92,35 @@ class Usage(BaseModel):
         else:
             cached_tokens = 0
 
-        try:
-            import litellm
+        # try:
+        #     import litellm
 
-            cost = litellm.completion_cost(
-                completion_response=completion_response, model=model
-            )
-        except Exception:
-            # If cost calculation fails, fall back to calculating it manually
-            try:
-                from litellm import cost_per_token, NotFoundError
+        #     cost = litellm.completion_cost(
+        #         completion_response=completion_response, model=model
+        #     )
+        # except Exception:
+        #     # If cost calculation fails, fall back to calculating it manually
+        #     try:
+        #         from litellm import cost_per_token, NotFoundError
 
-                prompt_cost, completion_cost = cost_per_token(
-                    model=model,
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                )
-                cost = prompt_cost + completion_cost
-            except NotFoundError as e:
-                logger.debug(
-                    f"Failed to calculate cost for completion response: {completion_response}. Error: {e}"
-                )
-                cost = 0
-            except Exception as e:
-                logger.debug(
-                    f"Failed to calculate cost for completion response: {completion_response}. Error: {e}"
-                )
-                cost = 0
+        #         prompt_cost, completion_cost = cost_per_token(
+        #             model=model,
+        #             prompt_tokens=prompt_tokens,
+        #             completion_tokens=completion_tokens,
+        #         )
+        #         cost = prompt_cost + completion_cost
+        #     except NotFoundError as e:
+        #         logger.debug(
+        #             f"Failed to calculate cost for completion response: {completion_response}. Error: {e}"
+        #         )
+        #         cost = 0
+        #     except Exception as e:
+        #         logger.debug(
+        #             f"Failed to calculate cost for completion response: {completion_response}. Error: {e}"
+        #         )
+        #         cost = 0
+
+        cost = 0
 
         return cls(
             completion_cost=cost,
